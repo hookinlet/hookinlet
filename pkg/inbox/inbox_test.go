@@ -104,7 +104,7 @@ func TestSecretsNeverFormat(t *testing.T) {
 	outputs := map[string]string{
 		"json": string(js), "log": log.String(),
 		"%v": fmt.Sprintf("%v", in), "%+v": fmt.Sprintf("%+v", *in), "%#v": fmt.Sprintf("%#v", *in),
-		"%s": fmt.Sprintf("%s", in.VerifierSecret), "%x-hex": fmt.Sprintf("%x", in.AgentTokenHash),
+		"%s": fmt.Sprintf("%s", in.VerifierSecret), //nolint:staticcheck // deliberately exercising the %s verb "%x-hex": fmt.Sprintf("%x", in.AgentTokenHash),
 	}
 	for name, out := range outputs {
 		if name == "%x-hex" {
@@ -204,7 +204,7 @@ func TestRedactHeaders(t *testing.T) {
 	}
 	// The result does not share slices with the input.
 	out["X-Keep"][0] = "changed"
-	if in["x-keep"][0] != "a" {
+	if in["x-keep"][0] != "a" { //nolint:staticcheck // the test built this header with a non-canonical key
 		t.Error("output aliases input")
 	}
 

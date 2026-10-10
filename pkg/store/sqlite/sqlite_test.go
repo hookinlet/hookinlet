@@ -273,6 +273,37 @@ func TestRedactedHeadersNeverReachDisk(t *testing.T) {
 	}
 }
 
+// The database holds message bodies and sealed secrets, so no other user may
+// read it, including the WAL and shared-memory files SQLite creates beside it.
+func TestDatabaseFilesArePrivate(t *testing.T) {
+	dir := t.TempDir()
+	s := openAt(t, dir)
+	in := newInbox("private")
+	if err := s.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Verified: true}); err != nil {
+		t.Fatal(err)
+	}
+	// While open, the WAL files exist too.
+	files, _ := filepath.Glob(filepath.Join(dir, sqlite.DBFileName+"*"))
+	if len(files) == 0 {
+		t.Fatal("no database files found")
+	}
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			t.Errorf("%s has mode %o; group and others must have no access", filepath.Base(f), mode)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpenFailsClearlyOnAnUnusableDirectory(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "a-file")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {

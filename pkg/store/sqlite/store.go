@@ -84,6 +84,16 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
 		return nil, fmt.Errorf("sqlite: %w", err)
 	}
 
+	// Create the database file ourselves so it is private to the owner. SQLite
+	// gives the -wal and -shm files the same permissions as the main file.
+	f, err := os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the path is the configured data directory plus a fixed name
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: create database file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("sqlite: create database file: %w", err)
+	}
+
 	// The writer is opened first: it creates the file and switches it to WAL.
 	// _txlock=immediate makes every write transaction take the write lock when
 	// it begins, so a transaction never fails halfway with SQLITE_BUSY.
