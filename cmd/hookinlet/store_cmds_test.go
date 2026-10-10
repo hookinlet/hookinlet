@@ -19,6 +19,8 @@ import (
 
 var tokenRE = regexp.MustCompile(`agent token:\s+(hki_\S+)`)
 
+func writeFile(path string) error { return os.WriteFile(path, []byte("x"), 0o600) }
+
 // readDB returns the raw bytes of the database file in dir.
 func readDB(t *testing.T, dir string) []byte {
 	t.Helper()

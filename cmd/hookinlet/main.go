@@ -17,7 +17,9 @@ import (
 	"syscall"
 
 	"github.com/hookinlet/hookinlet/internal/config"
+	"github.com/hookinlet/hookinlet/pkg/secretbox"
 	"github.com/hookinlet/hookinlet/pkg/server"
+	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=...".
@@ -89,15 +91,12 @@ func serve(args []string, getenv func(string) string, stderr io.Writer) int {
 	log := newLogger(stderr, cfg)
 	log.Info("starting", "version", version, "config", cfg)
 
-	srv, err := server.New(server.Options{
-		Addr:            cfg.ListenAddr,
-		Logger:          log,
-		ShutdownTimeout: cfg.ShutdownTimeout,
-	})
+	srv, closeStore, err := buildServer(context.Background(), cfg, log)
 	if err != nil {
 		log.Error("server setup failed", "err", err)
 		return exitRuntime
 	}
+	defer closeStore()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -107,6 +106,39 @@ func serve(args []string, getenv func(string) string, stderr io.Writer) int {
 	}
 	log.Info("stopped")
 	return 0
+}
+
+// buildServer opens the data directory (applying any pending migrations) and
+// assembles the server around it. The returned function closes the store and
+// must be called after the server has stopped.
+func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*server.Server, func(), error) {
+	store, err := sqlite.Open(ctx, cfg.DataDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	closeStore := func() {
+		if err := store.Close(); err != nil {
+			log.Error("closing the store failed", "err", err)
+		}
+	}
+	box, err := secretbox.New([]byte(cfg.MasterKey.Reveal()))
+	if err != nil {
+		closeStore()
+		return nil, nil, err
+	}
+	srv, err := server.New(server.Options{
+		Addr:            cfg.ListenAddr,
+		Logger:          log,
+		ShutdownTimeout: cfg.ShutdownTimeout,
+		Store:           store,
+		SecretBox:       box,
+		TrustedProxies:  cfg.TrustedProxies,
+	})
+	if err != nil {
+		closeStore()
+		return nil, nil, err
+	}
+	return srv, closeStore, nil
 }
 
 func newLogger(w io.Writer, cfg *config.Config) *slog.Logger {

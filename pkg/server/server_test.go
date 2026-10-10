@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
 )
 
 // syncBuffer is a bytes.Buffer safe for concurrent use by the logger.
@@ -39,9 +41,15 @@ func (s *syncBuffer) String() string {
 func newTestServer(t *testing.T) (*Server, *syncBuffer) {
 	t.Helper()
 	logs := &syncBuffer{}
+	store, err := sqlite.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
 	s, err := New(Options{
 		Addr:   "127.0.0.1:0",
 		Logger: slog.New(slog.NewJSONHandler(logs, nil)),
+		Store:  store,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,9 +74,17 @@ func listen(t *testing.T) (net.Listener, error) {
 	return lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
 }
 
-func TestNewRequiresAddr(t *testing.T) {
-	if _, err := New(Options{}); err == nil {
-		t.Fatal("want error for missing Addr")
+func TestNewValidatesOptions(t *testing.T) {
+	store, err := sqlite.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := New(Options{Store: store}); err == nil {
+		t.Error("want an error for a missing Addr")
+	}
+	if _, err := New(Options{Addr: "127.0.0.1:0"}); err == nil {
+		t.Error("want an error for a missing Store")
 	}
 }
 
@@ -261,10 +277,16 @@ func TestShutdownWaitsForInFlightRequest(t *testing.T) {
 
 func TestShutdownTimeoutForcesClose(t *testing.T) {
 	logs := &syncBuffer{}
+	store, err := sqlite.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
 	s, err := New(Options{
 		Addr:            "127.0.0.1:0",
 		Logger:          slog.New(slog.NewJSONHandler(logs, nil)),
 		ShutdownTimeout: 50 * time.Millisecond,
+		Store:           store,
 	})
 	if err != nil {
 		t.Fatal(err)
