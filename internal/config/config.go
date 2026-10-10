@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // EnvPrefix is prepended to the upper-cased, underscore-separated flag name to
@@ -27,6 +28,10 @@ const EnvPrefix = "HOOKINLET_"
 
 // masterKeyLen is the required length in bytes of the decoded master key.
 const masterKeyLen = 32
+
+// minAdminTokenLen is the shortest admin token accepted. 32 characters from a
+// random source is 192 bits or more; it rules out anything a person would type.
+const minAdminTokenLen = 32
 
 // ErrUsage is returned (wrapped) when flag parsing failed. The flag package has
 // already written the problem and the usage text to the output writer, so
@@ -98,7 +103,7 @@ type spec struct {
 var specs = []spec{
 	{name: "listen-addr", def: ":8080", usage: "address the HTTP server listens on"},
 	{name: "data-dir", def: "./data", usage: "directory for persistent data"},
-	{name: "admin-token", required: true, usage: "bearer token for the admin API (prefer the environment variable: flags are visible in process listings)"},
+	{name: "admin-token", required: true, usage: "bearer token that can read every inbox and use the admin API; at least 32 characters, e.g. from `openssl rand -base64 32` (prefer the environment variable: flags are visible in process listings)"},
 	{name: "master-key", required: true, usage: "base64-encoded 32-byte key that encrypts stored secrets (prefer the environment variable)"},
 	{name: "public-base-url", usage: "externally visible base URL, used for ingest URLs in admin responses; derived from the request if unset"},
 	{name: "trusted-proxies", usage: "comma-separated CIDRs whose X-Forwarded-For header is honored"},
@@ -258,6 +263,16 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 		}
 	}
 
+	if v := vals["admin-token"]; v != "" {
+		// This one credential reads every inbox, so a guessable one is not allowed.
+		// The value is never echoed.
+		switch {
+		case len(v) < minAdminTokenLen:
+			collect(fieldErr("admin-token", "must be at least %d characters; generate one with: openssl rand -base64 32", minAdminTokenLen))
+		case strings.IndexFunc(v, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0:
+			collect(fieldErr("admin-token", "must not contain whitespace or control characters"))
+		}
+	}
 	if c.ListenAddr == "" {
 		collect(fieldErr("listen-addr", "must not be empty"))
 	}

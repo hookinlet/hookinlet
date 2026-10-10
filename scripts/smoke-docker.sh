@@ -78,7 +78,7 @@ other_token=$(printf '%s\n' "$other" | sed -n 's/^ *agent token: *//p')
 [ -n "$other_token" ] || fail "inbox create did not print a second agent token"
 
 docker run -d --name "$name" -p "$port:8080" -v "$vol:/data" \
-  -e HOOKINLET_ADMIN_TOKEN=smoke-admin -e HOOKINLET_MASTER_KEY="$key" "$image" >/dev/null
+  -e HOOKINLET_ADMIN_TOKEN=smoke-admin-token-0123456789-0123456789 -e HOOKINLET_MASTER_KEY="$key" "$image" >/dev/null
 wait_ready
 
 body1='{"hello":"world"}'

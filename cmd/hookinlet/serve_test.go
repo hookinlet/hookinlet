@@ -24,7 +24,7 @@ func TestServeEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	env := map[string]string{ //nolint:gosec // fake values for a test
 		"HOOKINLET_DATA_DIR":        dir,
-		"HOOKINLET_ADMIN_TOKEN":     "admin-token-for-test",
+		"HOOKINLET_ADMIN_TOKEN":     "admin-token-for-the-serve-end-to-end-test",
 		"HOOKINLET_MASTER_KEY":      masterKey(),
 		"HOOKINLET_VERIFIER_SECRET": "e2e-shared-secret",
 		"HOOKINLET_LISTEN_ADDR":     "127.0.0.1:0",
@@ -125,7 +125,7 @@ func TestServeEndToEnd(t *testing.T) {
 		t.Errorf("message 1 = %v, %v", m1, err)
 	}
 
-	for _, secret := range []string{"e2e-shared-secret", "admin-token-for-test", "wrong-secret", `{"hello":"world"}`} {
+	for _, secret := range []string{"e2e-shared-secret", "admin-token-for-the-serve-end-to-end-test", "wrong-secret", `{"hello":"world"}`} {
 		if strings.Contains(logs.String(), secret) {
 			t.Errorf("the logs contain %q", secret)
 		}
@@ -139,7 +139,7 @@ func TestServeFailsReadablyWhenTheDataDirectoryIsUnusable(t *testing.T) {
 	}
 	env := map[string]string{
 		"HOOKINLET_DATA_DIR":    file + "/sub",
-		"HOOKINLET_ADMIN_TOKEN": "t",
+		"HOOKINLET_ADMIN_TOKEN": "a-valid-admin-token-of-sufficient-length-0123",
 		"HOOKINLET_MASTER_KEY":  masterKey(),
 	}
 	code, _, errOut := runCmd(t, env, "serve")
