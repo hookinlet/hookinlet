@@ -17,10 +17,13 @@ const (
 	// has room, so a page of large messages cannot pull gigabytes into memory.
 	InlineBodyBytes = 64 << 10
 
-	// PageBodyBudget caps the total body bytes in one page. A page ends early
-	// when the next message would exceed it (but always holds at least one
-	// message), and the next link continues from there.
-	PageBodyBudget = 16 << 20
+	// PageBudget caps the encoded size of one page: bodies, headers, paths, and
+	// everything else sent for each message, after JSON escaping. A page ends
+	// early when the next message would exceed it (but always holds at least one
+	// message), and the next link continues from there. It applies to summaries
+	// too, since the headers and query a sender chooses are stored and can be
+	// large.
+	PageBudget = 16 << 20
 )
 
 // Page is one page of messages ready to be written out.
@@ -33,8 +36,8 @@ type Page struct {
 // FetchPage runs the request against the Store and assembles the response.
 //
 // Two bounds keep a hostile or just unlucky inbox from costing too much. Bodies
-// over InlineBodyBytes are not loaded with the query, and the page stops once
-// PageBodyBudget bytes of bodies are in it. Both only shorten the page, so
+// over InlineBodyBytes are not loaded with the query, and the page stops once it
+// would exceed PageBudget encoded bytes. Both only shorten the page, so
 // following the next link still visits every message exactly once.
 func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageRequest) (*Page, error) {
 	q := req.Query
@@ -48,31 +51,28 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 		return nil, err
 	}
 
+	page := &Page{Messages: make([]Message, 0, len(res.Messages)), LatestSeq: res.LatestSeq}
 	kept := make([]*inbox.Message, 0, len(res.Messages))
 	var used int64
 	for _, m := range res.Messages {
-		if !req.Summary {
-			if len(kept) > 0 && used+m.Size > PageBodyBudget {
-				break // the next link picks up here
+		if !req.Summary && m.Body == nil {
+			full, err := st.Get(ctx, in.ID, m.Seq)
+			if errors.Is(err, inbox.ErrNotFound) {
+				continue // pruned since the query ran
 			}
-			used += m.Size
-			if m.Body == nil {
-				full, err := st.Get(ctx, in.ID, m.Seq)
-				if errors.Is(err, inbox.ErrNotFound) {
-					continue // pruned since the query ran
-				}
-				if err != nil {
-					return nil, fmt.Errorf("wire: load body of seq %d: %w", m.Seq, err)
-				}
-				m = full
+			if err != nil {
+				return nil, fmt.Errorf("wire: load body of seq %d: %w", m.Seq, err)
 			}
+			m = full
 		}
+		enc := FromStored(m, in.Slug, in.Verifier, !req.Summary)
+		cost := enc.encodedSize()
+		if len(page.Messages) > 0 && used+cost > PageBudget {
+			break // the next link picks up here
+		}
+		used += cost
 		kept = append(kept, m)
-	}
-
-	page := &Page{Messages: make([]Message, 0, len(kept)), LatestSeq: res.LatestSeq}
-	for _, m := range kept {
-		page.Messages = append(page.Messages, FromStored(m, in.Slug, in.Verifier, !req.Summary))
+		page.Messages = append(page.Messages, enc)
 	}
 	if next := req.NextLink(in.Slug, kept); next != "" {
 		page.Next = &next

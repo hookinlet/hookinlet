@@ -48,6 +48,33 @@ var knownParams = map[string]bool{
 	"until": true, "verified": true, "delivery_id": true, "fields": true,
 }
 
+// QueryValues parses a raw query string, strictly. net/http's r.URL.Query()
+// silently drops pairs it cannot parse ("after=5;&limit=2" and "after=%zz" both
+// yield no after at all), which would turn a client's mangled cursor into "start
+// from the newest" without a word. Here they are an error.
+func QueryValues(rawQuery string) (url.Values, error) {
+	v, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return nil, bad("", "the query string is malformed")
+	}
+	return v, nil
+}
+
+// RejectParams returns an error naming a query parameter, for endpoints that
+// take none.
+func RejectParams(v url.Values) error {
+	first := ""
+	for k := range v {
+		if first == "" || k < first {
+			first = k
+		}
+	}
+	if first == "" && len(v) == 0 {
+		return nil
+	}
+	return bad(truncate(first, 64), "unknown parameter")
+}
+
 // ParseMessages reads the query parameters of a request for a page of messages.
 //
 // Parsing is strict. An unknown parameter, a repeated one (except type), or a
