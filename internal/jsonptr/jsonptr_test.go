@@ -4,8 +4,12 @@
 package jsonptr
 
 import (
+	"bytes"
+	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The document from RFC 6901, section 5.
@@ -80,4 +84,94 @@ func FuzzString(f *testing.F) {
 		// Must never panic, whatever the document and pointer.
 		_, _ = String([]byte(doc), ptr)
 	})
+}
+
+// totalAlloc runs f and reports how many bytes it allocated.
+func totalAlloc(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// A hostile document must not cost much more memory than its own size. An
+// earlier version decoded the whole document into generic values and allocated
+// about 50 times the body's size (515 MiB for a 10 MiB array of zeros).
+func TestMemoryStaysProportionalToTheDocument(t *testing.T) {
+	const size = 10 << 20
+	repeat := func(prefix, unit, suffix string) []byte {
+		var b strings.Builder
+		b.Grow(size + 64)
+		b.WriteString(prefix)
+		for b.Len() < size {
+			b.WriteString(unit)
+		}
+		b.WriteString(suffix)
+		return []byte(b.String())
+	}
+	cases := []struct {
+		name string
+		doc  []byte
+		ptr  string
+		max  uint64
+	}{
+		{"array of numbers, key pointer", repeat("[", "0,", "0]"), "/type", 2 << 20},
+		{"array of empty objects, key pointer", repeat("[", "{},", "{}]"), "/type", 2 << 20},
+		{"array of arrays, index pointer", repeat("[", "[1,2],", "[3]]"), "/0/0", 2 << 20},
+		{"one large value to skip, then the key", repeat(`{"pad":[`, "0,", `0],"type":"x"}`), "/type", 4 * size},
+		{"deeply nested", []byte(strings.Repeat(`{"a":`, 5000) + `"x"` + strings.Repeat("}", 5000)), "/a/a", 8 << 20},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			alloc := totalAlloc(func() { _, _ = String(c.doc, c.ptr) })
+			t.Logf("allocated %.1f MiB for a %d MiB document", float64(alloc)/(1<<20), len(c.doc)>>20)
+			if alloc > c.max {
+				t.Errorf("allocated %d MiB for a %d MiB document (limit %d MiB)", alloc>>20, len(c.doc)>>20, c.max>>20)
+			}
+		})
+	}
+}
+
+// Work is bounded too: a document with millions of tiny values cannot make the
+// lookup run for long.
+func TestWorkIsBounded(t *testing.T) {
+	doc := []byte("[" + strings.Repeat("0,", 3_000_000) + "0]")
+	start := time.Now()
+	if _, ok := String(doc, "/type"); ok {
+		t.Error("found a key in an array")
+	}
+	if _, ok := String(doc, "/2999999"); ok {
+		t.Log("an index past the work budget is not found, which is acceptable")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("two lookups took %v", d)
+	}
+}
+
+func TestBudgetStillFindsEarlyValues(t *testing.T) {
+	// The value is near the start; a huge tail after it must not hide it.
+	doc := `{"type":"early","rest":[` + strings.Repeat("0,", 500_000) + `0]}`
+	if got, ok := String([]byte(doc), "/type"); !ok || got != "early" {
+		t.Errorf("String = %q, %v; want early, true", got, ok)
+	}
+}
+
+// The budget is what bounds CPU time, so test it directly rather than through a
+// stopwatch: on a document with millions of values the walker must give up long
+// before the end.
+func TestWalkerStopsAtItsBudget(t *testing.T) {
+	doc := []byte("[" + strings.Repeat("0,", 3_000_000) + "0]")
+	w := &walker{dec: json.NewDecoder(bytes.NewReader(doc)), budget: maxValues}
+	_, found := w.lookup([]string{"type"})
+	if found {
+		t.Error("found a key inside an array")
+	}
+	if !w.exhausted || w.invalid {
+		t.Errorf("exhausted=%v invalid=%v; want the budget to be what stopped it", w.exhausted, w.invalid)
+	}
+	if off := w.dec.InputOffset(); off > int64(len(doc))/20 {
+		t.Errorf("the walker read %d of %d bytes before giving up", off, len(doc))
+	}
 }
