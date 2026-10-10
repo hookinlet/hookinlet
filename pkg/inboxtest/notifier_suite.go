@@ -247,6 +247,62 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 		}
 	})
 
+	// The request that stored a message may be finished, and its context
+	// cancelled, by the time the notifier hears about it. The signal still has to
+	// go out, or a subscriber waits for the recheck interval for no reason.
+	t.Run("PublishWithACancelledContextStillSignals", func(t *testing.T) {
+		n := newNotifier(t)
+		ch, cancel := n.Subscribe(t.Context(), 1)
+		defer cancel()
+		ctx, stop := context.WithCancel(t.Context())
+		stop()
+		done := make(chan struct{})
+		go func() { defer close(done); n.Publish(ctx, 1, 1) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Publish blocked on a cancelled context")
+		}
+		if !signalled(ch, signalWait) {
+			t.Error("Publish with a cancelled context did not signal")
+		}
+	})
+
+	// Goroutines are not the only thing a notifier can leak: per-inbox state
+	// that is never removed grows with every inbox ever listened to.
+	t.Run("SubscribingAndCancellingDoesNotGrowMemory", func(t *testing.T) {
+		n := newNotifier(t)
+		heap := func() uint64 {
+			runtime.GC()
+			runtime.GC()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			return m.HeapAlloc
+		}
+		cycle := func(count int) {
+			for i := range count {
+				ctx, stop := context.WithCancel(t.Context())
+				_, cancel := n.Subscribe(ctx, inbox.ID(i%5000))
+				if i%2 == 0 {
+					cancel()
+				} else {
+					stop()
+				}
+				stop()
+				cancel()
+			}
+		}
+		cycle(5000) // warm up allocator and caches
+		time.Sleep(50 * time.Millisecond)
+		before := heap()
+		cycle(200_000)
+		time.Sleep(100 * time.Millisecond) // an implementation may clean up asynchronously
+		after := heap()
+		if after > before && after-before > 8<<20 {
+			t.Errorf("the heap grew by %d MiB over 200,000 subscribe/cancel cycles: something is not being released", (after-before)>>20)
+		}
+	})
+
 	t.Run("PublishDoesNotWaitForSlowSubscribers", func(t *testing.T) {
 		n := newNotifier(t)
 		for range 5000 {

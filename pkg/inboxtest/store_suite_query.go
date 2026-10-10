@@ -4,6 +4,7 @@
 package inboxtest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -665,5 +666,118 @@ func testUpdateDuringAppends(t *testing.T, s inbox.Store, _ *Clock) {
 	}
 	if got, _ := s.GetInbox(ctx, in.ID); got.Name != fmt.Sprintf("name-%d", updates-1) || got.LastSeq != total {
 		t.Errorf("final inbox: name=%q lastSeq=%d", got.Name, got.LastSeq)
+	}
+}
+
+// A caller that gets a short ascending page may continue after the newest Seq it
+// knows of, skipping every row in between. That is only safe if a short page means
+// "nothing more matches".
+func testQueryExactness(t *testing.T, s inbox.Store, clk *Clock) {
+	in := createInbox(t, s, "exactness")
+	const n = 120
+	for i := 1; i <= n; i++ {
+		appendAt(t, s, clk, in.ID, baseTime.Add(time.Duration(i)*time.Second), func(m *inbox.NewMessage) {
+			m.EventType = []string{"a", "b", "c"}[i%3]
+			m.Verified = i%4 != 0
+			m.Body = bytes.Repeat([]byte("x"), i) // varied sizes
+		})
+	}
+	matching := func(q inbox.Query) int {
+		count := 0
+		for i := 1; i <= n; i++ {
+			if len(q.Types) > 0 && !slices.Contains(q.Types, []string{"a", "b", "c"}[i%3]) {
+				continue
+			}
+			if q.Verified != nil && (i%4 != 0) != *q.Verified {
+				continue
+			}
+			count++
+		}
+		return count
+	}
+	for name, q := range map[string]inbox.Query{
+		"unfiltered":    {},
+		"one type":      {Types: []string{"a"}},
+		"two types":     {Types: []string{"a", "c"}},
+		"verified":      {Verified: ptr(true)},
+		"unverified":    {Verified: ptr(false)},
+		"type+verified": {Types: []string{"b"}, Verified: ptr(true)},
+	} {
+		for _, limit := range []int{1, 2, 7, 40, 119, 120, 500} {
+			for _, mode := range []string{"after", "newest"} {
+				q := q
+				q.Limit = limit
+				if mode == "after" {
+					q.After = ptr(int64(0))
+				}
+				page := query(t, s, in.ID, q)
+				want := min(limit, matching(q))
+				if len(page.Messages) != want {
+					t.Errorf("%s limit %d (%s): got %d messages, want exactly min(limit, matches) = %d", name, limit, mode, len(page.Messages), want)
+				}
+			}
+		}
+	}
+	// The limit is clamped to the maximum, and the page is exactly that size.
+	for range 450 {
+		appendMsg(t, s, in.ID)
+	}
+	if page := query(t, s, in.ID, inbox.Query{After: ptr(int64(0)), Limit: 100_000}); len(page.Messages) != inbox.MaxQueryLimit {
+		t.Errorf("a limit above the maximum returned %d messages, want %d", len(page.Messages), inbox.MaxQueryLimit)
+	}
+	// Large bodies do not shorten a page: only the caller's limit does.
+	big := createInbox(t, s, "exactness-big")
+	for range 30 {
+		appendMsg(t, s, big.ID, func(m *inbox.NewMessage) { m.Body = bytes.Repeat([]byte("B"), 600<<10) })
+	}
+	if page := query(t, s, big.ID, inbox.Query{After: ptr(int64(0)), Limit: 30}); len(page.Messages) != 30 {
+		t.Errorf("30 messages of 600 KiB came back as %d; a Store may not cut a page short", len(page.Messages))
+	}
+}
+
+// LatestSeq must come from a state no newer than the rows, or a caller who
+// continues after it can skip a message that committed in between. Appends race
+// the reads here, so a Store that reads last_seq after the rows fails quickly.
+func testQuerySnapshot(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	in := createInbox(t, s, "snapshot")
+
+	const writers, perWriter = 4, 150
+	const total = writers * perWriter
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Go(func() {
+			for range perWriter {
+				if _, _, err := s.Append(ctx, in.ID, nm()); err != nil {
+					cancel()
+					return
+				}
+			}
+		})
+	}
+
+	// Every message matches, so a short page must reach exactly LatestSeq.
+	const limit = 7
+	cursor := int64(0)
+	for cursor < total && ctx.Err() == nil {
+		after := cursor
+		page, err := s.Query(ctx, in.ID, inbox.Query{After: &after, Limit: limit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		end := cursor + int64(len(page.Messages))
+		if n := len(page.Messages); n > 0 && page.Messages[n-1].Seq > page.LatestSeq {
+			t.Fatalf("a message with seq %d came back with LatestSeq %d: LatestSeq is older than the rows", page.Messages[n-1].Seq, page.LatestSeq)
+		}
+		if len(page.Messages) < limit && end != page.LatestSeq {
+			t.Fatalf("a short page after %d returned %d messages (up to %d) but LatestSeq is %d. If LatestSeq is newer than the rows, a caller that skips ahead to it loses the messages in between",
+				cursor, len(page.Messages), end, page.LatestSeq)
+		}
+		cursor = end
+	}
+	wg.Wait()
+	if cursor != total {
+		t.Fatalf("read %d of %d messages", cursor, total)
 	}
 }

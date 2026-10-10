@@ -56,6 +56,8 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"GetAndStats", testGetAndStats},
 		{"MissingInbox", testMissingInbox},
 		{"QueryFilters", testQueryFilters},
+		{"QueryReturnsExactlyTheLimit", testQueryExactness},
+		{"QueryLatestSeqIsNotNewerThanTheRows", testQuerySnapshot},
 		{"QueryBodyLimit", testQueryBodyLimit},
 		{"QueryLimits", testQueryLimits},
 		{"QueryInvalid", testQueryInvalid},
