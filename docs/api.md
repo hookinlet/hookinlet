@@ -32,8 +32,8 @@ beyond the inbox's [verifier](verifiers.md).
 | Status | Code | When |
 |---|---|---|
 | `200` | | The delivery was stored (or was a duplicate of one already stored). Body: `{"seq": 42}`. A Slack `url_verification` handshake also gets `200`, with the challenge as plain text. |
-| `400` | `bad_request` | The request body could not be read. |
-| `401` | `verification_failed` | The signature or token did not verify and the inbox's `on_verify_fail` is `reject`. |
+| `400` | `bad_request` | The request body could not be read, including when it does not arrive within 60 seconds. |
+| `401` | `verification_failed` | The signature or token did not verify and the inbox's `on_verify_fail` is `reject`. The message is always `webhook verification failed`; the specific reason is in the server log. |
 | `402` | `quota_exceeded` | Refused by an embedder's hook (the open-source build never returns this). |
 | `403` | `forbidden` | Refused by an embedder's hook. |
 | `404` | `not_found` | No such inbox, or the inbox is disabled. The two are indistinguishable. |

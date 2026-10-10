@@ -22,7 +22,7 @@ Each inbox has:
 | `github` | GitHub | the body | no | `X-GitHub-Delivery` header (**not signed**) | `X-GitHub-Event` header (**not signed**) |
 | `slack` | Slack | `v0:<timestamp>:<body>` | yes | `event_id` in the body | `event.type` or `type` in the body |
 | `standardwebhooks` | [Standard Webhooks](https://www.standardwebhooks.com/), Svix, and compatible senders | `<id>.<timestamp>.<body>` | yes | `webhook-id` header (signed) | `type` in the body |
-| `hmac` | anything that signs with an HMAC | configurable | optional | optional header (**not signed** unless you put it in the template) | from the inbox's `event_type_pointer` |
+| `hmac` | anything that signs with an HMAC | configurable | optional | optional header (**never signed**) | from the inbox's `event_type_pointer`, for verified deliveries only |
 | `token` | anything that can send a header | not a signature: the header must equal the secret | no | none | from `event_type_pointer` |
 | `none` | anyone | nothing | no | none | from `event_type_pointer` |
 
@@ -41,6 +41,11 @@ Every comparison of a signature, token, or secret is constant-time.
 - Timestamps must be within **5 minutes** of the server's clock, in either
   direction. Stripe, Slack, Standard Webhooks, and generic HMAC inboxes with a
   timestamp accept `tolerance_seconds` (1 to 86,400) to change this.
+- Timestamps must be written as plain decimal numbers with no leading zeros,
+  and signatures in their one canonical encoding (base64 with correct padding
+  and zeroed trailing bits). If a signature or timestamp could be written
+  several ways, an attacker could shift characters between a timestamp and the
+  body without changing what was signed.
 - A verifier that needs a secret and finds none is a **server-side
   configuration error** (the sender gets a 500), not a failed signature, so a
   mistake in setup is never mistaken for an attack, or hidden by
@@ -60,10 +65,12 @@ Header: `X-Hub-Signature-256: sha256=<hex>`. The secret is the webhook secret.
 The legacy `X-Hub-Signature` (SHA-1) header is not used.
 
 > **GitHub signs only the body.** `X-GitHub-Delivery` and `X-GitHub-Event` are
-> metadata, not proof. Someone holding one captured, validly signed body could
-> replay it under a new delivery id, and GitHub provides no timestamp that
-> would let a receiver stop that. Treat the delivery id as a retry
-> de-duplicator, not as replay protection.
+> metadata, not proof. Someone holding one captured, validly signed body can
+> replay it at any time, under any delivery id and with any event type, and the
+> replay is stored as **verified**. GitHub provides no timestamp that would let
+> a receiver stop that. Treat the delivery id as a retry de-duplicator, not as
+> replay protection, and do not let anything with consequences (a deploy, a
+> payment) act on the event type alone.
 
 ### `slack`
 
@@ -72,7 +79,9 @@ secret is the app's signing secret.
 
 When Slack sends a `url_verification` request, hookinlet answers it with the
 challenge (as plain text) **after** the signature checks out, and does not store
-it. A forged handshake gets a 401 and no challenge.
+it. A forged handshake gets a 401 and no challenge. The challenge is returned
+as `text/plain` with `X-Content-Type-Options: nosniff`, and one longer than 256
+characters is not echoed at all (the request is stored like any other).
 
 Config: `{"tolerance_seconds": 300}` (optional).
 
@@ -81,7 +90,9 @@ Config: `{"tolerance_seconds": 300}` (optional).
 Headers: `webhook-id`, `webhook-timestamp`, and `webhook-signature`, which holds
 one or more space-separated `v1,<base64>` values. The secret is written
 `whsec_<base64>`; hookinlet decodes the base64 part to get the key. Signature
-versions other than `v1` are ignored.
+versions other than `v1` are ignored. A `webhook-id` that contains a `.` is
+rejected, because the signed text is `<id>.<timestamp>.<body>` and a dot in
+the id would let the same bytes be read as a different split.
 
 Config: `{"tolerance_seconds": 300}` (optional).
 
@@ -96,12 +107,14 @@ For senders that sign with an HMAC but are not one of the presets.
 | `encoding` | `hex`, `base64`, or `base64url` (padding optional). | `hex` |
 | `prefix` | Literal text before the signature, such as `sha256=`. It must be present. | none |
 | `timestamp_header` | Header with a Unix timestamp in seconds. Enables the tolerance check. | none |
-| `payload_template` | What is signed. `{body}` (exactly once) and `{timestamp}`; any other brace is an error. | `{body}`, or `{timestamp}.{body}` with a timestamp header |
+| `payload_template` | What is signed. `{body}` (exactly once) and `{timestamp}`; any other brace is an error. With `timestamp_header` it **must** include `{timestamp}`, and `{timestamp}` and `{body}` must be separated by at least one character that is not a digit. | `{body}`, or `{timestamp}.{body}` with a timestamp header |
 | `tolerance_seconds` | Only with `timestamp_header`. | 300 |
-| `delivery_id_header` | Header whose value deduplicates retries. | none |
+| `delivery_id_header` | Header whose value deduplicates retries. It is never authenticated, so it is only a retry de-duplicator. | none |
 
 The template is parsed once when the inbox is loaded, so text in a delivery that
-happens to look like `{timestamp}` is never expanded.
+happens to look like `{timestamp}` is never expanded. A configuration that would
+make the signed bytes ambiguous, or that would check a timestamp the signature
+does not cover, is rejected when the inbox is loaded, with an explanation.
 
 Examples:
 
@@ -143,22 +156,33 @@ anything, or while you are wiring up a sender and want to see what it sends.
 
 | `on_verify_fail` | Result |
 |---|---|
-| `reject` (default) | `401` with `{"error": {"code": "verification_failed", "message": "webhook verification failed: <reason>"}}`. Nothing is stored. |
+| `reject` (default) | `401` with `{"error": {"code": "verification_failed", "message": "webhook verification failed"}}`. Nothing is stored. |
 | `store` | The delivery is stored with `verified: false` and a `verify_error`, and the sender gets `200` (so it stops retrying). |
 
-The reason is a short fixed phrase (`signature mismatch`, `timestamp outside
-tolerance`, `missing X-Hub-Signature-256 header`, ...). It never contains the
-signature, the secret, or any part of the request.
+The sender is told only that verification failed. The specific reason is a short
+fixed phrase (`signature mismatch`, `timestamp outside tolerance`, `missing
+X-Hub-Signature-256 header`, ...) that goes to the server log and, in `store`
+mode, to the message's `verify_error`. It is kept out of the response because it
+can name the header and scheme an inbox expects, which is not for whoever
+happens to hold the ingest key. It never contains the signature, the secret, or
+any part of the request.
 
 An unverified delivery is stored as received, but **nothing the sender claimed
-is trusted**: its delivery id and event type are left empty. This matters for
-two reasons:
+is trusted**: its delivery id and event type are left empty (the inbox's
+`event_type_pointer` is not applied to it either). This matters for two
+reasons:
 
 - Deduplication only considers *verified* deliveries. Otherwise a forged request
   that reuses a real delivery id could cause the genuine delivery to be dropped
   as a duplicate.
 - Agents reading the inbox can tell verified from unverified with the
   `verified` filter and should treat unverified content as untrusted input.
+
+> **`store` mode has a cost.** Anyone who knows the ingest key can fill an inbox
+> with unverified messages, and once count-based retention applies they push
+> genuine ones out. Keep the default `reject` unless you are debugging a sender,
+> and use a `BeforeIngest` hook to rate limit. A cap on unverified messages is
+> on the [roadmap](roadmap.md).
 
 ## Trying it out
 
