@@ -6,6 +6,26 @@ applies.
 
 ## Unreleased
 
+### Phase 4: SSE and the notifier
+
+#### Added
+- `pkg/notify/local`: `Notifier`, the in-process `inbox.Notifier`.
+- `pkg/inboxtest`: `NotifierSuite`, the conformance suite for `inbox.Notifier`.
+- `GET /v1/inboxes/{slug}/stream`: Server-Sent Events, resumable with
+  `Last-Event-ID`.
+- `server.Options`: `MaxStreams`, `MaxStreamsPerInbox`, `StreamRevalidateInterval`,
+  `SSEHeartbeat`, and `SSERecheckInterval` (wired to `HOOKINLET_MAX_STREAMS`,
+  `HOOKINLET_MAX_STREAMS_PER_INBOX`, `HOOKINLET_SSE_HEARTBEAT`, and
+  `HOOKINLET_SSE_RECHECK_INTERVAL`).
+
+#### Changed
+- The default `Options.Notifier` is now `local.New()`. It was a notifier that never
+  signalled, which was only suitable while nothing waited on it.
+- Contract: `Store.Query` must be exact and read a consistent snapshot, and
+  `Notifier.Publish` must signal existing subscriptions even with a cancelled
+  context. `StoreSuite` and `NotifierSuite` enforce both.
+- `Server.Shutdown` ends open streams, in addition to stopping new connections.
+
 ### Phase 3: the read API
 
 #### Added

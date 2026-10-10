@@ -267,17 +267,24 @@ do for the list endpoint. Other parameters are a `400`.
   finish at once; deliveries that are mid-way through being stored are allowed to
   complete. Reconnect with `Last-Event-ID` to carry on.
 - The inbox is deleted.
+- The token the stream was opened with is rotated or revoked, or the inbox it
+  belonged to is deleted. Open streams are re-checked every 30 seconds
+  (`StreamRevalidateInterval`), so access ends within about that long. A
+  transient storage error during the re-check does not end the stream.
 - A write to a client that has stopped reading takes longer than 30 seconds.
-
-Changing an inbox's token does not close its open streams; they end when the
-connection does, and a reconnect needs the new token.
 
 #### Limits
 
-At most `HOOKINLET_MAX_STREAMS` streams (1000 by default) are open at once; more
-get `503` with `Retry-After`. A stream holds a connection and little else:
-about 50 KiB of memory (measured: 500 idle streams take about 22 MiB on top of the
-server's own 10 MiB on Linux).
+At most `HOOKINLET_MAX_STREAMS` streams (1000 by default) are open at once, and
+at most `HOOKINLET_MAX_STREAMS_PER_INBOX` for any one inbox (half of
+`MAX_STREAMS` by default), so one inbox cannot use up every slot. More get `503`
+with `Retry-After`. A stream holds a connection and little else: about 50 KiB
+of memory (measured: 500 idle streams take about 22 MiB on top of the server's
+own 10 MiB on Linux). A stream that is catching up reads pages of up to 256 KiB,
+so a slow client replaying large messages holds at most that much more.
+
+If a client starts after a position the inbox has not reached yet, the stream
+opens with a comment saying so and waits, rather than failing.
 
 Streams do not count against the limit on concurrent page reads, except for the
 moments they spend reading, so an open stream never keeps an ordinary read out.
