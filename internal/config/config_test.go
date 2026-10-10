@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Pat Ramsey
+
+package config
+
+import (
+	"bytes"
+	"encoding/base64"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"maps"
+	"strings"
+	"testing"
+	"time"
+)
+
+var testKey = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+
+func env(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func validEnv() map[string]string {
+	return map[string]string{
+		"HOOKINLET_ADMIN_TOKEN": "admin-secret-value",
+		"HOOKINLET_MASTER_KEY":  testKey,
+	}
+}
+
+func TestLoadDefaults(t *testing.T) {
+	c, err := Load(nil, env(validEnv()), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ListenAddr != ":8080" || c.DataDir != "./data" || c.LogFormat != "json" ||
+		c.LogLevel != slog.LevelInfo || c.SSEHeartbeat != 15*time.Second ||
+		c.SSERecheckInterval != 0 || !c.MCPEnabled || c.MCPInlineBodyBytes != 16384 ||
+		c.RetentionInterval != time.Hour || c.ShutdownTimeout != 10*time.Second {
+		t.Fatalf("unexpected defaults: %+v", c)
+	}
+	if got := c.MasterKey.Reveal(); got != string(bytes.Repeat([]byte{7}, 32)) {
+		t.Fatalf("master key not decoded: %q", got)
+	}
+}
+
+func TestFlagsBeatEnvBeatDefault(t *testing.T) {
+	e := validEnv()
+	e["HOOKINLET_LISTEN_ADDR"] = ":9000"
+	e["HOOKINLET_DATA_DIR"] = "/env/data"
+	c, err := Load([]string{"--listen-addr=:7000"}, env(e), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ListenAddr != ":7000" {
+		t.Errorf("flag should beat env: got %q", c.ListenAddr)
+	}
+	if c.DataDir != "/env/data" {
+		t.Errorf("env should beat default: got %q", c.DataDir)
+	}
+}
+
+func TestFlagCanSetEmptyOverEnv(t *testing.T) {
+	// An explicitly passed empty flag wins, so a required value cannot be
+	// silently satisfied by the environment.
+	_, err := Load([]string{"--admin-token="}, env(validEnv()), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "--admin-token") {
+		t.Fatalf("want admin-token error, got %v", err)
+	}
+}
+
+func TestMissingRequiredReportsAllAndNamesEnvVars(t *testing.T) {
+	_, err := Load(nil, env(nil), io.Discard)
+	if err == nil {
+		t.Fatal("want error")
+	}
+	for _, want := range []string{
+		"--admin-token (HOOKINLET_ADMIN_TOKEN) is required",
+		"--master-key (HOOKINLET_MASTER_KEY) is required",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+}
+
+func TestInvalidValues(t *testing.T) {
+	short := base64.StdEncoding.EncodeToString([]byte("too-short"))
+	tests := []struct {
+		name string
+		set  map[string]string
+		want string
+	}{
+		{"master key not base64", map[string]string{"HOOKINLET_MASTER_KEY": "%%%not-base64%%%"}, "--master-key"},
+		{"master key wrong length", map[string]string{"HOOKINLET_MASTER_KEY": short}, "exactly 32 bytes, got 9"},
+		{"bad duration", map[string]string{"HOOKINLET_SHUTDOWN_TIMEOUT": "soon"}, "--shutdown-timeout"},
+		{"zero shutdown timeout", map[string]string{"HOOKINLET_SHUTDOWN_TIMEOUT": "0s"}, "greater than zero"},
+		{"negative recheck", map[string]string{"HOOKINLET_SSE_RECHECK_INTERVAL": "-1s"}, "must not be negative"},
+		{"bad log format", map[string]string{"HOOKINLET_LOG_FORMAT": "xml"}, "--log-format"},
+		{"bad log level", map[string]string{"HOOKINLET_LOG_LEVEL": "loud"}, "--log-level"},
+		{"bad bool", map[string]string{"HOOKINLET_MCP_ENABLED": "maybe"}, "--mcp-enabled"},
+		{"bad body bytes", map[string]string{"HOOKINLET_MCP_INLINE_BODY_BYTES": "0"}, "--mcp-inline-body-bytes"},
+		{"bad cidr", map[string]string{"HOOKINLET_TRUSTED_PROXIES": "10.0.0.0/8, nonsense"}, `"nonsense" is not a CIDR`},
+		{"relative base url", map[string]string{"HOOKINLET_PUBLIC_BASE_URL": "example.com"}, "--public-base-url"},
+		{"non-http base url", map[string]string{"HOOKINLET_PUBLIC_BASE_URL": "ftp://example.com"}, "--public-base-url"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := validEnv()
+			maps.Copy(e, tt.set)
+			_, err := Load(nil, env(e), io.Discard)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("want error containing %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestErrorsNeverEchoSecrets(t *testing.T) {
+	e := validEnv()
+	e["HOOKINLET_MASTER_KEY"] = "super-secret-but-not-base64!!"
+	_, err := Load(nil, env(e), io.Discard)
+	if err == nil {
+		t.Fatal("want error")
+	}
+	for _, secret := range []string{"super-secret-but-not-base64", "admin-secret-value"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error leaks secret %q: %v", secret, err)
+		}
+	}
+}
+
+func TestParsedValues(t *testing.T) {
+	e := validEnv()
+	e["HOOKINLET_TRUSTED_PROXIES"] = "10.0.0.0/8, 192.168.0.0/16"
+	e["HOOKINLET_PUBLIC_BASE_URL"] = "https://hooks.example.com/"
+	e["HOOKINLET_SSE_RECHECK_INTERVAL"] = "5s"
+	e["HOOKINLET_MCP_ENABLED"] = "false"
+	c, err := Load(nil, env(e), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.TrustedProxies) != 2 || c.PublicBaseURL != "https://hooks.example.com" ||
+		c.SSERecheckInterval != 5*time.Second || c.MCPEnabled {
+		t.Fatalf("unexpected: %+v", c)
+	}
+}
+
+func TestUsageErrors(t *testing.T) {
+	var out bytes.Buffer
+	_, err := Load([]string{"--no-such-flag"}, env(validEnv()), &out)
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("want ErrUsage, got %v", err)
+	}
+	if !strings.Contains(out.String(), "no-such-flag") {
+		t.Errorf("flag package should have explained the problem: %q", out.String())
+	}
+	if _, err := Load([]string{"stray"}, env(validEnv()), io.Discard); !errors.Is(err, ErrUsage) {
+		t.Fatalf("positional argument: want ErrUsage, got %v", err)
+	}
+	if _, err := Load([]string{"-h"}, env(validEnv()), io.Discard); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("want flag.ErrHelp, got %v", err)
+	}
+}
+
+func TestSecretsAreRedactedEverywhere(t *testing.T) {
+	c, err := Load(nil, env(validEnv()), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	slog.New(slog.NewJSONHandler(&buf, nil)).Info("cfg", "config", c)
+	outputs := []string{
+		buf.String(),
+		fmt.Sprintf("%v", c), fmt.Sprintf("%+v", c), fmt.Sprintf("%#v", c),
+		fmt.Sprint(c.AdminToken), fmt.Sprint(c.MasterKey),
+		fmt.Sprintf("%#v", c.AdminToken),
+	}
+	for _, out := range outputs {
+		if strings.Contains(out, "admin-secret-value") || strings.Contains(out, string(bytes.Repeat([]byte{7}, 32))) {
+			t.Errorf("secret leaked in %q", out)
+		}
+	}
+	if !strings.Contains(buf.String(), "[redacted]") {
+		t.Errorf("expected redaction marker in log output: %s", buf.String())
+	}
+}
