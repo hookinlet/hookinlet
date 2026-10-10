@@ -2,7 +2,10 @@ module github.com/hookinlet/hookinlet
 
 go 1.27.2
 
-require modernc.org/sqlite v1.60.1
+require (
+	go.uber.org/goleak v1.3.0
+	modernc.org/sqlite v1.60.1
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
