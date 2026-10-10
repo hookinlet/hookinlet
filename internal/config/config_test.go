@@ -25,7 +25,7 @@ func env(m map[string]string) func(string) string {
 
 func validEnv() map[string]string {
 	return map[string]string{
-		"HOOKINLET_ADMIN_TOKEN": "admin-secret-value",
+		"HOOKINLET_ADMIN_TOKEN": "admin-secret-value-0123456789-abcdefghij",
 		"HOOKINLET_MASTER_KEY":  testKey,
 	}
 }
@@ -125,7 +125,7 @@ func TestErrorsNeverEchoSecrets(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	for _, secret := range []string{"super-secret-but-not-base64", "admin-secret-value"} {
+	for _, secret := range []string{"super-secret-but-not-base64", "admin-secret-value-0123456789-abcdefghij"} {
 		if strings.Contains(err.Error(), secret) {
 			t.Errorf("error leaks secret %q: %v", secret, err)
 		}
@@ -179,7 +179,7 @@ func TestSecretsAreRedactedEverywhere(t *testing.T) {
 		fmt.Sprintf("%#v", c.AdminToken),
 	}
 	for _, out := range outputs {
-		if strings.Contains(out, "admin-secret-value") || strings.Contains(out, string(bytes.Repeat([]byte{7}, 32))) {
+		if strings.Contains(out, "admin-secret-value-0123456789-abcdefghij") || strings.Contains(out, string(bytes.Repeat([]byte{7}, 32))) {
 			t.Errorf("secret leaked in %q", out)
 		}
 	}
@@ -244,5 +244,42 @@ func TestAddDataFlags(t *testing.T) {
 	// Unlike serve, no admin token is demanded.
 	if _, err := load(nil, nil); err != nil {
 		t.Errorf("data settings should not require an admin token: %v", err)
+	}
+}
+
+func TestAdminTokenMustBeStrong(t *testing.T) {
+	sentinel := "short-secret-sentinel"
+	for name, tok := range map[string]string{
+		"one character":        "t",
+		"a typed password":     "hunter2hunter2",
+		"31 characters":        strings.Repeat("a", 31),
+		"with a space":         strings.Repeat("a", 20) + " " + strings.Repeat("b", 20),
+		"with a newline":       strings.Repeat("a", 40) + "\n",
+		"with a tab":           strings.Repeat("a", 20) + "\t" + strings.Repeat("b", 20),
+		"with a unicode space": strings.Repeat("a", 20) + "\u00a0" + strings.Repeat("b", 20),
+		"with a control byte":  strings.Repeat("a", 40) + "\x01",
+		"short sentinel":       sentinel,
+	} {
+		e := validEnv()
+		e["HOOKINLET_ADMIN_TOKEN"] = tok
+		_, err := Load(nil, env(e), io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "--admin-token") {
+			t.Errorf("%s: accepted (%v)", name, err)
+			continue
+		}
+		if strings.Contains(err.Error(), tok) && len(tok) > 3 {
+			t.Errorf("%s: the error echoes the token: %v", name, err)
+		}
+	}
+	for name, tok := range map[string]string{
+		"exactly 32":       strings.Repeat("a", 32),
+		"openssl base64":   "dGhpcyBpcyBhIGxvbmcgcmFuZG9tIHRva2VuIQ==" + "AAAA",
+		"with punctuation": "correct-horse_battery.staple/0123456789+=",
+	} {
+		e := validEnv()
+		e["HOOKINLET_ADMIN_TOKEN"] = tok
+		if _, err := Load(nil, env(e), io.Discard); err != nil {
+			t.Errorf("%s: rejected: %v", name, err)
+		}
 	}
 }

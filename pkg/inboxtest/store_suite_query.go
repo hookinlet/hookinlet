@@ -313,6 +313,9 @@ func testRetentionByAge(t *testing.T, s inbox.Store, clk *Clock) {
 	if st, _ := s.Stats(ctx, aged.ID); *st != (inbox.InboxStats{MessageCount: 3, OldestSeq: 3, LatestSeq: 5}) {
 		t.Errorf("stats after prune = %+v", st)
 	}
+	if walked := len(walkAscending(t, s, aged.ID, inbox.Query{}, 100)); walked != 3 {
+		t.Errorf("Stats says 3 messages but %d are stored", walked)
+	}
 	if st, _ := s.Stats(ctx, forever.ID); st.MessageCount != 5 {
 		t.Errorf("an inbox with no retention lost messages: %+v", st)
 	}
@@ -448,6 +451,10 @@ func testRetentionIsPrefix(t *testing.T, s inbox.Store, clk *Clock) {
 	st, _ := s.Stats(ctx, in.ID)
 	if st.MessageCount != st.LatestSeq-st.OldestSeq+1 {
 		t.Errorf("stored seqs are not contiguous: %+v", st)
+	}
+	// And the reported count matches the messages actually there.
+	if walked := int64(len(walkAscending(t, s, in.ID, inbox.Query{}, 100))); walked != st.MessageCount {
+		t.Errorf("Stats reports %d messages but %d are stored", st.MessageCount, walked)
 	}
 }
 

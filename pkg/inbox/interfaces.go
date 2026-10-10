@@ -163,9 +163,21 @@ type Notifier interface {
 }
 
 // Authenticator resolves a request's credentials to a Principal.
+//
+// Authenticate runs before the server knows whether the caller is allowed to
+// see anything, on requests from anyone, so an implementation that consults a
+// database should be paired with rate limiting in front of it.
 type Authenticator interface {
 	// Authenticate returns the caller's Principal, or an error wrapping
-	// ErrUnauthenticated if the credentials are missing or invalid.
+	// ErrUnauthenticated if the credentials are missing or invalid. Every such
+	// failure must look the same to the caller: no error text, status, or
+	// timing that says whether a token once existed, expired, or belongs to a
+	// different inbox.
+	//
+	// Any other error is taken to mean the credential could not be checked (the
+	// Store is down) and becomes a server error, not a 401. An implementation
+	// must therefore wrap ErrUnauthenticated for an unknown token and must not
+	// return some other error for it.
 	Authenticate(r *http.Request) (Principal, error)
 }
 
@@ -174,6 +186,10 @@ type Principal interface {
 	// CanReadInbox reports whether the caller may read in's messages. Callers
 	// answer a false result with 404, not 403, so a credential for one inbox
 	// never reveals whether another exists. A disabled inbox stays readable.
+	//
+	// The decision must follow the inbox's ID, which never changes, and not its
+	// slug or name, which a different inbox can carry. It must not depend on
+	// Inbox.Disabled. A nil inbox is never readable.
 	CanReadInbox(in *Inbox) bool
 	// CanAdmin reports whether the caller may use the admin API.
 	CanAdmin() bool

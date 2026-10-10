@@ -215,9 +215,15 @@ func (s *Server) verifierSecret(in *inbox.Inbox) ([]byte, error) {
 	return secret, nil
 }
 
-// internalError logs the real cause and tells the client nothing about it.
+// internalError logs the real cause and tells the client nothing about it. A
+// request whose client has already gone away is not a fault on our side, so it
+// is logged quietly and not answered.
 func (s *Server) internalError(ctx context.Context, w http.ResponseWriter, what string, err error, attrs ...slog.Attr) {
 	attrs = append([]slog.Attr{slog.String("op", what), slog.String("err", err.Error())}, attrs...)
-	s.log.LogAttrs(ctx, slog.LevelError, "ingest failed", attrs...)
+	if errors.Is(err, context.Canceled) {
+		s.log.LogAttrs(ctx, slog.LevelDebug, "request abandoned by the client", attrs...)
+		return
+	}
+	s.log.LogAttrs(ctx, slog.LevelError, "request failed", attrs...)
 	writeError(w, http.StatusInternalServerError, "internal", "internal error")
 }

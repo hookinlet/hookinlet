@@ -38,11 +38,11 @@ func TestMigrate(t *testing.T) {
 	env := map[string]string{"HOOKINLET_DATA_DIR": dir}
 
 	code, out, errOut := runCmd(t, env, "migrate")
-	if code != 0 || !strings.Contains(out, "applied migrations [1]") {
+	if code != 0 || !strings.Contains(out, "applied migrations [1 2]") {
 		t.Fatalf("first migrate: code %d, out %q, err %q", code, out, errOut)
 	}
 	code, out, _ = runCmd(t, env, "migrate")
-	if code != 0 || !strings.Contains(out, "up to date at version 1") {
+	if code != 0 || !strings.Contains(out, "up to date at version 2") {
 		t.Errorf("second migrate: code %d, out %q", code, out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, sqlite.DBFileName)); err != nil {

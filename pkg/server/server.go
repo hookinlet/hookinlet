@@ -46,6 +46,10 @@ type Options struct {
 	// Verifiers maps verifier names to implementations. Defaults to
 	// verify.Default().
 	Verifiers *verify.Registry
+	// Authenticator decides who may use the read API (/v1/...). If nil, the read
+	// API is not served at all: there is no safe default for who may read.
+	// token.NewAuthenticator provides the open-source default.
+	Authenticator inbox.Authenticator
 	// TrustedProxies lists the networks whose X-Forwarded-For header is
 	// believed when recording a delivery's source IP. Empty means the header
 	// is never trusted.
@@ -56,6 +60,17 @@ type Options struct {
 	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
 	// to the ingest endpoint. Defaults to 60s.
 	ReadBodyTimeout time.Duration
+	// MaxHeaderBytes bounds the request line and headers of any request, which
+	// ingest stores verbatim and the read API later returns. Defaults to 64 KiB;
+	// Go's own default is 1 MiB. net/http allows about 4 KiB of slack beyond it.
+	MaxHeaderBytes int
+	// MaxConcurrentReads bounds how many read API requests are served at once.
+	// Building a page can take tens of megabytes, so without a bound a few
+	// agents polling together could exhaust memory. Defaults to 16.
+	MaxConcurrentReads int
+	// ReadWaitTimeout is how long a read request waits for a free slot before
+	// being told to retry (503). Defaults to 10s.
+	ReadWaitTimeout time.Duration
 }
 
 // Server is the hookinlet HTTP server.
@@ -64,6 +79,7 @@ type Server struct {
 	log     *slog.Logger
 	handler http.Handler
 	http    *http.Server
+	reads   chan struct{} // a slot per read request being served
 }
 
 // New builds a Server. It performs no I/O and makes no network calls.
@@ -95,8 +111,17 @@ func New(opts Options) (*Server, error) {
 	if opts.ReadBodyTimeout <= 0 {
 		opts.ReadBodyTimeout = 60 * time.Second
 	}
+	if opts.MaxHeaderBytes <= 0 {
+		opts.MaxHeaderBytes = 64 << 10
+	}
+	if opts.MaxConcurrentReads <= 0 {
+		opts.MaxConcurrentReads = 16
+	}
+	if opts.ReadWaitTimeout <= 0 {
+		opts.ReadWaitTimeout = 10 * time.Second
+	}
 
-	s := &Server{opts: opts, log: opts.Logger}
+	s := &Server{opts: opts, log: opts.Logger, reads: make(chan struct{}, opts.MaxConcurrentReads)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("GET /readyz", s.readyz)
@@ -104,6 +129,9 @@ func New(opts Options) (*Server, error) {
 	// response is JSON and carries an Allow header.
 	mux.HandleFunc("/in/{key}", s.handleIngest)
 	mux.HandleFunc("/in/{key}/{rest...}", s.handleIngest)
+	if opts.Authenticator != nil {
+		s.registerAgentAPI(mux)
+	}
 	mux.HandleFunc("/", notFound)
 
 	// Outermost first. accessLog must see the same *http.Request the mux
@@ -117,6 +145,7 @@ func New(opts Options) (*Server, error) {
 		// No WriteTimeout: SSE streams are long-lived. Handlers that need a
 		// deadline set one per request with http.ResponseController.
 		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    opts.MaxHeaderBytes,
 		IdleTimeout:       120 * time.Second,
 		ErrorLog:          slog.NewLogLogger(opts.Logger.Handler(), slog.LevelWarn),
 	}

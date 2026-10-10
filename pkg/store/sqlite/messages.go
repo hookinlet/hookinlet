@@ -181,6 +181,13 @@ func (s *Store) LatestSeq(ctx context.Context, inboxID inbox.ID) (int64, error) 
 }
 
 // Stats implements inbox.Store.
+//
+// MessageCount is exact without counting rows. Messages are only ever removed
+// as a prefix of an inbox (retention) or all together (deleting the inbox), and
+// a duplicate delivery never consumes a seq, so the stored seqs are always the
+// contiguous range oldest..latest. That makes the count a subtraction, which
+// stays instant at millions of messages where COUNT(*) took over 100 ms. The
+// conformance suite checks this against a real walk of the inbox.
 func (s *Store) Stats(ctx context.Context, inboxID inbox.ID) (*inbox.InboxStats, error) {
 	var st inbox.InboxStats
 	err := s.readTx(ctx, func(tx *sql.Tx) error {
@@ -188,11 +195,13 @@ func (s *Store) Stats(ctx context.Context, inboxID inbox.ID) (*inbox.InboxStats,
 			return notFound(err, "inbox")
 		}
 		var oldest sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), MIN(seq) FROM messages WHERE inbox_id = ?`, int64(inboxID)).
-			Scan(&st.MessageCount, &oldest); err != nil {
-			return fmt.Errorf("sqlite: count messages: %w", err)
+		if err := tx.QueryRowContext(ctx, `SELECT MIN(seq) FROM messages WHERE inbox_id = ?`, int64(inboxID)).Scan(&oldest); err != nil {
+			return fmt.Errorf("sqlite: find oldest message: %w", err)
 		}
-		st.OldestSeq = oldest.Int64
+		if oldest.Valid {
+			st.OldestSeq = oldest.Int64
+			st.MessageCount = st.LatestSeq - st.OldestSeq + 1
+		}
 		return nil
 	})
 	if err != nil {
@@ -237,7 +246,9 @@ func (s *Store) Query(ctx context.Context, inboxID inbox.ID, q inbox.Query) (*in
 		where, args = append(where, "verified = ?"), append(args, boolInt(*q.Verified))
 	}
 	if q.DeliveryID != "" {
-		where, args = append(where, "delivery_id = ?"), append(args, q.DeliveryID)
+		// "IS NOT NULL" is what lets SQLite use the partial delivery-id index; it
+		// cannot prove a bound parameter is non-null by itself.
+		where, args = append(where, "delivery_id IS NOT NULL", "delivery_id = ?"), append(args, q.DeliveryID)
 	}
 	args = append(args, q.EffectiveLimit())
 	// Only constant fragments and "?" placeholders are concatenated; every value
@@ -270,3 +281,8 @@ func (s *Store) Query(ctx context.Context, inboxID inbox.ID, q inbox.Query) (*in
 	}
 	return page, nil
 }
+
+// queryDeliveryIDPlanSQL is the shape of a delivery-id query, used by the plan
+// test to check that an index is chosen.
+const queryDeliveryIDPlanSQL = `SELECT ` + messageCols + `, body FROM messages
+	WHERE inbox_id = ? AND delivery_id IS NOT NULL AND delivery_id = ? ORDER BY seq DESC LIMIT ?`
