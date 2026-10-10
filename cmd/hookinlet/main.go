@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/hookinlet/hookinlet/internal/config"
+	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/secretbox"
 	"github.com/hookinlet/hookinlet/pkg/server"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
@@ -132,6 +133,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		ShutdownTimeout: cfg.ShutdownTimeout,
 		Store:           store,
 		SecretBox:       box,
+		Authenticator:   token.NewAuthenticator(store, cfg.AdminToken.Reveal()),
 		TrustedProxies:  cfg.TrustedProxies,
 	})
 	if err != nil {

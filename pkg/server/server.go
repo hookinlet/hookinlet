@@ -46,6 +46,10 @@ type Options struct {
 	// Verifiers maps verifier names to implementations. Defaults to
 	// verify.Default().
 	Verifiers *verify.Registry
+	// Authenticator decides who may use the read API (/v1/...). If nil, the read
+	// API is not served at all: there is no safe default for who may read.
+	// token.NewAuthenticator provides the open-source default.
+	Authenticator inbox.Authenticator
 	// TrustedProxies lists the networks whose X-Forwarded-For header is
 	// believed when recording a delivery's source IP. Empty means the header
 	// is never trusted.
@@ -104,6 +108,9 @@ func New(opts Options) (*Server, error) {
 	// response is JSON and carries an Allow header.
 	mux.HandleFunc("/in/{key}", s.handleIngest)
 	mux.HandleFunc("/in/{key}/{rest...}", s.handleIngest)
+	if opts.Authenticator != nil {
+		s.registerAgentAPI(mux)
+	}
 	mux.HandleFunc("/", notFound)
 
 	// Outermost first. accessLog must see the same *http.Request the mux
