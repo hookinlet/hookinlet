@@ -41,6 +41,10 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	switch args[0] {
 	case "serve":
 		return serve(args[1:], getenv, stderr)
+	case "migrate":
+		return migrateCmd(args[1:], getenv, stdout, stderr)
+	case "inbox":
+		return inboxCmd(args[1:], getenv, stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0
@@ -59,6 +63,8 @@ func usage(w io.Writer) {
 
 Commands:
   serve     Run the HTTP server (see "hookinlet serve -h" for settings)
+  migrate   Apply pending database migrations and report the schema version
+  inbox     Manage inboxes directly in the data directory (inbox create)
   version   Print the version
   help      Show this help
 
