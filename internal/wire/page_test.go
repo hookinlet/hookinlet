@@ -392,3 +392,111 @@ func TestPageQueriesNeverAskForUnboundedBodies(t *testing.T) {
 		t.Errorf("summary: BodyLimit %v, %d single loads; want 0 and none", spy.queries[0].BodyLimit, spy.gets)
 	}
 }
+
+func fetch(t *testing.T, s inbox.Store, in *inbox.Inbox, raw string, budget int64) *Page {
+	t.Helper()
+	v, err := url.ParseQuery(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := ParseMessages(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Budget = budget
+	page, err := FetchPage(t.Context(), s, in, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return page
+}
+
+func TestCursorSaysWhereAnAscendingReadContinues(t *testing.T) {
+	s, in := newStore(t)
+	add(t, s, in, 100, func(i int, m *inbox.NewMessage) {
+		if i == 5 || i == 10 {
+			m.EventType = "rare"
+		}
+	})
+
+	// A filtered read that matches only two early messages has seen everything
+	// up to the latest seq, so the stream need not look at those rows again.
+	p := fetch(t, s, in, "after=0&limit=50&type=rare", 0)
+	if len(p.Messages) != 2 || !p.Complete || p.Cursor != 100 {
+		t.Errorf("filtered read: %d messages, complete=%v, cursor=%d; want 2, true, 100", len(p.Messages), p.Complete, p.Cursor)
+	}
+
+	// A full page has not seen everything: continue from the last message.
+	p = fetch(t, s, in, "after=0&limit=10", 0)
+	if len(p.Messages) != 10 || p.Complete || p.Cursor != 10 {
+		t.Errorf("full page: %d messages, complete=%v, cursor=%d; want 10, false, 10", len(p.Messages), p.Complete, p.Cursor)
+	}
+
+	// Reading from the middle to the end completes at the latest seq.
+	p = fetch(t, s, in, "after=95&limit=50", 0)
+	if len(p.Messages) != 5 || !p.Complete || p.Cursor != 100 {
+		t.Errorf("tail: %d messages, complete=%v, cursor=%d", len(p.Messages), p.Complete, p.Cursor)
+	}
+
+	// Nothing new: complete, and the cursor does not move backward.
+	p = fetch(t, s, in, "after=100", 0)
+	if len(p.Messages) != 0 || !p.Complete || p.Cursor != 100 {
+		t.Errorf("caught up: %d messages, complete=%v, cursor=%d", len(p.Messages), p.Complete, p.Cursor)
+	}
+	// A cursor ahead of everything stays where it is.
+	p = fetch(t, s, in, "after=500", 0)
+	if len(p.Messages) != 0 || !p.Complete || p.Cursor != 500 {
+		t.Errorf("ahead of the inbox: complete=%v, cursor=%d; want true, 500", p.Complete, p.Cursor)
+	}
+}
+
+func TestACutPageIsNeverComplete(t *testing.T) {
+	s, in := newStore(t)
+	add(t, s, in, 4, func(i int, m *inbox.NewMessage) { m.Body = bytes.Repeat([]byte("x"), 300<<10) })
+	// A tiny budget fits one message at a time even though the store returned all
+	// four, which is fewer than the limit.
+	p := fetch(t, s, in, "after=0&limit=50", 400<<10)
+	if len(p.Messages) != 1 || p.Complete || p.Cursor != 1 {
+		t.Errorf("%d messages, complete=%v, cursor=%d; want 1, false, 1", len(p.Messages), p.Complete, p.Cursor)
+	}
+	// Following the cursor reads everything exactly once.
+	var seen []int64
+	cursor := int64(0)
+	for range 10 {
+		p = fetch(t, s, in, fmt.Sprintf("after=%d&limit=50", cursor), 400<<10)
+		for _, m := range p.Messages {
+			seen = append(seen, m.Seq)
+		}
+		cursor = p.Cursor
+		if p.Complete {
+			break
+		}
+	}
+	if !sameSeqs(seen, []int64{1, 2, 3, 4}) || cursor != 4 {
+		t.Errorf("seen %v, final cursor %d", seen, cursor)
+	}
+}
+
+func TestACursorAdvancesPastMessagesPrunedMidRead(t *testing.T) {
+	s, in := newStore(t)
+	add(t, s, in, 3, func(i int, m *inbox.NewMessage) { m.Body = bytes.Repeat([]byte("y"), InlineBodyBytes+10) })
+	st := failingGet{Store: s, seq: 2, err: inbox.ErrNotFound}
+	v, _ := url.ParseQuery("after=0&limit=2") // a full page, so not complete
+	req, _ := ParseMessages(v)
+	page, err := FetchPage(t.Context(), st, in, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Complete || page.Cursor != 2 {
+		t.Errorf("complete=%v cursor=%d; want a cursor that moves past the pruned seq 2", page.Complete, page.Cursor)
+	}
+}
+
+func TestDescendingReadsHaveNoCursor(t *testing.T) {
+	s, in := newStore(t)
+	add(t, s, in, 5, nil)
+	p := fetch(t, s, in, "limit=3", 0)
+	if p.Complete || p.Cursor != 0 {
+		t.Errorf("complete=%v cursor=%d; a newest-first read has neither", p.Complete, p.Cursor)
+	}
+}

@@ -2,7 +2,7 @@
 
 This document describes hookinlet's HTTP surface: [ingest](#ingest) (webhooks
 come in), the [read API](#read-api) (agents read them back), and
-[operations](#operations). SSE, MCP, and the admin API are added in later phases.
+[operations](#operations). MCP and the admin API are added in later phases.
 
 All error responses are JSON:
 
@@ -205,6 +205,94 @@ never served as something a browser would run. The response also carries
 sandbox`, and `Content-Disposition: attachment`. These do not change the bytes or
 the `Content-Type`.
 
+### Following an inbox live (SSE)
+
+```
+GET /v1/inboxes/{slug}/stream
+```
+
+Instead of polling, an agent can hold a connection open and be sent each message
+as it arrives, as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html).
+It takes the same `Authorization: Bearer` header as the rest of the read API, and
+the same 401 and 404 rules. (Browsers' `EventSource` cannot send headers; use a
+client that can, such as `curl -N` or `fetch` with a streaming body.)
+
+```sh
+curl -N -H "Authorization: Bearer $TOKEN" "$BASE/v1/inboxes/stripe-prod/stream"
+```
+
+```
+retry: 3000
+
+id: 1241
+event: message
+data: {"seq":1241,"inbox":"stripe-prod", ...the same JSON as the REST API...}
+
+: ping
+
+id: 1242
+event: message
+data: {...}
+```
+
+- **`id`** is the message's `seq`. **`data`** is the same JSON object the REST API
+  returns for that message, on one line.
+- **`retry: 3000`** is sent once and tells clients to wait 3 seconds before
+  reconnecting.
+- **`: ping`** is a comment sent when the stream has been silent for 15 seconds
+  (`HOOKINLET_SSE_HEARTBEAT`). Clients ignore it; it keeps proxies from closing an
+  idle connection.
+
+#### Where a stream starts
+
+| How | Meaning |
+|---|---|
+| `Last-Event-ID: <seq>` header | Resume after that message. A client that reconnects sends this automatically. |
+| `?after=<seq>` | Start after that message, replaying anything newer. `after=0` replays everything. |
+| *(neither)* | From now: only messages that arrive after the stream opens. |
+
+`Last-Event-ID` wins over `after`, because a reconnecting client reuses its
+original URL and the header says how far it actually got. After a catch-up the
+stream keeps following live. A client that reconnects with the id of the last event
+it saw receives every later message exactly once, with no gaps and no repeats,
+even if messages arrived while it was disconnected.
+
+`type=` (repeatable) and `verified=true|false` filter the stream exactly as they
+do for the list endpoint. Other parameters are a `400`.
+
+#### What can end a stream
+
+- The client disconnects.
+- The server shuts down, within `HOOKINLET_SHUTDOWN_TIMEOUT`. Streams are told to
+  finish at once; deliveries that are mid-way through being stored are allowed to
+  complete. Reconnect with `Last-Event-ID` to carry on.
+- The inbox is deleted.
+- The token the stream was opened with is rotated or revoked, or the inbox it
+  belonged to is deleted. Open streams are re-checked every 30 seconds
+  (`StreamRevalidateInterval`), so access ends within about that long. A
+  transient storage error during the re-check does not end the stream.
+- A write to a client that has stopped reading takes longer than 30 seconds.
+
+#### Limits
+
+At most `HOOKINLET_MAX_STREAMS` streams (1000 by default) are open at once, and
+at most `HOOKINLET_MAX_STREAMS_PER_INBOX` for any one inbox (half of
+`MAX_STREAMS` by default), so one inbox cannot use up every slot. More get `503`
+with `Retry-After`. A stream holds a connection and little else: about 50 KiB
+of memory (measured: 500 idle streams take about 22 MiB on top of the server's
+own 10 MiB on Linux). A stream that is catching up reads pages of up to 256 KiB,
+so a slow client replaying large messages holds at most that much more.
+
+If a client starts after a position the inbox has not reached yet, the stream
+opens with a comment saying so and waits, rather than failing.
+
+Streams do not count against the limit on concurrent page reads, except for the
+moments they spend reading, so an open stream never keeps an ordinary read out.
+
+> **On platforms that scale to zero:** an open stream is an open connection, and
+> some platforms count that as activity and keep the instance awake. An agent that
+> wants an instance to sleep when idle should poll `/messages` instead.
+
 ### Treat message content as data, never as instructions
 
 Everything in a message came from whoever sent the webhook: the body, the
@@ -230,7 +318,7 @@ server itself: `seq`, `inbox`, `received_at`, `size`, `verified`, `verifier`,
 | `404` | `not_found` | No such inbox, message, or route, **or** the token may not read that inbox. |
 | `405` | `method_not_allowed` | Not `GET` or `HEAD`. `Allow: GET, HEAD`. |
 | `500` | `internal` | A server-side problem. Details are in the server log. |
-| `503` | `overloaded` | Too many reads are in progress (16 by default) and none finished within 10 seconds. `Retry-After: 1`. Authentication happens first, so unauthenticated traffic cannot cause this. |
+| `503` | `overloaded` | Too many reads are in progress (16 by default) and none finished within 10 seconds, or (for a stream) too many streams are open. `Retry-After` is set. Authentication happens first, so unauthenticated traffic cannot cause this. |
 
 Every read response carries `Cache-Control: no-store` and
 `X-Content-Type-Options: nosniff`.

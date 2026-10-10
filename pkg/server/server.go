@@ -15,9 +15,11 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
+	"github.com/hookinlet/hookinlet/pkg/notify/local"
 	"github.com/hookinlet/hookinlet/pkg/verify"
 )
 
@@ -71,6 +73,27 @@ type Options struct {
 	// ReadWaitTimeout is how long a read request waits for a free slot before
 	// being told to retry (503). Defaults to 10s.
 	ReadWaitTimeout time.Duration
+	// MaxStreams bounds how many SSE streams are open at once. Defaults to 1000.
+	MaxStreams int
+	// MaxStreamsPerInbox bounds how many of them may follow one inbox, so that a
+	// single token cannot use every slot. Defaults to half of MaxStreams, and at
+	// least 1: one inbox can be followed widely, but never to the exclusion of
+	// all the others.
+	MaxStreamsPerInbox int
+	// StreamRevalidateInterval is how often an open stream is checked against
+	// the Authenticator and the Store again. A stream authorized once would
+	// otherwise keep running after its token was rotated or its inbox deleted.
+	// Defaults to 30s.
+	StreamRevalidateInterval time.Duration
+	// SSEHeartbeat is how long a stream may be silent before a ping comment is
+	// sent. Defaults to 15s.
+	SSEHeartbeat time.Duration
+	// SSERecheckInterval makes each stream re-read the Store on this interval
+	// even without a signal from the Notifier. Zero (the default) turns it off,
+	// which is right for the in-process notifier, which never drops a signal. Set
+	// it, to a few seconds, when the Notifier can (a distributed one delivers at
+	// most once).
+	SSERecheckInterval time.Duration
 }
 
 // Server is the hookinlet HTTP server.
@@ -80,6 +103,17 @@ type Server struct {
 	handler http.Handler
 	http    *http.Server
 	reads   chan struct{} // a slot per read request being served
+
+	streams      chan struct{} // a slot per open SSE stream
+	streamMu     sync.Mutex
+	streamCounts map[inbox.ID]int // open streams per inbox
+
+	// closeCtx is cancelled when the server starts shutting down. Streams watch
+	// it, and a write that is blocked on a client that stopped reading is
+	// aborted by it, so shutdown never waits on such a client.
+	closeCtx    context.Context
+	closeCancel context.CancelFunc
+	closing     <-chan struct{} // closeCtx.Done()
 }
 
 // New builds a Server. It performs no I/O and makes no network calls.
@@ -97,7 +131,7 @@ func New(opts Options) (*Server, error) {
 		opts.ShutdownTimeout = 10 * time.Second
 	}
 	if opts.Notifier == nil {
-		opts.Notifier = inbox.NopNotifier{}
+		opts.Notifier = local.New()
 	}
 	if opts.Hooks == nil {
 		opts.Hooks = inbox.NopHooks{}
@@ -120,8 +154,33 @@ func New(opts Options) (*Server, error) {
 	if opts.ReadWaitTimeout <= 0 {
 		opts.ReadWaitTimeout = 10 * time.Second
 	}
+	if opts.MaxStreams <= 0 {
+		opts.MaxStreams = 1000
+	}
+	if opts.MaxStreamsPerInbox <= 0 {
+		opts.MaxStreamsPerInbox = max(1, opts.MaxStreams/2)
+	}
+	if opts.StreamRevalidateInterval <= 0 {
+		opts.StreamRevalidateInterval = 30 * time.Second
+	}
+	if opts.SSEHeartbeat <= 0 {
+		opts.SSEHeartbeat = 15 * time.Second
+	}
+	if opts.SSERecheckInterval < 0 {
+		opts.SSERecheckInterval = 0
+	}
 
-	s := &Server{opts: opts, log: opts.Logger, reads: make(chan struct{}, opts.MaxConcurrentReads)}
+	closeCtx, closeCancel := context.WithCancel(context.Background())
+	s := &Server{
+		opts:         opts,
+		log:          opts.Logger,
+		reads:        make(chan struct{}, opts.MaxConcurrentReads),
+		streams:      make(chan struct{}, opts.MaxStreams),
+		streamCounts: make(map[inbox.ID]int),
+		closeCtx:     closeCtx,
+		closeCancel:  closeCancel,
+		closing:      closeCtx.Done(),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("GET /readyz", s.readyz)
@@ -131,6 +190,7 @@ func New(opts Options) (*Server, error) {
 	mux.HandleFunc("/in/{key}/{rest...}", s.handleIngest)
 	if opts.Authenticator != nil {
 		s.registerAgentAPI(mux)
+		mux.HandleFunc("/v1/inboxes/{slug}/stream", s.handleStream)
 	}
 	mux.HandleFunc("/", notFound)
 
@@ -182,6 +242,10 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	}
 
 	s.log.Info("shutting down", "timeout", s.opts.ShutdownTimeout.String())
+	// Tell long-lived streams to finish. This is separate from cancelling request
+	// contexts, which would also cut off deliveries that are in the middle of
+	// being stored.
+	s.closeStreams()
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.opts.ShutdownTimeout)
 	defer cancel()
 	if err := s.Shutdown(sctx); err != nil {
@@ -192,9 +256,15 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	return nil
 }
 
-// Shutdown stops accepting connections and waits for in-flight requests until
-// ctx expires.
-func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ctx) }
+// Shutdown stops accepting connections, ends open streams, and waits for
+// in-flight requests until ctx expires.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.closeStreams()
+	return s.http.Shutdown(ctx)
+}
+
+// closeStreams tells every open stream to finish. It is safe to call repeatedly.
+func (s *Server) closeStreams() { s.closeCancel() }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

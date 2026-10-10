@@ -77,6 +77,22 @@ type Store interface {
 	Append(ctx context.Context, inboxID ID, m *NewMessage) (msg *Message, created bool, err error)
 
 	// Query returns messages per q (see Query for ordering and paging).
+	//
+	// Two guarantees let a caller follow an inbox without rescanning it, and an
+	// implementation must keep both:
+	//
+	//   - Exactness: the result holds exactly min(q.EffectiveLimit(), matches)
+	//     messages. A page shorter than the limit therefore means nothing more
+	//     matches, not that the Store stopped early for a size or time reason.
+	//   - Snapshot: Page.LatestSeq is no newer than the state the messages were
+	//     read from (one transaction, or read first). Every message that matches
+	//     and has a Seq at or below LatestSeq is in the result or beyond a full
+	//     page. A LatestSeq read after the messages could name a Seq that
+	//     committed in between, and a caller who skipped ahead to it would never
+	//     see that message.
+	//
+	// Together they mean that when an ascending read comes back short, the
+	// caller may continue after max(last returned Seq, LatestSeq).
 	Query(ctx context.Context, inboxID ID, q Query) (*Page, error)
 
 	// Get returns one message including its body. A seq that does not exist in
@@ -146,6 +162,15 @@ type Store interface {
 type Notifier interface {
 	// Publish signals that the inbox now has a message at seq. It never blocks
 	// the caller and must be called only after the message is committed.
+	//
+	// Every subscription that exists when Publish begins, that is, one whose
+	// Subscribe has returned, must be signalled. Consumers depend on this: they
+	// subscribe first and read second, so a message committed after the read is
+	// announced to a subscription that is already there.
+	//
+	// ctx belongs to the request that stored the message and may be cancelled by
+	// the time Publish runs. An implementation must still deliver the signal.
+	//
 	// An in-process notifier must not drop signals. A distributed notifier may
 	// (delivery is at-most-once), and must then be deployed with a positive
 	// SSE_RECHECK_INTERVAL so subscribers re-read the Store periodically.

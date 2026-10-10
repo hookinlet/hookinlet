@@ -41,34 +41,8 @@ func (s *Server) agent(h agentHandler) http.HandlerFunc {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "this endpoint accepts GET and HEAD")
 			return
 		}
-		// Responses carry message content and depend on who is asking. Some of
-		// that content is chosen by whoever sent the webhook, so no client may
-		// guess a type for it.
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-
-		ctx := r.Context()
-		principal, err := s.opts.Authenticator.Authenticate(r)
-		switch {
-		case errors.Is(err, inbox.ErrUnauthenticated):
-			w.Header().Set("WWW-Authenticate", `Bearer realm="hookinlet"`)
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
-			return
-		case err != nil:
-			s.internalError(ctx, w, "authenticate", err)
-			return
-		}
-
-		in, err := s.opts.Store.GetInboxBySlug(ctx, r.PathValue("slug"))
-		switch {
-		case errors.Is(err, inbox.ErrNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "not found")
-			return
-		case err != nil:
-			s.internalError(ctx, w, "load inbox", err)
-			return
-		case !principal.CanReadInbox(in):
-			writeError(w, http.StatusNotFound, "not_found", "not found")
+		in, ok := s.authorize(w, r)
+		if !ok {
 			return
 		}
 		// Only authenticated, authorized requests take a slot, so anonymous
@@ -80,6 +54,43 @@ func (s *Server) agent(h agentHandler) http.HandlerFunc {
 		defer release()
 		h(w, r, in)
 	}
+}
+
+// authorize runs the checks every read of an inbox shares: it authenticates the
+// caller and finds the inbox only if the caller may read it. It writes the
+// response itself when it cannot say yes.
+func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*inbox.Inbox, bool) {
+	// Responses carry message content and depend on who is asking. Some of that
+	// content is chosen by whoever sent the webhook, so no client may guess a
+	// type for it.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	ctx := r.Context()
+	principal, err := s.opts.Authenticator.Authenticate(r)
+	switch {
+	case errors.Is(err, inbox.ErrUnauthenticated):
+		w.Header().Set("WWW-Authenticate", `Bearer realm="hookinlet"`)
+		writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return nil, false
+	case err != nil:
+		s.internalError(ctx, w, "authenticate", err)
+		return nil, false
+	}
+
+	in, err := s.opts.Store.GetInboxBySlug(ctx, r.PathValue("slug"))
+	switch {
+	case errors.Is(err, inbox.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "not found")
+		return nil, false
+	case err != nil:
+		s.internalError(ctx, w, "load inbox", err)
+		return nil, false
+	case !principal.CanReadInbox(in):
+		writeError(w, http.StatusNotFound, "not_found", "not found")
+		return nil, false
+	}
+	return in, true
 }
 
 func (s *Server) handleInboxInfo(w http.ResponseWriter, r *http.Request, in *inbox.Inbox) {

@@ -17,11 +17,14 @@ key=$(openssl rand -base64 32)
 secret='smoke-shared-secret'
 tmp=$(mktemp)
 
+stream_pids=()
 cleanup() {
+  for pid in "${stream_pids[@]}"; do kill "$pid" 2>/dev/null || true; done
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker volume rm "$vol" >/dev/null 2>&1 || true
-  rm -f "$tmp"
+  rm -f "$tmp" "${stream_files[@]}"
 }
+stream_files=()
 trap cleanup EXIT
 
 fail() {
@@ -56,6 +59,29 @@ send() {
 }
 
 sign() { printf '%s' "$1" | openssl dgst -sha256 -hmac "$secret" -hex | sed 's/^.* //'; }
+
+# wait_for FILE PATTERN [SECONDS]: wait until the file contains the pattern.
+wait_for() {
+  local file=$1 pattern=$2 limit=${3:-5}
+  for _ in $(seq 1 $((limit * 10))); do
+    if grep -q -- "$pattern" "$file" 2>/dev/null; then return 0; fi
+    sleep 0.1
+  done
+  return 1
+}
+
+# follow PATH [LAST_EVENT_ID]: start streaming into a fresh file; sets $stream_file and $stream_pid.
+follow() {
+  local path=$1 last=${2-}
+  stream_file=$(mktemp)
+  stream_files+=("$stream_file")
+  local args=(-sN -H "Authorization: Bearer $agent_token")
+  [ -n "$last" ] && args+=(-H "Last-Event-ID: $last")
+  curl "${args[@]}" "$base$path" -o "$stream_file" &
+  stream_pid=$!
+  stream_pids+=("$stream_pid")
+  wait_for "$stream_file" "retry: 3000" 5 || fail "the stream never opened"
+}
 
 wait_ready() {
   for _ in $(seq 1 40); do
@@ -108,10 +134,32 @@ esac
 case $page in *'"body":{"hello":"world"}'*) echo "ok   a JSON body is embedded as JSON" ;; *) fail "the JSON body was not embedded: $page" ;; esac
 expect "the raw endpoint returns the exact bytes"  "200 $body1" "$(read_api /v1/inboxes/demo/messages/1/raw "$agent_token")"
 
+# The live stream: an event arrives as a delivery is stored.
+follow "/v1/inboxes/demo/stream"
+body3='{"live":true}'
+expect "a delivery while streaming is accepted" '200 {"seq":3}' "$(send POST /in/demo "$body3" "$(sign "$body3")")"
+wait_for "$stream_file" "id: 3" 5 || fail "the stream never delivered message 3: $(cat "$stream_file")"
+grep -q "event: message" "$stream_file" || fail "the stream event has no event name"
+grep -q '"body":{"live":true}' "$stream_file" || fail "the streamed event lacks the message: $(cat "$stream_file")"
+echo "ok   the stream delivered the new message as an event"
+case $(grep -c "^id: " "$stream_file") in 1) echo "ok   and only that one (no replay of older messages)" ;; *) fail "the stream replayed old messages: $(cat "$stream_file")" ;; esac
+
+# Stopping the container ends open streams promptly (SIGTERM, then a clean exit).
+begin=$(date +%s)
+docker stop -t 15 "$name" >/dev/null
+took=$(( $(date +%s) - begin ))
+[ "$took" -le 5 ] || fail "stopping the container took ${took}s with a stream open"
+wait "$stream_pid" 2>/dev/null || true
+if kill -0 "$stream_pid" 2>/dev/null; then fail "the stream client is still connected after the container stopped"; fi
+echo "ok   stopping the container ended the open stream (${took}s)"
+docker start "$name" >/dev/null
+
 # The data and the sequence counter survive a restart.
-docker restart "$name" >/dev/null
 wait_ready
-expect "the sequence continues after a restart" '200 {"seq":3}' "$(send POST /in/demo "$body1" "$(sign "$body1")")"
+expect "the sequence continues after a restart" '200 {"seq":4}' "$(send POST /in/demo "$body1" "$(sign "$body1")")"
+follow "/v1/inboxes/demo/stream" 3
+wait_for "$stream_file" "id: 4" 5 || fail "reconnecting with Last-Event-ID 3 did not resume at 4: $(cat "$stream_file")"
+case $(grep -c "^id: " "$stream_file") in 1) echo "ok   Last-Event-ID resumed exactly after message 3" ;; *) fail "unexpected replay: $(cat "$stream_file")" ;; esac
 expect "messages are still there after a restart" "200" "$(read_api /v1/inboxes/demo/messages/2 "$agent_token" | cut -d' ' -f1)"
 expect "and so is the raw body" "200 $body2" "$(read_api /v1/inboxes/demo/messages/2/raw "$agent_token")"
 

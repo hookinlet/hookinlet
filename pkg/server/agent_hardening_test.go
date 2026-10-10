@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
@@ -249,4 +250,26 @@ func TestRawResponseIsKeptSameOrigin(t *testing.T) {
 	if got := rec.Header().Get("Cross-Origin-Resource-Policy"); got != "same-origin" {
 		t.Errorf("Cross-Origin-Resource-Policy = %q", got)
 	}
+}
+
+// tokenFor creates an agent token for the inbox and returns it.
+func (ae *agentEnv) tokenFor(in *inbox.Inbox) string {
+	ae.t.Helper()
+	tok, hash, err := token.Generate()
+	if err != nil {
+		ae.t.Fatal(err)
+	}
+	upd := *in
+	upd.AgentTokenHash = hash
+	if err := ae.store.UpdateInbox(ae.t.Context(), &upd); err != nil {
+		ae.t.Fatal(err)
+	}
+	*in = upd
+	return tok
+}
+
+func newListener(t *testing.T) (net.Listener, error) {
+	t.Helper()
+	var lc net.ListenConfig
+	return lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
 }
