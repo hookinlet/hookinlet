@@ -1,0 +1,267 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Pat Ramsey
+
+// Package config loads hookinlet's settings from flags and environment
+// variables. Every setting is a flag (--listen-addr) and an environment
+// variable (HOOKINLET_LISTEN_ADDR). Flags win over the environment, which wins
+// over the built-in default.
+package config
+
+import (
+	"encoding/base64"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/netip"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// EnvPrefix is prepended to the upper-cased, underscore-separated flag name to
+// form the environment variable name.
+const EnvPrefix = "HOOKINLET_"
+
+// masterKeyLen is the required length in bytes of the decoded master key.
+const masterKeyLen = 32
+
+// ErrUsage is returned (wrapped) when flag parsing failed. The flag package has
+// already written the problem and the usage text to the output writer, so
+// callers should not print it again.
+var ErrUsage = errors.New("invalid command line")
+
+// Secret holds a value that must never reach logs or error messages. Its
+// String, GoString and LogValue methods all redact; use Reveal at the point of
+// use.
+type Secret string
+
+// Reveal returns the secret value.
+func (s Secret) Reveal() string { return string(s) }
+
+// String implements fmt.Stringer.
+func (Secret) String() string { return "[redacted]" }
+
+// GoString implements fmt.GoStringer so that %#v does not leak the value.
+func (Secret) GoString() string { return "config.Secret([redacted])" }
+
+// LogValue implements slog.LogValuer.
+func (Secret) LogValue() slog.Value { return slog.StringValue("[redacted]") }
+
+// Config is the validated runtime configuration.
+type Config struct {
+	ListenAddr         string
+	DataDir            string
+	AdminToken         Secret
+	MasterKey          Secret // the raw 32 key bytes, not the base64 form
+	PublicBaseURL      string
+	TrustedProxies     []netip.Prefix
+	LogLevel           slog.Level
+	LogFormat          string
+	SSEHeartbeat       time.Duration
+	SSERecheckInterval time.Duration
+	MCPEnabled         bool
+	MCPInlineBodyBytes int
+	RetentionInterval  time.Duration
+	ShutdownTimeout    time.Duration
+}
+
+// LogValue implements slog.LogValuer. Secrets are redacted by their type.
+func (c *Config) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("listen_addr", c.ListenAddr),
+		slog.String("data_dir", c.DataDir),
+		slog.Any("admin_token", c.AdminToken),
+		slog.Any("master_key", c.MasterKey),
+		slog.String("public_base_url", c.PublicBaseURL),
+		slog.Int("trusted_proxies", len(c.TrustedProxies)),
+		slog.String("log_level", c.LogLevel.String()),
+		slog.String("log_format", c.LogFormat),
+		slog.Duration("sse_heartbeat", c.SSEHeartbeat),
+		slog.Duration("sse_recheck_interval", c.SSERecheckInterval),
+		slog.Bool("mcp_enabled", c.MCPEnabled),
+		slog.Int("mcp_inline_body_bytes", c.MCPInlineBodyBytes),
+		slog.Duration("retention_interval", c.RetentionInterval),
+		slog.Duration("shutdown_timeout", c.ShutdownTimeout),
+	)
+}
+
+type spec struct {
+	name     string // flag name; the env name is derived from it
+	def      string
+	usage    string
+	required bool
+}
+
+var specs = []spec{
+	{name: "listen-addr", def: ":8080", usage: "address the HTTP server listens on"},
+	{name: "data-dir", def: "./data", usage: "directory for persistent data"},
+	{name: "admin-token", required: true, usage: "bearer token for the admin API (prefer the environment variable: flags are visible in process listings)"},
+	{name: "master-key", required: true, usage: "base64-encoded 32-byte key that encrypts stored secrets (prefer the environment variable)"},
+	{name: "public-base-url", usage: "externally visible base URL, used for ingest URLs in admin responses; derived from the request if unset"},
+	{name: "trusted-proxies", usage: "comma-separated CIDRs whose X-Forwarded-For header is honored"},
+	{name: "log-level", def: "info", usage: "log level: debug, info, warn, error"},
+	{name: "log-format", def: "json", usage: "log format: json or text"},
+	{name: "sse-heartbeat", def: "15s", usage: "interval between SSE heartbeat comments"},
+	{name: "sse-recheck-interval", def: "0", usage: "re-read the store on this interval even without a notifier signal; 0 disables"},
+	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
+	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools"},
+	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps"},
+	{name: "shutdown-timeout", def: "10s", usage: "time allowed for in-flight requests to finish on shutdown"},
+}
+
+func envName(flagName string) string {
+	return EnvPrefix + strings.ToUpper(strings.ReplaceAll(flagName, "-", "_"))
+}
+
+// Load resolves settings from args (the arguments after the subcommand) and
+// getenv, validates them, and reports every problem at once. Flag usage and
+// flag errors are written to usageOut.
+func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Config, error) {
+	fs := flag.NewFlagSet("hookinlet serve", flag.ContinueOnError)
+	fs.SetOutput(usageOut)
+	raw := make(map[string]*string, len(specs))
+	for _, s := range specs {
+		usage := s.usage + " [env " + envName(s.name) + "]"
+		if s.def != "" {
+			usage += " (default " + s.def + ")"
+		}
+		raw[s.name] = fs.String(s.name, "", usage)
+	}
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %w", ErrUsage, err)
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(usageOut, "unexpected argument %q\n", fs.Arg(0))
+		fs.Usage()
+		return nil, fmt.Errorf("%w: unexpected argument %q", ErrUsage, fs.Arg(0))
+	}
+	set := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+
+	vals := make(map[string]string, len(specs))
+	var errs []error
+	for _, s := range specs {
+		switch {
+		case set[s.name]:
+			vals[s.name] = *raw[s.name]
+		case getenv(envName(s.name)) != "":
+			vals[s.name] = getenv(envName(s.name))
+		default:
+			vals[s.name] = s.def
+		}
+		if s.required && vals[s.name] == "" {
+			errs = append(errs, fieldErr(s.name, "is required"))
+		}
+	}
+
+	c := &Config{
+		ListenAddr:    vals["listen-addr"],
+		DataDir:       vals["data-dir"],
+		AdminToken:    Secret(vals["admin-token"]),
+		LogFormat:     vals["log-format"],
+		PublicBaseURL: strings.TrimRight(vals["public-base-url"], "/"),
+	}
+	collect := func(err error) {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if c.ListenAddr == "" {
+		collect(fieldErr("listen-addr", "must not be empty"))
+	}
+	if c.DataDir == "" {
+		collect(fieldErr("data-dir", "must not be empty"))
+	}
+	if c.LogFormat != "json" && c.LogFormat != "text" {
+		collect(fieldErr("log-format", "must be json or text"))
+	}
+	if err := c.LogLevel.UnmarshalText([]byte(vals["log-level"])); err != nil {
+		collect(fieldErr("log-level", "must be debug, info, warn, or error"))
+	}
+	if v := vals["master-key"]; v != "" {
+		// The value is deliberately not echoed in any error below.
+		key, err := base64.StdEncoding.DecodeString(v)
+		switch {
+		case err != nil:
+			collect(fieldErr("master-key", "is not valid base64"))
+		case len(key) != masterKeyLen:
+			collect(fieldErr("master-key", "must decode to exactly %d bytes, got %d", masterKeyLen, len(key)))
+		default:
+			c.MasterKey = Secret(key)
+		}
+	}
+	if v := c.PublicBaseURL; v != "" {
+		u, err := url.Parse(v)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			collect(fieldErr("public-base-url", "must be an absolute http or https URL"))
+		}
+	}
+	for _, p := range splitList(vals["trusted-proxies"]) {
+		prefix, err := netip.ParsePrefix(p)
+		if err != nil {
+			collect(fieldErr("trusted-proxies", "%q is not a CIDR", p))
+			continue
+		}
+		c.TrustedProxies = append(c.TrustedProxies, prefix)
+	}
+
+	var err error
+	if c.SSEHeartbeat, err = parseDuration(vals, "sse-heartbeat", true); err != nil {
+		collect(err)
+	}
+	if c.SSERecheckInterval, err = parseDuration(vals, "sse-recheck-interval", false); err != nil {
+		collect(err)
+	}
+	if c.RetentionInterval, err = parseDuration(vals, "retention-interval", true); err != nil {
+		collect(err)
+	}
+	if c.ShutdownTimeout, err = parseDuration(vals, "shutdown-timeout", true); err != nil {
+		collect(err)
+	}
+	if c.MCPEnabled, err = strconv.ParseBool(vals["mcp-enabled"]); err != nil {
+		collect(fieldErr("mcp-enabled", "must be true or false"))
+	}
+	if c.MCPInlineBodyBytes, err = strconv.Atoi(vals["mcp-inline-body-bytes"]); err != nil || c.MCPInlineBodyBytes <= 0 {
+		collect(fieldErr("mcp-inline-body-bytes", "must be a positive integer"))
+	}
+
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return c, nil
+}
+
+func parseDuration(vals map[string]string, name string, positive bool) (time.Duration, error) {
+	d, err := time.ParseDuration(vals[name])
+	switch {
+	case err != nil:
+		return 0, fieldErr(name, "must be a duration such as 15s or 1h")
+	case d < 0 || (positive && d == 0):
+		if positive {
+			return 0, fieldErr(name, "must be greater than zero")
+		}
+		return 0, fieldErr(name, "must not be negative")
+	}
+	return d, nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for p := range strings.SplitSeq(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func fieldErr(name, format string, args ...any) error {
+	return fmt.Errorf("--%s (%s) %s", name, envName(name), fmt.Sprintf(format, args...))
+}
