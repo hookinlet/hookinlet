@@ -125,7 +125,7 @@ func TestQueryLatencyAtScale(t *testing.T) {
 	s, in := seeded(t)
 	n := int64(benchRows())
 	const iterations = 400
-	r := rand.New(rand.NewPCG(1, 2))
+	r := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // a fixed-seed generator for repeatable benchmark inputs
 
 	names := make([]string, 0)
 	all := shapes(n)
@@ -192,7 +192,7 @@ func BenchmarkQuery(b *testing.B) {
 	for _, name := range []string{"latest 50", "poll after near the end", "poll after random", "one event type, newest", "by delivery id"} {
 		gen := all[name]
 		b.Run(name, func(b *testing.B) {
-			r := rand.New(rand.NewPCG(3, 4))
+			r := rand.New(rand.NewPCG(3, 4)) //nolint:gosec // a fixed-seed generator for repeatable benchmark inputs
 			for b.Loop() {
 				if _, err := s.Query(b.Context(), in.ID, gen(r)); err != nil {
 					b.Fatal(err)
