@@ -28,6 +28,10 @@ handler: authentication, inbox lookup, query, and JSON encoding. Each shape ran
 | one message | 0.06 ms | 0.10 ms | 0.2 ms |
 | inbox info (includes the message count) | 0.05 ms | 0.07 ms | 0.2 ms |
 
+These were measured again after the page-size bounds below were added (each
+message's encoded size is now computed to enforce them); nothing changed beyond
+noise, and the worst p95 stayed at 11.4 ms.
+
 The slowest shapes are the time-range filters. SQLite finds the range through the
 `(inbox_id, received_at)` index and sorts it by `seq`; an hour is 3,600
 messages here. The cost grows with how many messages fall inside the range, not

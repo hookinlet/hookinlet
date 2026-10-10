@@ -6,6 +6,33 @@ applies.
 
 ## Unreleased
 
+### Phase 3: the read API
+
+#### Added
+- `pkg/auth/token`: `Authenticator`, an `inbox.Authenticator` that accepts the
+  admin token or an inbox's agent token, with the principals `Admin` and
+  `Agent`.
+- `pkg/server`: the read API (`GET /v1/inboxes/{slug}`, `/messages`,
+  `/messages/{seq}`, `/messages/{seq}/raw`), mounted when `Options.Authenticator`
+  is set.
+- `pkg/inboxtest`: `AuthenticatorSuite`, the conformance suite for
+  `inbox.Authenticator` and `inbox.Principal`.
+- `server.Options`: `Authenticator`, `MaxHeaderBytes` (default 64 KiB),
+  `MaxConcurrentReads` (default 16), and `ReadWaitTimeout` (default 10s).
+- Migration 0002: an index on `(inbox_id, delivery_id, seq)`.
+
+#### Changed
+- The contract for `inbox.Authenticator` and `inbox.Principal` is spelled out:
+  failures must be indistinguishable, an error that does not wrap
+  `ErrUnauthenticated` becomes a server error, and `CanReadInbox` must follow the
+  inbox's ID, not its slug, and not depend on `Disabled`.
+- `HOOKINLET_ADMIN_TOKEN` must be at least 32 characters with no whitespace.
+- Requests whose headers exceed 64 KiB (plus a few KiB of slack) get 431.
+  Go's default was 1 MiB.
+- `Store.Stats` computes the message count by subtraction instead of counting
+  rows. The result is the same; it relies on retention removing only a prefix of
+  an inbox, which the conformance suite now verifies against a real walk.
+
 ### Phase 2: ingest and verification
 
 #### Added
