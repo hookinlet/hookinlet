@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/hookinlet/hookinlet/internal/jsonptr"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -52,6 +53,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
 		return
 	}
+	// A sender gets a bounded time to deliver the body, so a trickle cannot hold a
+	// connection and its buffer open indefinitely. Servers that cannot set a
+	// deadline (such as a test recorder) just do without one.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.opts.ReadBodyTimeout))
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, in.MaxBodyBytes))
 	var tooLarge *http.MaxBytesError
 	switch {
@@ -80,8 +85,11 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		s.internalError(ctx, w, "open verifier secret", err)
 		return
 	}
-	res, verr := verifier.Verify(r, body, secret, s.opts.Now())
-	clear(secret)
+	// The decrypted secret is wiped when verification ends, however it ends.
+	res, verr := func() (verify.Result, error) {
+		defer clear(secret)
+		return verifier.Verify(r, body, secret, s.opts.Now())
+	}()
 
 	verified, verifyReason := true, ""
 	if verr != nil {
@@ -95,9 +103,12 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			// is trusted: the failed Result carries no id or type.
 			verified, verifyReason, res = false, reason, verify.Result{}
 		default:
+			// The sender is told only that verification failed. The reason can
+			// name the header and scheme an inbox expects, which is not for
+			// whoever happens to hold the ingest key; it goes to the log.
 			s.log.LogAttrs(ctx, slog.LevelInfo, "delivery rejected",
 				slog.String("slug", in.Slug), slog.String("reason", reason), slog.Int("size", len(body)))
-			writeError(w, http.StatusUnauthorized, "verification_failed", "webhook verification failed: "+reason)
+			writeError(w, http.StatusUnauthorized, "verification_failed", "webhook verification failed")
 			return
 		}
 	}
@@ -105,6 +116,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	// 5. A handshake (Slack's url_verification) is answered, not stored.
 	if res.Challenge != nil {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(res.Challenge)
 		return
@@ -116,7 +128,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		redact = hr.SecretHeaders()
 	}
 	eventType := res.EventType
-	if eventType == "" && in.EventTypePointer != "" {
+	// The pointer reads the body, which is only worth trusting, or even parsing,
+	// once the delivery has verified.
+	if eventType == "" && verified && in.EventTypePointer != "" {
 		if v, ok := jsonptr.String(body, in.EventTypePointer); ok && v != "" && len(v) <= maxEventTypeLen {
 			eventType = v
 		}

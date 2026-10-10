@@ -53,6 +53,9 @@ type Options struct {
 	// Now is the clock used for signature timestamp tolerance. Defaults to
 	// time.Now.
 	Now func() time.Time
+	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
+	// to the ingest endpoint. Defaults to 60s.
+	ReadBodyTimeout time.Duration
 }
 
 // Server is the hookinlet HTTP server.
@@ -88,6 +91,9 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
+	}
+	if opts.ReadBodyTimeout <= 0 {
+		opts.ReadBodyTimeout = 60 * time.Second
 	}
 
 	s := &Server{opts: opts, log: opts.Logger}

@@ -275,6 +275,8 @@ func mac256(key []byte, parts ...string) []byte {
 	return m.Sum(nil)
 }
 
+func hexMAC(secret, msg string) string { return hex.EncodeToString(mac256([]byte(secret), msg)) }
+
 func githubSig(secret, body string) string {
 	return "sha256=" + hex.EncodeToString(mac256([]byte(secret), body))
 }
@@ -535,7 +537,7 @@ func TestIngestVerifiers(t *testing.T) {
 			t.Errorf("stored %+v", *m)
 		}
 		bad := e.post("/in/gh-box", body, "X-Hub-Signature-256", githubSig("other-secret", body))
-		if bad.Code != http.StatusUnauthorized || errorCode(t, bad) != "verification_failed" || !strings.Contains(bad.Body.String(), "signature mismatch") {
+		if bad.Code != http.StatusUnauthorized || errorCode(t, bad) != "verification_failed" || !strings.Contains(e.logs.String(), "signature mismatch") {
 			t.Errorf("wrong secret: status %d, %s", bad.Code, bad.Body.String())
 		}
 		if tamper := e.post("/in/gh-box", body+" ", "X-Hub-Signature-256", githubSig("gh-secret", body)); tamper.Code != http.StatusUnauthorized {
@@ -561,7 +563,7 @@ func TestIngestVerifiers(t *testing.T) {
 			t.Errorf("stored %+v", *m)
 		}
 		stale := e.post("/in/st-box", body, "Stripe-Signature", stripeSig("whsec_server", "1699990000", body))
-		if stale.Code != http.StatusUnauthorized || !strings.Contains(stale.Body.String(), "timestamp outside tolerance") {
+		if stale.Code != http.StatusUnauthorized || !strings.Contains(e.logs.String(), "timestamp outside tolerance") {
 			t.Errorf("stale: status %d, %s", stale.Code, stale.Body.String())
 		}
 		if n := e.count(in); n != 1 {
