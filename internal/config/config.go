@@ -116,20 +116,113 @@ func envName(flagName string) string {
 	return EnvPrefix + strings.ToUpper(strings.ReplaceAll(flagName, "-", "_"))
 }
 
+// source resolves settings from flags, then the environment, then defaults.
+type source struct {
+	raw    map[string]*string
+	set    map[string]bool
+	getenv func(string) string
+}
+
+// register adds the named settings as flags on fs. Call resolve after fs.Parse.
+func register(fs *flag.FlagSet, getenv func(string) string, names ...string) *source {
+	src := &source{raw: make(map[string]*string, len(names)), getenv: getenv}
+	for _, name := range names {
+		s := specByName(name)
+		usage := s.usage + " [env " + envName(s.name) + "]"
+		if s.def != "" {
+			usage += " (default " + s.def + ")"
+		}
+		src.raw[s.name] = fs.String(s.name, "", usage)
+	}
+	return src
+}
+
+// resolve records which flags were set explicitly. An explicitly passed empty
+// flag wins, so a required value cannot be silently satisfied by the
+// environment.
+func (src *source) resolve(fs *flag.FlagSet) {
+	src.set = make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) { src.set[f.Name] = true })
+}
+
+func (src *source) value(name string) string {
+	s := specByName(name)
+	switch {
+	case src.set[name]:
+		return *src.raw[name]
+	case src.getenv(envName(name)) != "":
+		return src.getenv(envName(name))
+	default:
+		return s.def
+	}
+}
+
+func specByName(name string) spec {
+	for _, s := range specs {
+		if s.name == name {
+			return s
+		}
+	}
+	panic("config: unknown setting " + name)
+}
+
+// ParseMasterKey decodes a base64 master key and checks its length. The value
+// is deliberately never echoed in an error.
+func ParseMasterKey(v string) (Secret, error) {
+	key, err := base64.StdEncoding.DecodeString(v)
+	switch {
+	case err != nil:
+		return "", fieldErr("master-key", "is not valid base64")
+	case len(key) != masterKeyLen:
+		return "", fieldErr("master-key", "must decode to exactly %d bytes, got %d", masterKeyLen, len(key))
+	}
+	return Secret(key), nil
+}
+
+// DataSettings are the settings commands that open the data directory need.
+type DataSettings struct {
+	DataDir string
+	// MasterKey is empty unless one was supplied.
+	MasterKey Secret
+}
+
+// AddDataFlags registers --data-dir and --master-key on fs and returns a
+// function that resolves them. Call the returned function after fs.Parse. The
+// master key is optional here; a command that needs it must check for it.
+func AddDataFlags(fs *flag.FlagSet, getenv func(string) string) func() (*DataSettings, error) {
+	src := register(fs, getenv, "data-dir", "master-key")
+	return func() (*DataSettings, error) {
+		src.resolve(fs)
+		d := &DataSettings{DataDir: src.value("data-dir")}
+		var errs []error
+		if d.DataDir == "" {
+			errs = append(errs, fieldErr("data-dir", "must not be empty"))
+		}
+		if v := src.value("master-key"); v != "" {
+			key, err := ParseMasterKey(v)
+			if err != nil {
+				errs = append(errs, err)
+			}
+			d.MasterKey = key
+		}
+		if len(errs) > 0 {
+			return nil, errors.Join(errs...)
+		}
+		return d, nil
+	}
+}
+
 // Load resolves settings from args (the arguments after the subcommand) and
 // getenv, validates them, and reports every problem at once. Flag usage and
 // flag errors are written to usageOut.
 func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Config, error) {
 	fs := flag.NewFlagSet("hookinlet serve", flag.ContinueOnError)
 	fs.SetOutput(usageOut)
-	raw := make(map[string]*string, len(specs))
+	names := make([]string, 0, len(specs))
 	for _, s := range specs {
-		usage := s.usage + " [env " + envName(s.name) + "]"
-		if s.def != "" {
-			usage += " (default " + s.def + ")"
-		}
-		raw[s.name] = fs.String(s.name, "", usage)
+		names = append(names, s.name)
 	}
+	src := register(fs, getenv, names...)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, err
@@ -141,20 +234,12 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 		fs.Usage()
 		return nil, fmt.Errorf("%w: unexpected argument %q", ErrUsage, fs.Arg(0))
 	}
-	set := make(map[string]bool)
-	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	src.resolve(fs)
 
 	vals := make(map[string]string, len(specs))
 	var errs []error
 	for _, s := range specs {
-		switch {
-		case set[s.name]:
-			vals[s.name] = *raw[s.name]
-		case getenv(envName(s.name)) != "":
-			vals[s.name] = getenv(envName(s.name))
-		default:
-			vals[s.name] = s.def
-		}
+		vals[s.name] = src.value(s.name)
 		if s.required && vals[s.name] == "" {
 			errs = append(errs, fieldErr(s.name, "is required"))
 		}
@@ -186,16 +271,11 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 		collect(fieldErr("log-level", "must be debug, info, warn, or error"))
 	}
 	if v := vals["master-key"]; v != "" {
-		// The value is deliberately not echoed in any error below.
-		key, err := base64.StdEncoding.DecodeString(v)
-		switch {
-		case err != nil:
-			collect(fieldErr("master-key", "is not valid base64"))
-		case len(key) != masterKeyLen:
-			collect(fieldErr("master-key", "must decode to exactly %d bytes, got %d", masterKeyLen, len(key)))
-		default:
-			c.MasterKey = Secret(key)
+		key, err := ParseMasterKey(v)
+		if err != nil {
+			collect(err)
 		}
+		c.MasterKey = key
 	}
 	if v := c.PublicBaseURL; v != "" {
 		u, err := url.Parse(v)

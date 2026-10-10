@@ -187,3 +187,62 @@ func TestSecretsAreRedactedEverywhere(t *testing.T) {
 		t.Errorf("expected redaction marker in log output: %s", buf.String())
 	}
 }
+
+func TestParseMasterKey(t *testing.T) {
+	good, err := ParseMasterKey(testKey)
+	if err != nil || good.Reveal() != string(bytes.Repeat([]byte{7}, 32)) {
+		t.Fatalf("valid key: %v", err)
+	}
+	for name, in := range map[string]string{
+		"empty":       "",
+		"not base64":  "%%%secret-sentinel%%%",
+		"too short":   base64.StdEncoding.EncodeToString([]byte("short")),
+		"too long":    base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 33)),
+		"url-safe":    base64.URLEncoding.EncodeToString(bytes.Repeat([]byte{0xfb, 0xff}, 16)),
+		"unpadded 32": strings.TrimRight(testKey, "="),
+	} {
+		_, err := ParseMasterKey(in)
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+			continue
+		}
+		if strings.Contains(err.Error(), "secret-sentinel") {
+			t.Errorf("%s: error echoes the value: %v", name, err)
+		}
+	}
+}
+
+func TestAddDataFlags(t *testing.T) {
+	load := func(args []string, env map[string]string) (*DataSettings, error) {
+		fs := flag.NewFlagSet("t", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		resolve := AddDataFlags(fs, func(k string) string { return env[k] })
+		if err := fs.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		return resolve()
+	}
+
+	d, err := load(nil, nil)
+	if err != nil || d.DataDir != "./data" || d.MasterKey != "" {
+		t.Errorf("defaults: %+v, %v", d, err)
+	}
+	d, err = load(nil, map[string]string{"HOOKINLET_DATA_DIR": "/env", "HOOKINLET_MASTER_KEY": testKey})
+	if err != nil || d.DataDir != "/env" || d.MasterKey == "" {
+		t.Errorf("env: %+v, %v", d, err)
+	}
+	d, err = load([]string{"--data-dir", "/flag"}, map[string]string{"HOOKINLET_DATA_DIR": "/env"})
+	if err != nil || d.DataDir != "/flag" {
+		t.Errorf("flag should win: %+v, %v", d, err)
+	}
+	if _, err := load([]string{"--data-dir="}, nil); err == nil {
+		t.Error("an explicitly empty --data-dir was accepted")
+	}
+	if _, err := load(nil, map[string]string{"HOOKINLET_MASTER_KEY": "bad"}); err == nil || !strings.Contains(err.Error(), "--master-key") {
+		t.Errorf("bad master key: %v", err)
+	}
+	// Unlike serve, no admin token is demanded.
+	if _, err := load(nil, nil); err != nil {
+		t.Errorf("data settings should not require an admin token: %v", err)
+	}
+}
