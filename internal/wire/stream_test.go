@@ -173,3 +173,34 @@ func TestStreamConstants(t *testing.T) {
 	// Comments and retry are not events: a client must not see them as messages.
 	var _ inbox.Message
 }
+
+// Programs that read an event stream line by line often split on more than \n.
+// Python's str.splitlines, for one, also breaks at NEL, vertical tab, form feed,
+// the information separators, and the Unicode line and paragraph separators.
+func TestAnEventHasNoCharacterThatSplitsLinesAnywhere(t *testing.T) {
+	const breakers = "\u0085\u2028\u2029\x0b\x0c\x1c\x1d\x1e"
+	body := "a" + breakers + "b"
+	m := stored([]byte(body))
+	m.Headers = map[string][]string{"X-Odd": {breakers}}
+	m.Query = breakers
+	m.DeliveryID = breakers
+	m.EventType = breakers
+	frame, err := Event(FromStored(m, "i", "none", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := frame[strings.Index(string(frame), "data: ")+6:]
+	for _, r := range breakers {
+		if bytes.ContainsRune(data, r) {
+			t.Errorf("U+%04X appears raw in the data line", r)
+		}
+	}
+	// The values survive the escaping: a JSON parser gets them back intact.
+	var decoded map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(data), &decoded); err != nil {
+		t.Fatalf("data is not JSON: %v", err)
+	}
+	if decoded["body_text"] != body || decoded["delivery_id"] != breakers {
+		t.Errorf("the escaped values changed: %v", decoded)
+	}
+}

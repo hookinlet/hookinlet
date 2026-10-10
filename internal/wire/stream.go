@@ -101,6 +101,11 @@ func Event(m Message) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// U+0085 (NEL) is not a line break in SSE, but many programs split text on it
+	// (Python's str.splitlines does), which would cut the data line in two. Inside
+	// a JSON string it can be written as an escape. A C2 byte is always the first
+	// byte of its character, so this cannot touch any other one.
+	data = bytes.ReplaceAll(data, []byte("\xc2\x85"), []byte(`\u0085`))
 	if bytes.ContainsAny(data, "\r\n") {
 		return nil, errNewlineInData
 	}

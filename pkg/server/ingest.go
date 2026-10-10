@@ -194,7 +194,9 @@ func (s *Server) afterCommit(ctx context.Context, in *inbox.Inbox, msg *inbox.Me
 		}
 	}()
 	if created {
-		s.opts.Notifier.Publish(ctx, in.ID, msg.Seq)
+		// By now the request that stored the message may be finished and its
+		// context cancelled; a notifier that honored that would drop the signal.
+		s.opts.Notifier.Publish(context.WithoutCancel(ctx), in.ID, msg.Seq)
 	}
 	s.opts.Hooks.AfterIngest(ctx, in, msg, created)
 }
