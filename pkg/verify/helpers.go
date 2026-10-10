@@ -6,6 +6,7 @@ package verify
 import (
 	"bytes"
 	"crypto/hmac"
+	"encoding/base64"
 	"encoding/json"
 	"hash"
 	"net/http"
@@ -35,11 +36,14 @@ func requireSecret(secret []byte) error {
 	return nil
 }
 
-// parseUnixSeconds parses a Unix timestamp written as plain decimal digits.
-// Signs, spaces, fractions, and anything past the year 9999 are rejected.
+// parseUnixSeconds parses a Unix timestamp written as plain decimal digits in
+// canonical form. Signs, spaces, fractions, leading zeros, and anything past the
+// year 9999 are rejected. Leading zeros matter: if "0123" and "123" were the
+// same time, characters could slide between a timestamp and the adjacent part
+// of a signed message without changing the signed bytes or the parsed time.
 func parseUnixSeconds(s string) (time.Time, bool) {
 	const maxSeconds = 253402300799 // 9999-12-31T23:59:59Z, 12 digits at most
-	if s == "" || len(s) > 12 {
+	if s == "" || len(s) > 12 || (len(s) > 1 && s[0] == '0') {
 		return time.Time{}, false
 	}
 	var n int64
@@ -97,4 +101,15 @@ func topLevelStrings(body []byte, keys ...string) map[string]string {
 		}
 	}
 	return out
+}
+
+// decodeBase64 decodes base64 in its one canonical form. Padding is optional
+// but, if present, must be exactly right, and unused trailing bits must be
+// zero. Without this, one signature could be written many ways ("AB==",
+// "AB=", "AC==" all decode to the same byte in a lenient decoder).
+func decodeBase64(enc *base64.Encoding, s string) ([]byte, error) {
+	if len(s)%4 == 0 {
+		return enc.Strict().DecodeString(s)
+	}
+	return enc.WithPadding(base64.NoPadding).Strict().DecodeString(s)
 }

@@ -37,8 +37,10 @@ type hmacConfig struct {
 	// ToleranceSeconds applies only with TimestampHeader. Default 300.
 	ToleranceSeconds int `json:"tolerance_seconds"`
 	// DeliveryIDHeader names a header holding a unique delivery id, used to
-	// deduplicate retries. It is only as trustworthy as the sender makes it:
-	// unless the payload template covers it, it is not signed.
+	// deduplicate retries. It is never authenticated: the payload template can
+	// only cover the body and the timestamp, so anyone holding one captured,
+	// validly signed request can replay it under a new id and defeat
+	// deduplication. Use a timestamp to bound replays.
 	DeliveryIDHeader string `json:"delivery_id_header"`
 }
 
@@ -98,9 +100,9 @@ func newHMAC(config json.RawMessage) (Verifier, error) {
 	case "", "hex":
 		v.decode = hex.DecodeString
 	case "base64":
-		v.decode = func(s string) ([]byte, error) { return base64.RawStdEncoding.DecodeString(strings.TrimRight(s, "=")) }
+		v.decode = func(s string) ([]byte, error) { return decodeBase64(base64.StdEncoding, s) }
 	case "base64url":
-		v.decode = func(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(strings.TrimRight(s, "=")) }
+		v.decode = func(s string) ([]byte, error) { return decodeBase64(base64.URLEncoding, s) }
 	default:
 		return nil, configErr(`"encoding" must be hex, base64, or base64url`)
 	}
@@ -136,6 +138,12 @@ func newHMAC(config json.RawMessage) (Verifier, error) {
 	}
 	if v.hasTimestampIn && v.timestampHdr == "" {
 		return nil, configErr(`"payload_template" uses {timestamp}, which needs "timestamp_header"`)
+	}
+	// A timestamp that is checked against the clock but not covered by the
+	// signature authenticates nothing: an old signed body with a fresh header
+	// would pass.
+	if v.timestampHdr != "" && !v.hasTimestampIn {
+		return nil, configErr(`"timestamp_header" is set but "payload_template" does not include {timestamp}, so the timestamp would not be signed`)
 	}
 
 	if c.DeliveryIDHeader != "" {
@@ -176,7 +184,46 @@ func parseTemplate(t string) ([]segment, error) {
 	if bodies != 1 {
 		return nil, configErr(`"payload_template" must contain {body} exactly once`)
 	}
+	if err := rejectAmbiguousNeighbours(segs); err != nil {
+		return nil, err
+	}
 	return segs, nil
+}
+
+// rejectAmbiguousNeighbours refuses templates where {body} and {timestamp} touch
+// or are separated only by digits. Then the signed bytes do not say where one
+// ends and the other begins, so characters could be moved from one to the other
+// without changing the signature.
+func rejectAmbiguousNeighbours(segs []segment) error {
+	const msg = `"payload_template" must separate {timestamp} and {body} with at least one character that is not a digit`
+	for i := range segs {
+		if segs[i].kind == segLiteral {
+			continue
+		}
+		// Walk right through digit-only literals to the next placeholder.
+		for j := i + 1; j < len(segs); j++ {
+			if segs[j].kind == segLiteral {
+				if !digitsOnly(segs[j].lit) {
+					break
+				}
+				continue
+			}
+			if (segs[i].kind == segBody) != (segs[j].kind == segBody) {
+				return configErr(msg)
+			}
+			break
+		}
+	}
+	return nil
+}
+
+func digitsOnly(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (g *genericHMAC) Verify(r *http.Request, body, secret []byte, now time.Time) (Result, error) {

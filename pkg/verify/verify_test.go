@@ -562,3 +562,11 @@ func TestFailureNeverCarriesRequestData(t *testing.T) {
 		t.Errorf("error text leaks request data or the secret: %v", err)
 	}
 }
+
+// slackSign signs a Slack request with the standard library, independent of
+// the verifier under test.
+func slackSign(secret, ts, body string) string {
+	m := hmac.New(sha256.New, []byte(secret))
+	m.Write([]byte("v0:" + ts + ":" + body))
+	return "v0=" + hex.EncodeToString(m.Sum(nil))
+}

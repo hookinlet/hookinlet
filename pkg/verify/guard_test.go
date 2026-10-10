@@ -163,3 +163,19 @@ func FuzzParseUnixSeconds(f *testing.F) {
 		}
 	})
 }
+
+// Timestamps are written as plain decimal numbers. A leading zero would let two
+// different header values mean the same time, which lets characters slide
+// between a timestamp and an adjacent part of a signed message.
+func TestUnixSecondsAreCanonical(t *testing.T) {
+	for _, s := range []string{"0", "1", "1700000000", "253402300799"} {
+		if _, ok := parseUnixSeconds(s); !ok {
+			t.Errorf("%q rejected", s)
+		}
+	}
+	for _, s := range []string{"", "00", "01", "001700000000", "01700000000", "-1", "+1", "1.0", " 1", "1 ", "253402300800", "9999999999999"} {
+		if _, ok := parseUnixSeconds(s); ok {
+			t.Errorf("%q accepted", s)
+		}
+	}
+}

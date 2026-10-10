@@ -16,9 +16,11 @@ import (
 // HMAC-SHA256 of the raw body keyed with the webhook secret.
 //
 // GitHub signs only the body. X-GitHub-Delivery and X-GitHub-Event are not
-// covered by the signature, so they are metadata, not proof: someone holding
-// one captured, validly signed body can replay it under a new delivery id.
-// GitHub provides no timestamp that would let a receiver close that gap.
+// covered by the signature, so they are metadata, not proof. Someone holding one
+// captured, validly signed body can replay it at any time, under any delivery
+// id and with any event type, and the replay is stored as verified. GitHub
+// provides no timestamp that would let a receiver close that gap. Anything that
+// acts on the event type must not treat it as authenticated.
 type github struct{}
 
 func newGitHub(config json.RawMessage) (Verifier, error) {

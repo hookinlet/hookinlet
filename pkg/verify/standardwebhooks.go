@@ -4,6 +4,7 @@
 package verify
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -44,11 +45,14 @@ func (s standardWebhooks) Verify(r *http.Request, body, secret []byte, now time.
 	if err != nil {
 		return Result{}, err
 	}
+	defer clear(key)
 	id, err := singleHeader(r, "webhook-id")
 	if err != nil {
 		return Result{}, err
 	}
-	if id == "" || len(id) > maxIDLen {
+	// The signed text is "<id>.<timestamp>.<body>"; a "." inside the id would let
+	// the same bytes be read as a different split.
+	if id == "" || len(id) > maxIDLen || strings.Contains(id, ".") {
 		return Result{}, fail("malformed webhook-id header")
 	}
 	tsStr, err := singleHeader(r, "webhook-timestamp")
@@ -83,12 +87,16 @@ func (s standardWebhooks) Verify(r *http.Request, body, secret []byte, now time.
 // decodeStandardWebhooksSecret turns "whsec_<base64>" into the signing key. A
 // secret in any other shape is a configuration problem, not a bad delivery.
 func decodeStandardWebhooksSecret(secret []byte) ([]byte, error) {
-	enc, ok := strings.CutPrefix(string(secret), standardWebhooksSecretPrefix)
+	// bytes.CutPrefix, not a string conversion: a Go string cannot be wiped.
+	enc, ok := bytes.CutPrefix(secret, []byte(standardWebhooksSecretPrefix))
 	if !ok {
 		return nil, configErr("the secret must look like whsec_<base64>")
 	}
-	key, err := base64.StdEncoding.DecodeString(enc)
+	key := make([]byte, base64.StdEncoding.DecodedLen(len(enc)))
+	n, err := base64.StdEncoding.Decode(key, enc)
+	key = key[:n]
 	if err != nil || len(key) == 0 {
+		clear(key)
 		return nil, configErr("the secret must look like whsec_<base64>")
 	}
 	return key, nil
@@ -108,7 +116,7 @@ func parseStandardWebhooksSignatures(h string) [][]byte {
 		if !ok || version != "v1" {
 			continue
 		}
-		if sig, err := base64.StdEncoding.DecodeString(enc); err == nil && len(sig) == sha256.Size {
+		if sig, err := decodeBase64(base64.StdEncoding, enc); err == nil && len(sig) == sha256.Size && len(enc)%4 == 0 {
 			sigs = append(sigs, sig)
 		}
 	}

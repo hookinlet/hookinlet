@@ -12,6 +12,10 @@ import (
 	"time"
 )
 
+// maxChallengeLen bounds the handshake challenge that is echoed back. Slack's
+// are a few dozen characters.
+const maxChallengeLen = 256
+
 // slack verifies Slack requests: `X-Slack-Signature: v0=<hex>`, the
 // HMAC-SHA256 of "v0:<X-Slack-Request-Timestamp>:<body>" keyed with the app's
 // signing secret. Both the timestamp and the body are signed.
@@ -79,7 +83,13 @@ func (s slack) Verify(r *http.Request, body, secret []byte, now time.Time) (Resu
 	if json.Unmarshal(body, &payload) == nil {
 		switch payload.Type {
 		case "url_verification":
-			res.Challenge = []byte(payload.Challenge)
+			// The challenge is echoed to the sender, so an oversized one is
+			// ignored and the delivery is treated as an ordinary message.
+			if len(payload.Challenge) <= maxChallengeLen {
+				res.Challenge = []byte(payload.Challenge)
+			} else {
+				res.EventType = payload.Type
+			}
 		case "event_callback":
 			var ev struct {
 				Type string `json:"type"`
