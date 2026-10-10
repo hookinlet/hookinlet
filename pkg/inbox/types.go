@@ -12,9 +12,13 @@ package inbox
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ID identifies an inbox. It is opaque to callers and never appears in a
@@ -31,11 +35,21 @@ const (
 	// DefaultQueryLimit and MaxQueryLimit bound Query.Limit.
 	DefaultQueryLimit = 50
 	MaxQueryLimit     = 500
+	// MaxQueryTypes bounds Query.Types.
+	MaxQueryTypes = 100
 
 	// DefaultListLimit and MaxListLimit bound ListParams.Limit.
 	DefaultListLimit = 100
 	MaxListLimit     = 1000
+
+	// TimePrecision is the finest resolution a Store must keep for
+	// timestamps. Stores truncate to it, and always return UTC.
+	TimePrecision = time.Microsecond
 )
+
+// NormalizeTime converts t to the form every Store persists and returns: UTC,
+// truncated to TimePrecision.
+func NormalizeTime(t time.Time) time.Time { return t.UTC().Truncate(TimePrecision) }
 
 // What to do with a delivery whose signature does not verify.
 const (
@@ -43,19 +57,22 @@ const (
 	OnVerifyFailStore  = "store"  // store it with Verified=false
 )
 
-var verifierNames = map[string]struct{}{
+var builtinVerifiers = map[string]struct{}{
 	"none": {}, "token": {}, "hmac": {}, "stripe": {}, "github": {}, "slack": {}, "standardwebhooks": {},
 }
 
-// KnownVerifier reports whether name is a built-in verifier preset. Embedders
-// that register extra verifiers manage their own names; this check applies to
-// the open-source Store's validation.
+// KnownVerifier reports whether name is one of the built-in verifier presets.
+// Inbox.Validate does not require it, because embedders can register more
+// verifiers; the admin layer checks names against the live registry.
 func KnownVerifier(name string) bool {
-	_, ok := verifierNames[name]
+	_, ok := builtinVerifiers[name]
 	return ok
 }
 
-var slugRE = regexp.MustCompile(`^[a-z0-9-]{3,64}$`)
+var (
+	slugRE         = regexp.MustCompile(`^[a-z0-9-]{3,64}$`)
+	verifierNameRE = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+)
 
 // ValidSlug reports whether s is a valid inbox slug: 3 to 64 characters from
 // a-z, 0-9, and hyphen.
@@ -67,31 +84,37 @@ type Inbox struct {
 	Slug string // immutable after creation; the external name
 	Name string
 
-	// Verifier selects the signature scheme: none, token, hmac, stripe,
-	// github, slack, or standardwebhooks.
+	// Version counts successful updates, starting at 1. UpdateInbox compares it
+	// to detect concurrent edits; see Store.UpdateInbox.
+	Version int64
+
+	// Verifier names the signature scheme: none, token, hmac, stripe, github,
+	// slack, standardwebhooks, or one an embedder registered.
 	Verifier string
-	// VerifierConfig holds non-secret verifier parameters as a JSON object.
+	// VerifierConfig holds non-secret verifier parameters as a JSON object. It
+	// is preserved semantically, not byte for byte.
 	VerifierConfig json.RawMessage
 	// VerifierSecret is the verifier secret sealed by a SecretBox. A Store
 	// persists it verbatim and never sees the plaintext.
-	VerifierSecret []byte
+	VerifierSecret SecretBytes
 	// OnVerifyFail is OnVerifyFailReject or OnVerifyFailStore.
 	OnVerifyFail string
 
-	// AgentTokenHash is the hash of the inbox's agent token. Only the hash is
-	// stored; the token is shown once at creation or rotation.
-	AgentTokenHash []byte
+	// AgentTokenHash is the hash of the inbox's agent token. It is unique
+	// across inboxes. Only the hash is stored; the token is shown once.
+	AgentTokenHash SecretBytes
 
 	// MaxBodyBytes limits accepted body size, up to MaxBodyBytesCeiling.
 	MaxBodyBytes int64
-	// RetentionDays prunes messages older than this many days. 0 means keep
-	// forever by age.
+	// RetentionDays prunes messages older than this many days of 24 hours. 0
+	// means keep forever by age.
 	RetentionDays int
 	// RetentionMaxCount keeps at most this many of the newest messages. 0 means
 	// no count limit.
 	RetentionMaxCount int64
-	// EventTypePointer is a JSON pointer (for example "/type") used to extract
-	// the event type from JSON bodies on generic inboxes. Empty means none.
+	// EventTypePointer is a JSON pointer (RFC 6901, for example "/type") used
+	// to extract the event type from JSON bodies on generic inboxes. Empty
+	// means none.
 	EventTypePointer string
 
 	// LastSeq is the sequence number of the newest message ever appended.
@@ -99,9 +122,23 @@ type Inbox struct {
 	// supplied by the caller.
 	LastSeq int64
 
-	Disabled  bool
+	// Disabled stops ingest (deliveries get 404). Reads continue to work, so
+	// agents can still drain a disabled inbox.
+	Disabled bool
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// LogValue implements slog.LogValuer and omits everything secret.
+func (in *Inbox) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Int64("id", int64(in.ID)),
+		slog.String("slug", in.Slug),
+		slog.String("verifier", in.Verifier),
+		slog.Int64("last_seq", in.LastSeq),
+		slog.Bool("disabled", in.Disabled),
+	)
 }
 
 // ApplyDefaults fills zero-valued optional fields. Every Store calls it before
@@ -124,10 +161,10 @@ func (in *Inbox) Validate() error {
 	switch {
 	case !ValidSlug(in.Slug):
 		return Invalidf("slug must be 3-64 characters from a-z, 0-9, and hyphen")
-	case in.Name == "" || len(in.Name) > 200:
-		return Invalidf("name must be 1-200 characters")
-	case !KnownVerifier(in.Verifier):
-		return Invalidf("unknown verifier %q", in.Verifier)
+	case !utf8.ValidString(in.Name) || in.Name == "" || utf8.RuneCountInString(in.Name) > 200:
+		return Invalidf("name must be 1-200 characters of valid UTF-8")
+	case !verifierNameRE.MatchString(in.Verifier):
+		return Invalidf("verifier must be 1-32 characters from a-z, 0-9, and hyphen")
 	case in.OnVerifyFail != OnVerifyFailReject && in.OnVerifyFail != OnVerifyFailStore:
 		return Invalidf("on_verify_fail must be %q or %q", OnVerifyFailReject, OnVerifyFailStore)
 	case len(in.AgentTokenHash) == 0:
@@ -138,8 +175,8 @@ func (in *Inbox) Validate() error {
 		return Invalidf("retention_days must not be negative")
 	case in.RetentionMaxCount < 0:
 		return Invalidf("retention_max_count must not be negative")
-	case in.EventTypePointer != "" && in.EventTypePointer[0] != '/':
-		return Invalidf("event_type_pointer must be a JSON pointer starting with /")
+	case in.EventTypePointer != "" && !validJSONPointer(in.EventTypePointer):
+		return Invalidf("event_type_pointer must be a valid JSON pointer such as /type")
 	}
 	var cfg map[string]json.RawMessage
 	if err := json.Unmarshal(in.VerifierConfig, &cfg); err != nil || cfg == nil {
@@ -148,11 +185,24 @@ func (in *Inbox) Validate() error {
 	return nil
 }
 
-// NewMessage is a delivery to be appended to an inbox.
+// validJSONPointer checks RFC 6901 syntax: it starts with "/", and "~" is
+// only used as the escapes "~0" and "~1".
+func validJSONPointer(p string) bool {
+	if !utf8.ValidString(p) || !strings.HasPrefix(p, "/") {
+		return false
+	}
+	for i := 0; i < len(p); i++ {
+		if p[i] == '~' && (i+1 >= len(p) || (p[i+1] != '0' && p[i+1] != '1')) {
+			return false
+		}
+	}
+	return true
+}
+
+// NewMessage is a delivery to be appended to an inbox. The Store assigns the
+// receive time (see Store.Append); callers do not supply one.
 type NewMessage struct {
-	// ReceivedAt is when the delivery arrived. Zero means the Store's clock.
-	ReceivedAt time.Time
-	Method     string
+	Method string
 	// PathSuffix is the part of the ingest path after the inbox key, without a
 	// leading slash.
 	PathSuffix string
@@ -167,10 +217,12 @@ type NewMessage struct {
 	Body        []byte
 	Verified    bool
 	VerifyError string
-	// DeliveryID, when non-empty, deduplicates deliveries within an inbox.
+	// DeliveryID, when non-empty, identifies the delivery for deduplication
+	// (see Store.Append). Only verified deliveries are deduplicated.
 	DeliveryID string
-	EventType  string
-	SourceIP   string
+	// EventType is empty when unknown.
+	EventType string
+	SourceIP  string
 }
 
 // Validate checks the fields a Store cannot sensibly default.
@@ -185,17 +237,21 @@ func (m *NewMessage) Validate() error {
 type Message struct {
 	InboxID ID
 	// Seq is the per-inbox sequence number, starting at 1. It is the cursor.
-	Seq        int64
+	Seq int64
+	// ReceivedAt is when the Store committed the delivery: UTC, microsecond
+	// precision, and never earlier than the previous message's in the same
+	// inbox.
 	ReceivedAt time.Time
 	Method     string
 	PathSuffix string
 	Query      string
-	Headers    http.Header
-	// ContentType is the Content-Type of the delivery.
+	// Headers is never nil.
+	Headers     http.Header
 	ContentType string
-	// Body is nil, not empty, when the Query asked to omit bodies.
+	// Body is non-nil (empty for an empty body) unless the Query's BodyLimit
+	// withheld it, in which case it is nil.
 	Body        []byte
-	Size        int64 // size of the stored body, set even when Body is omitted
+	Size        int64 // size of the stored body, set even when Body is withheld
 	Verified    bool
 	VerifyError string
 	DeliveryID  string
@@ -216,15 +272,20 @@ type Query struct {
 	// Limit caps the result size. 0 means DefaultQueryLimit; values above
 	// MaxQueryLimit are clamped. Negative is invalid.
 	Limit int
-	// Types matches any of these event types.
+	// Types matches any of these event types. Empty strings are invalid, and
+	// at most MaxQueryTypes are allowed.
 	Types []string
 	// Since is inclusive and Until exclusive, both compared with ReceivedAt.
-	// The zero time means unbounded.
+	// The zero time means unbounded. If both are set, Since must be before
+	// Until.
 	Since, Until time.Time
 	Verified     *bool
 	DeliveryID   string
-	// OmitBody leaves Message.Body nil for lighter results.
-	OmitBody bool
+	// BodyLimit, when non-nil, withholds bodies larger than *BodyLimit bytes:
+	// those messages come back with Body nil and Size set. 0 withholds every
+	// non-empty body. nil returns all bodies. A Store must not read withheld
+	// bodies into memory.
+	BodyLimit *int64
 }
 
 // Validate checks the query. Errors wrap ErrInvalid.
@@ -236,6 +297,16 @@ func (q Query) Validate() error {
 		return Invalidf("cursors must not be negative")
 	case q.Limit < 0:
 		return Invalidf("limit must not be negative")
+	case q.BodyLimit != nil && *q.BodyLimit < 0:
+		return Invalidf("body limit must not be negative")
+	case !q.Since.IsZero() && !q.Until.IsZero() && !q.Since.Before(q.Until):
+		return Invalidf("since must be before until")
+	}
+	if len(q.Types) > MaxQueryTypes {
+		return Invalidf("at most %d event types may be given", MaxQueryTypes)
+	}
+	if slices.Contains(q.Types, "") {
+		return Invalidf("event types must not be empty")
 	}
 	return nil
 }

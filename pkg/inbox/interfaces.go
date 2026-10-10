@@ -10,7 +10,8 @@ import (
 )
 
 // Store persists inboxes and their messages. All methods are safe for
-// concurrent use and honor context cancellation.
+// concurrent use and honor context cancellation: a cancelled call returns an
+// error wrapping the context's error and leaves no partial effect.
 //
 // # Sequence numbers
 //
@@ -29,24 +30,50 @@ import (
 // Seqs are never reused. Retention removes old messages but leaves LastSeq
 // untouched, so the next Append continues the count.
 //
+// # Visibility
+//
+// Once Append returns, every later read by any caller, on any node, observes
+// the message. A notifier wake-up followed by a read must never find the
+// message missing, so implementations that read from replicas must read their
+// own writes.
+//
+// # Time
+//
+// The Store owns the clock. ReceivedAt, CreatedAt, and UpdatedAt are UTC,
+// truncated to TimePrecision (see NormalizeTime), and what a write returns is
+// exactly what later reads return. Within one inbox, ReceivedAt never
+// decreases as Seq increases, even if the system clock steps backwards:
+// Append uses the later of the clock and the previous message's ReceivedAt.
+//
 // # Errors
 //
-// Missing inboxes or messages yield ErrNotFound, uniqueness violations
+// Missing inboxes or messages yield ErrNotFound (including Query, LatestSeq,
+// and Stats on an inbox that does not exist), uniqueness violations
 // ErrConflict, and invalid arguments ErrInvalid, each possibly wrapped.
 type Store interface {
 	// ResolveIngestKey maps the key in an ingest URL (/in/{key}) to its inbox.
 	// The open-source implementation treats the key as the slug. It returns
 	// ErrNotFound for an unknown key and may return a disabled inbox; callers
-	// must check Inbox.Disabled.
+	// must check Inbox.Disabled. The server calls it on every delivery and
+	// does not cache the result: an implementation that needs a cache owns it,
+	// including cross-node invalidation.
 	ResolveIngestKey(ctx context.Context, key string) (*Inbox, error)
 
-	// Append stores m in the inbox and returns the stored message. If
-	// m.DeliveryID is non-empty and the inbox already holds a message with that
-	// delivery id, Append returns the existing message with created == false,
-	// stores nothing, and does not consume a sequence number. Otherwise created
-	// is true. Append drops AlwaysRedactedHeaders from m.Headers before storing
-	// and returns ErrNotFound if the inbox does not exist. It does not enforce
-	// body-size limits; the caller does.
+	// Append stores m in the inbox and returns the stored message, assigning
+	// its Seq and ReceivedAt. It drops AlwaysRedactedHeaders from m.Headers,
+	// returns ErrNotFound if the inbox does not exist, and does not enforce
+	// body-size limits (the caller does).
+	//
+	// Deduplication: if m.Verified and m.DeliveryID is non-empty and the inbox
+	// already holds a verified message with that delivery id, Append stores
+	// nothing, consumes no sequence number, and returns the existing message
+	// with created == false. Otherwise created is true. Unverified messages
+	// are never deduplicated and never match: a forged delivery that claims a
+	// real delivery id must not suppress the genuine one. When several Appends
+	// with the same verified delivery id race, exactly one gets created == true
+	// and the rest get that message back with created == false; none returns
+	// ErrConflict. Once a message is pruned, its delivery id may be stored
+	// again.
 	Append(ctx context.Context, inboxID ID, m *NewMessage) (msg *Message, created bool, err error)
 
 	// Query returns messages per q (see Query for ordering and paging).
@@ -64,17 +91,25 @@ type Store interface {
 	// Stats returns message counts for the inbox.
 	Stats(ctx context.Context, inboxID ID) (*InboxStats, error)
 
-	// CreateInbox validates in (after ApplyDefaults), assigns ID, CreatedAt,
-	// and UpdatedAt, sets LastSeq to 0, and stores it, updating *in. It returns
-	// ErrConflict if the slug is taken.
+	// CreateInbox applies defaults, validates in, assigns ID, CreatedAt,
+	// UpdatedAt, and Version 1, sets LastSeq to 0, and stores it, updating
+	// *in. It returns ErrConflict if the slug or the agent token hash is
+	// already used by another inbox.
 	CreateInbox(ctx context.Context, in *Inbox) error
 
 	// UpdateInbox replaces the mutable fields of an existing inbox: Name,
 	// Verifier, VerifierConfig, VerifierSecret, OnVerifyFail, AgentTokenHash,
 	// MaxBodyBytes, RetentionDays, RetentionMaxCount, EventTypePointer, and
 	// Disabled. ID, Slug, LastSeq, and CreatedAt are never changed, and an
-	// update never disturbs sequence assignment for concurrent Appends. It
-	// refreshes UpdatedAt and *in, and returns ErrNotFound if the inbox is gone.
+	// update never disturbs sequence assignment for concurrent Appends.
+	//
+	// It is a compare-and-swap on Version: if in.Version is not the stored
+	// version, nothing changes and the error wraps ErrConflict, so two admins
+	// (or a PATCH racing a token rotation) cannot silently overwrite each
+	// other. Callers re-read and retry. On success the stored Version is
+	// incremented and *in is refreshed. It returns ErrConflict if the new
+	// agent token hash is already used by another inbox, and ErrNotFound if
+	// the inbox is gone.
 	UpdateInbox(ctx context.Context, in *Inbox) error
 
 	// DeleteInbox removes the inbox and all of its messages.
@@ -82,12 +117,23 @@ type Store interface {
 
 	GetInbox(ctx context.Context, id ID) (*Inbox, error)
 	GetInboxBySlug(ctx context.Context, slug string) (*Inbox, error)
+	// GetInboxByTokenHash finds the inbox whose agent token hashes to hash, or
+	// returns ErrNotFound. It must be an indexed lookup, not a scan.
+	GetInboxByTokenHash(ctx context.Context, hash []byte) (*Inbox, error)
 	ListInboxes(ctx context.Context, p ListParams) ([]*Inbox, error)
 
-	// Prune applies every inbox's retention policy as of now: it deletes
-	// messages older than RetentionDays and, beyond RetentionMaxCount, the
-	// oldest messages. It returns the number of messages deleted.
+	// Prune applies every inbox's retention policy as of now. A message is
+	// deleted if either rule selects it: it is strictly older than
+	// RetentionDays*24h before now, or it is not among the newest
+	// RetentionMaxCount messages by Seq. Because ReceivedAt never decreases
+	// with Seq, what is deleted is always a prefix of an inbox's messages.
+	// Prune works in bounded batches. It returns the number of messages
+	// deleted, and if ctx is cancelled partway, the count so far together
+	// with the error. Pruning is idempotent.
 	Prune(ctx context.Context, now time.Time) (deleted int64, err error)
+
+	// Ping verifies the Store is reachable and usable, for readiness checks.
+	Ping(ctx context.Context) error
 
 	// Close releases resources. The Store must not be used afterward.
 	Close() error
@@ -100,14 +146,19 @@ type Store interface {
 type Notifier interface {
 	// Publish signals that the inbox now has a message at seq. It never blocks
 	// the caller and must be called only after the message is committed.
-	// Delivery is at-most-once; implementations may drop signals.
+	// An in-process notifier must not drop signals. A distributed notifier may
+	// (delivery is at-most-once), and must then be deployed with a positive
+	// SSE_RECHECK_INTERVAL so subscribers re-read the Store periodically.
 	Publish(ctx context.Context, inboxID ID, seq int64)
 
 	// Subscribe returns a channel that receives a signal whenever the inbox may
 	// have new messages, and a function that cancels the subscription. Signals
 	// coalesce: if several arrive before the receiver reads, it sees one. The
 	// channel is never closed. cancel is idempotent, and cancelling ctx also
-	// ends the subscription. Both release all resources held for it.
+	// ends the subscription. Both release all resources held for it. An
+	// implementation that cannot subscribe (for example its backend is down)
+	// returns a channel that never signals and logs the failure, so callers
+	// degrade to periodic re-reads.
 	Subscribe(ctx context.Context, inboxID ID) (signal <-chan struct{}, cancel func())
 }
 
@@ -122,7 +173,7 @@ type Authenticator interface {
 type Principal interface {
 	// CanReadInbox reports whether the caller may read in's messages. Callers
 	// answer a false result with 404, not 403, so a credential for one inbox
-	// never reveals whether another exists.
+	// never reveals whether another exists. A disabled inbox stays readable.
 	CanReadInbox(in *Inbox) bool
 	// CanAdmin reports whether the caller may use the admin API.
 	CanAdmin() bool
@@ -137,8 +188,12 @@ type Hooks interface {
 	// treated as an internal failure.
 	BeforeIngest(ctx context.Context, in *Inbox, size int64) error
 
-	// AfterIngest runs after a message is committed. It must not block.
-	AfterIngest(ctx context.Context, in *Inbox, m *Message)
+	// AfterIngest runs after a delivery is committed or recognized as a
+	// duplicate. created is false for a duplicate, so a metering hook can
+	// avoid double counting. It must not block. The ctx may be cancelled as
+	// soon as the HTTP response is sent; work that outlives the call must use
+	// context.WithoutCancel.
+	AfterIngest(ctx context.Context, in *Inbox, m *Message, created bool)
 }
 
 // SecretBox seals secrets for storage at rest.

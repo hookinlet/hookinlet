@@ -5,6 +5,7 @@ package inbox
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -17,7 +18,11 @@ var AlwaysRedactedHeaders = []string{"Authorization", "Cookie", "Proxy-Authoriza
 
 // RedactHeaders returns a copy of h in canonical header form without the
 // always-redacted headers and without any header named in extra. Names are
-// matched case-insensitively. h is not modified.
+// matched case-insensitively. h is not modified. The result is never nil.
+//
+// If several keys of h canonicalize to the same name, their values are merged
+// in the order of the original keys sorted ascending, so the result is
+// deterministic.
 func RedactHeaders(h http.Header, extra ...string) http.Header {
 	drop := make(map[string]struct{}, len(AlwaysRedactedHeaders)+len(extra))
 	for _, name := range AlwaysRedactedHeaders {
@@ -28,13 +33,18 @@ func RedactHeaders(h http.Header, extra ...string) http.Header {
 			drop[http.CanonicalHeaderKey(name)] = struct{}{}
 		}
 	}
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
 	out := make(http.Header, len(h))
-	for k, vs := range h {
+	for _, k := range keys {
 		ck := http.CanonicalHeaderKey(k)
 		if _, ok := drop[ck]; ok {
 			continue
 		}
-		out[ck] = append(out[ck], vs...)
+		out[ck] = append(out[ck], h[k]...)
 	}
 	return out
 }
