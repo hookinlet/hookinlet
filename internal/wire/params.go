@@ -41,6 +41,10 @@ type PageRequest struct {
 	Limit int
 	// Summary asks for messages without bodies.
 	Summary bool
+	// Budget caps the encoded size of one page. Zero means PageBudget. A
+	// stream uses a smaller one, so replaying a large backlog never builds a
+	// huge page in memory.
+	Budget int64
 }
 
 var knownParams = map[string]bool{

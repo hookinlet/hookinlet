@@ -31,6 +31,16 @@ type Page struct {
 	Messages  []Message `json:"messages"`
 	Next      *string   `json:"next"`
 	LatestSeq int64     `json:"latest_seq"`
+
+	// Cursor is the seq to ask for messages after to continue an ascending read.
+	// It is the last message returned, except that when Complete it may jump
+	// ahead to LatestSeq: nothing matching lies in between, so there is no need
+	// to scan those rows again. Not part of the response.
+	Cursor int64 `json:"-"`
+	// Complete reports, for an ascending read, that nothing further matches as of
+	// LatestSeq: the page was not full and was not cut short. Not part of the
+	// response.
+	Complete bool `json:"-"`
 }
 
 // FetchPage runs the request against the Store and assembles the response.
@@ -51,10 +61,20 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 		return nil, err
 	}
 
+	budget := req.Budget
+	if budget <= 0 {
+		budget = PageBudget
+	}
 	page := &Page{Messages: make([]Message, 0, len(res.Messages)), LatestSeq: res.LatestSeq}
 	kept := make([]*inbox.Message, 0, len(res.Messages))
 	var used int64
+	cut := false
+	examined := int64(0) // the last seq the query returned, whether or not it made the page
+	if q.After != nil {
+		examined = *q.After
+	}
 	for _, m := range res.Messages {
+		examined = m.Seq
 		if !req.Summary && m.Body == nil {
 			full, err := st.Get(ctx, in.ID, m.Seq)
 			if errors.Is(err, inbox.ErrNotFound) {
@@ -67,7 +87,8 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 		}
 		enc := FromStored(m, in.Slug, in.Verifier, !req.Summary)
 		cost := enc.encodedSize()
-		if len(page.Messages) > 0 && used+cost > PageBudget {
+		if len(page.Messages) > 0 && used+cost > budget {
+			cut = true
 			break // the next link picks up here
 		}
 		used += cost
@@ -76,6 +97,23 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 	}
 	if next := req.NextLink(in.Slug, kept); next != "" {
 		page.Next = &next
+	}
+
+	// Where an ascending read should continue. If the store returned fewer rows
+	// than asked for, it returned everything that matched up to LatestSeq (both
+	// come from one snapshot), so the cursor can safely jump there.
+	if q.Ascending() {
+		switch {
+		case !cut && len(res.Messages) < q.EffectiveLimit():
+			page.Complete = true
+			page.Cursor = max(examined, res.LatestSeq)
+		case cut:
+			// The messages after the last one kept were not delivered.
+			page.Cursor = kept[len(kept)-1].Seq
+		default:
+			// Everything the query returned was either delivered or pruned since.
+			page.Cursor = examined
+		}
 	}
 	return page, nil
 }
