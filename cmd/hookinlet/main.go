@@ -18,6 +18,7 @@ import (
 
 	"github.com/hookinlet/hookinlet/internal/config"
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
+	"github.com/hookinlet/hookinlet/pkg/notify/local"
 	"github.com/hookinlet/hookinlet/pkg/secretbox"
 	"github.com/hookinlet/hookinlet/pkg/server"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
@@ -128,13 +129,17 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		return nil, nil, err
 	}
 	srv, err := server.New(server.Options{
-		Addr:            cfg.ListenAddr,
-		Logger:          log,
-		ShutdownTimeout: cfg.ShutdownTimeout,
-		Store:           store,
-		SecretBox:       box,
-		Authenticator:   token.NewAuthenticator(store, cfg.AdminToken.Reveal()),
-		TrustedProxies:  cfg.TrustedProxies,
+		Addr:               cfg.ListenAddr,
+		Logger:             log,
+		ShutdownTimeout:    cfg.ShutdownTimeout,
+		Store:              store,
+		SecretBox:          box,
+		Authenticator:      token.NewAuthenticator(store, cfg.AdminToken.Reveal()),
+		Notifier:           local.New(),
+		MaxStreams:         cfg.MaxStreams,
+		SSEHeartbeat:       cfg.SSEHeartbeat,
+		SSERecheckInterval: cfg.SSERecheckInterval,
+		TrustedProxies:     cfg.TrustedProxies,
 	})
 	if err != nil {
 		closeStore()

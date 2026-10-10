@@ -65,6 +65,7 @@ type Config struct {
 	TrustedProxies     []netip.Prefix
 	LogLevel           slog.Level
 	LogFormat          string
+	MaxStreams         int
 	SSEHeartbeat       time.Duration
 	SSERecheckInterval time.Duration
 	MCPEnabled         bool
@@ -84,6 +85,7 @@ func (c *Config) LogValue() slog.Value {
 		slog.Int("trusted_proxies", len(c.TrustedProxies)),
 		slog.String("log_level", c.LogLevel.String()),
 		slog.String("log_format", c.LogFormat),
+		slog.Int("max_streams", c.MaxStreams),
 		slog.Duration("sse_heartbeat", c.SSEHeartbeat),
 		slog.Duration("sse_recheck_interval", c.SSERecheckInterval),
 		slog.Bool("mcp_enabled", c.MCPEnabled),
@@ -109,6 +111,7 @@ var specs = []spec{
 	{name: "trusted-proxies", usage: "comma-separated CIDRs whose X-Forwarded-For header is honored"},
 	{name: "log-level", def: "info", usage: "log level: debug, info, warn, error"},
 	{name: "log-format", def: "json", usage: "log format: json or text"},
+	{name: "max-streams", def: "1000", usage: "most SSE streams open at once; further ones get 503"},
 	{name: "sse-heartbeat", def: "15s", usage: "interval between SSE heartbeat comments"},
 	{name: "sse-recheck-interval", def: "0", usage: "re-read the store on this interval even without a notifier signal; 0 disables"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
@@ -322,6 +325,9 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 	}
 	if c.MCPEnabled, err = strconv.ParseBool(vals["mcp-enabled"]); err != nil {
 		collect(fieldErr("mcp-enabled", "must be true or false"))
+	}
+	if c.MaxStreams, err = strconv.Atoi(vals["max-streams"]); err != nil || c.MaxStreams < 1 {
+		collect(fieldErr("max-streams", "must be a positive integer"))
 	}
 	if c.MCPInlineBodyBytes, err = strconv.Atoi(vals["mcp-inline-body-bytes"]); err != nil || c.MCPInlineBodyBytes <= 0 {
 		collect(fieldErr("mcp-inline-body-bytes", "must be a positive integer"))
