@@ -13,6 +13,7 @@ import (
 
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
+	"github.com/hookinlet/hookinlet/pkg/inboxtest"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
 )
 
@@ -48,6 +49,21 @@ func newFixture(t *testing.T, admin string) *fixture {
 	f.a, f.tokenA = mk("inbox-a")
 	f.b, f.tokenB = mk("inbox-b")
 	return f
+}
+
+func TestConformance(t *testing.T) {
+	inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
+		f := newFixture(t, adminToken)
+		return inboxtest.AuthFixture{
+			Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, AdminToken: adminToken,
+		}
+	})
+	t.Run("without an admin token", func(t *testing.T) {
+		inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
+			f := newFixture(t, "")
+			return inboxtest.AuthFixture{Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB}
+		})
+	})
 }
 
 func req(t *testing.T, headers ...string) *http.Request {

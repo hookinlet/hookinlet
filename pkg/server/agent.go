@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -70,13 +71,19 @@ func (s *Server) agent(h agentHandler) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "not_found", "not found")
 			return
 		}
+		// Only authenticated, authorized requests take a slot, so anonymous
+		// traffic cannot starve real readers.
+		release, ok := s.acquireRead(w, r)
+		if !ok {
+			return
+		}
+		defer release()
 		h(w, r, in)
 	}
 }
 
 func (s *Server) handleInboxInfo(w http.ResponseWriter, r *http.Request, in *inbox.Inbox) {
-	if len(r.URL.Query()) > 0 {
-		writeParamError(w, &wire.ParamError{Param: firstKey(r), Reason: "unknown parameter"})
+	if !noParams(w, r) {
 		return
 	}
 	info, err := wire.FetchInfo(r.Context(), s.opts.Store, in)
@@ -88,7 +95,12 @@ func (s *Server) handleInboxInfo(w http.ResponseWriter, r *http.Request, in *inb
 }
 
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, in *inbox.Inbox) {
-	req, err := wire.ParseMessages(r.URL.Query())
+	values, err := wire.QueryValues(r.URL.RawQuery)
+	if err != nil {
+		writeParamError(w, err)
+		return
+	}
+	req, err := wire.ParseMessages(values)
 	if err != nil {
 		writeParamError(w, err)
 		return
@@ -102,8 +114,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request, in *inbo
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request, in *inbox.Inbox) {
-	if len(r.URL.Query()) > 0 {
-		writeParamError(w, &wire.ParamError{Param: firstKey(r), Reason: "unknown parameter"})
+	if !noParams(w, r) {
 		return
 	}
 	m, ok := s.loadMessage(w, r, in)
@@ -122,8 +133,7 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request, in *inbox
 // script in HTML or SVG that does get rendered, and attachment tells it to save
 // the file instead. None of this changes the body or the Content-Type.
 func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request, in *inbox.Inbox) {
-	if len(r.URL.Query()) > 0 {
-		writeParamError(w, &wire.ParamError{Param: firstKey(r), Reason: "unknown parameter"})
+	if !noParams(w, r) {
 		return
 	}
 	m, ok := s.loadMessage(w, r, in)
@@ -138,6 +148,7 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request, in *inbox.Inb
 	}
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	h.Set("Content-Disposition", "attachment")
 	h.Set("Content-Length", strconv.Itoa(len(m.Body)))
 	w.WriteHeader(http.StatusOK)
@@ -184,11 +195,40 @@ func writeParamError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 }
 
-func firstKey(r *http.Request) string {
-	for k := range r.URL.Query() {
-		return k
+// noParams answers a request that carries any query parameter to an endpoint
+// that takes none, and reports whether the handler may go on.
+func noParams(w http.ResponseWriter, r *http.Request) bool {
+	values, err := wire.QueryValues(r.URL.RawQuery)
+	if err == nil {
+		err = wire.RejectParams(values)
 	}
-	return ""
+	if err != nil {
+		writeParamError(w, err)
+		return false
+	}
+	return true
+}
+
+// acquireRead waits for one of the limited read slots. It reports false after
+// answering, or after giving up silently because the client has gone away.
+func (s *Server) acquireRead(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
+	select {
+	case s.reads <- struct{}{}:
+		return func() { <-s.reads }, true
+	default:
+	}
+	wait := time.NewTimer(s.opts.ReadWaitTimeout)
+	defer wait.Stop()
+	select {
+	case s.reads <- struct{}{}:
+		return func() { <-s.reads }, true
+	case <-r.Context().Done():
+		return nil, false
+	case <-wait.C:
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusServiceUnavailable, "overloaded", "the server is busy; retry shortly")
+		return nil, false
+	}
 }
 
 // writeWire writes v as JSON using the shared encoder. It builds the whole body
