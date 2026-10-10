@@ -676,7 +676,7 @@ func TestShutdownLetsAnInFlightDeliveryFinish(t *testing.T) {
 // ---- limits and resource handling ----
 
 func TestStreamLimitAndRelease(t *testing.T) {
-	ae, base, n := streamEnv(t, func(o *Options) { o.MaxStreams = 2 })
+	ae, base, n := streamEnv(t, func(o *Options) { o.MaxStreams = 2; o.MaxStreamsPerInbox = 2 })
 	c1 := openStream(t, ae.streamURL(base, "agent-a", ""), ae.tokenA, nil)
 	c2 := openStream(t, ae.streamURL(base, "agent-a", ""), ae.tokenA, nil)
 	if c1.status != 200 || c2.status != 200 {

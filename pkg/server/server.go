@@ -75,6 +75,16 @@ type Options struct {
 	ReadWaitTimeout time.Duration
 	// MaxStreams bounds how many SSE streams are open at once. Defaults to 1000.
 	MaxStreams int
+	// MaxStreamsPerInbox bounds how many of them may follow one inbox, so that a
+	// single token cannot use every slot. Defaults to half of MaxStreams, and at
+	// least 1: one inbox can be followed widely, but never to the exclusion of
+	// all the others.
+	MaxStreamsPerInbox int
+	// StreamRevalidateInterval is how often an open stream is checked against
+	// the Authenticator and the Store again. A stream authorized once would
+	// otherwise keep running after its token was rotated or its inbox deleted.
+	// Defaults to 30s.
+	StreamRevalidateInterval time.Duration
 	// SSEHeartbeat is how long a stream may be silent before a ping comment is
 	// sent. Defaults to 15s.
 	SSEHeartbeat time.Duration
@@ -94,9 +104,16 @@ type Server struct {
 	http    *http.Server
 	reads   chan struct{} // a slot per read request being served
 
-	streams   chan struct{} // a slot per open SSE stream
-	closing   chan struct{} // closed when the server starts shutting down
-	closeOnce sync.Once
+	streams      chan struct{} // a slot per open SSE stream
+	streamMu     sync.Mutex
+	streamCounts map[inbox.ID]int // open streams per inbox
+
+	// closeCtx is cancelled when the server starts shutting down. Streams watch
+	// it, and a write that is blocked on a client that stopped reading is
+	// aborted by it, so shutdown never waits on such a client.
+	closeCtx    context.Context
+	closeCancel context.CancelFunc
+	closing     <-chan struct{} // closeCtx.Done()
 }
 
 // New builds a Server. It performs no I/O and makes no network calls.
@@ -140,6 +157,12 @@ func New(opts Options) (*Server, error) {
 	if opts.MaxStreams <= 0 {
 		opts.MaxStreams = 1000
 	}
+	if opts.MaxStreamsPerInbox <= 0 {
+		opts.MaxStreamsPerInbox = max(1, opts.MaxStreams/2)
+	}
+	if opts.StreamRevalidateInterval <= 0 {
+		opts.StreamRevalidateInterval = 30 * time.Second
+	}
 	if opts.SSEHeartbeat <= 0 {
 		opts.SSEHeartbeat = 15 * time.Second
 	}
@@ -147,12 +170,16 @@ func New(opts Options) (*Server, error) {
 		opts.SSERecheckInterval = 0
 	}
 
+	closeCtx, closeCancel := context.WithCancel(context.Background())
 	s := &Server{
-		opts:    opts,
-		log:     opts.Logger,
-		reads:   make(chan struct{}, opts.MaxConcurrentReads),
-		streams: make(chan struct{}, opts.MaxStreams),
-		closing: make(chan struct{}),
+		opts:         opts,
+		log:          opts.Logger,
+		reads:        make(chan struct{}, opts.MaxConcurrentReads),
+		streams:      make(chan struct{}, opts.MaxStreams),
+		streamCounts: make(map[inbox.ID]int),
+		closeCtx:     closeCtx,
+		closeCancel:  closeCancel,
+		closing:      closeCtx.Done(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
@@ -237,7 +264,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // closeStreams tells every open stream to finish. It is safe to call repeatedly.
-func (s *Server) closeStreams() { s.closeOnce.Do(func() { close(s.closing) }) }
+func (s *Server) closeStreams() { s.closeCancel() }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

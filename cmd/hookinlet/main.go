@@ -137,6 +137,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		Authenticator:      token.NewAuthenticator(store, cfg.AdminToken.Reveal()),
 		Notifier:           local.New(),
 		MaxStreams:         cfg.MaxStreams,
+		MaxStreamsPerInbox: cfg.MaxStreamsPerInbox,
 		SSEHeartbeat:       cfg.SSEHeartbeat,
 		SSERecheckInterval: cfg.SSERecheckInterval,
 		TrustedProxies:     cfg.TrustedProxies,

@@ -4,9 +4,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -16,20 +19,31 @@ import (
 
 const (
 	// streamPageLimit and streamPageBudget size the reads a stream makes while
-	// catching up. They are smaller than the REST API's, because a client
-	// reconnecting to a long backlog should receive it in steady pieces, not make
-	// the server build one huge page.
+	// catching up. The budget is small on purpose: a page is held in memory while
+	// it is written to a client that may be slow, and every open stream holds one.
+	// A message larger than the budget still goes out, as a page of its own.
 	streamPageLimit  = 100
-	streamPageBudget = 2 << 20
+	streamPageBudget = 256 << 10
 
 	// streamWriteTimeout is how long one write to a client may take. A client that
-	// stops reading is disconnected rather than allowed to hold a goroutine for
-	// good.
+	// stops reading is disconnected rather than allowed to hold a goroutine and a
+	// page of memory for good.
 	streamWriteTimeout = 30 * time.Second
 )
 
-// errStreamClosed is how a stream learns that the server is shutting down.
-var errStreamClosed = errors.New("the server is shutting down")
+var (
+	// errStreamClosed is how a stream learns that the server is shutting down.
+	errStreamClosed = errors.New("the server is shutting down")
+	// errStreamRevoked means the stream's credential or inbox is no longer valid.
+	errStreamRevoked = errors.New("the stream is no longer authorized")
+)
+
+// clientGoneError wraps a failure to write to the client, which is the client's
+// doing (it left, or stopped reading) and not a fault on our side.
+type clientGoneError struct{ err error }
+
+func (e *clientGoneError) Error() string { return "client gone: " + e.err.Error() }
+func (e *clientGoneError) Unwrap() error { return e.err }
 
 // handleStream serves GET /v1/inboxes/{slug}/stream as Server-Sent Events.
 //
@@ -62,37 +76,40 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Streams have their own limit. They must not use the read slots, which are
+	// Streams have their own limits. They must not use the read slots, which are
 	// held for the length of a request and would cap the server at a handful of
 	// open streams.
-	select {
-	case s.streams <- struct{}{}:
-		defer func() { <-s.streams }()
-	default:
-		w.Header().Set("Retry-After", "5")
-		writeError(w, http.StatusServiceUnavailable, "overloaded", "too many streams are open; retry shortly")
+	release, ok := s.acquireStream(w, in.ID)
+	if !ok {
 		return
 	}
+	defer release()
 
 	ctx := r.Context()
+	rc := http.NewResponseController(w)
+
+	// If the server starts shutting down while a write is blocked on a client that
+	// has stopped reading, abort that write now. Waiting out the write timeout
+	// would hold shutdown past its deadline, and the fallback for that closes
+	// connections that have deliveries mid-store.
+	stopAbort := context.AfterFunc(s.closeCtx, func() { _ = rc.SetWriteDeadline(time.Now()) })
+	defer stopAbort()
+
 	// Subscribe before reading anything. A message committed after this point
 	// signals us; one committed before it is found by the first read.
 	signal, cancel := s.opts.Notifier.Subscribe(ctx, in.ID)
 	defer cancel()
 
-	cursor := int64(0)
+	latest, err := s.opts.Store.LatestSeq(ctx, in.ID)
+	if err != nil {
+		s.readError(w, r, "stream start", err)
+		return
+	}
+	cursor, ahead := latest, req.After != nil && *req.After > latest
 	if req.After != nil {
 		cursor = *req.After
-	} else {
-		latest, err := s.opts.Store.LatestSeq(ctx, in.ID)
-		if err != nil {
-			s.readError(w, r, "stream start", err)
-			return
-		}
-		cursor = latest
 	}
 
-	rc := http.NewResponseController(w)
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("X-Accel-Buffering", "no") // tell nginx-style proxies not to hold events back
@@ -100,25 +117,100 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if err := s.writeStream(w, rc, []byte(wire.Retry)); err != nil {
 		return
 	}
+	if ahead {
+		// Typical after an inbox is recreated: the client remembers a position the
+		// new inbox has not reached. Nothing is wrong, but nothing will arrive until
+		// the sequence catches up, which looks exactly like a hung stream.
+		note := fmt.Sprintf(": the requested position (%d) is ahead of the newest message (%d); waiting for new messages\n\n", cursor, latest)
+		if err := s.writeStream(w, rc, []byte(note)); err != nil {
+			return
+		}
+	}
 
 	s.log.LogAttrs(ctx, slog.LevelDebug, "stream opened", slog.String("slug", in.Slug), slog.Int64("from", cursor))
-	err = s.follow(ctx, w, rc, in, req, cursor, signal)
+	err = s.follow(ctx, w, rc, in, req, cursor, signal, s.stillAllowed(r, in.ID))
+
+	var gone *clientGoneError
 	switch {
 	case err == nil, errors.Is(err, errStreamClosed), errors.Is(err, context.Canceled):
 		s.log.LogAttrs(ctx, slog.LevelDebug, "stream closed", slog.String("slug", in.Slug))
+	case errors.Is(err, errStreamRevoked):
+		s.log.LogAttrs(ctx, slog.LevelInfo, "stream ended: no longer authorized", slog.String("slug", in.Slug))
 	case errors.Is(err, inbox.ErrNotFound):
 		s.log.LogAttrs(ctx, slog.LevelInfo, "stream ended: the inbox was deleted", slog.String("slug", in.Slug))
+	case errors.As(err, &gone):
+		// The client left or stopped reading.
+		s.log.LogAttrs(ctx, slog.LevelDebug, "stream ended by the client", slog.String("slug", in.Slug), slog.String("err", err.Error()))
 	default:
-		// Most often the client went away mid-write.
-		s.log.LogAttrs(ctx, slog.LevelDebug, "stream ended", slog.String("slug", in.Slug), slog.String("err", err.Error()))
+		s.log.LogAttrs(ctx, slog.LevelError, "stream failed", slog.String("slug", in.Slug), slog.String("err", err.Error()))
 	}
+}
+
+// acquireStream takes a stream slot, both a global one and one of the inbox's
+// share, or answers 503. The per-inbox share keeps one token from using them all.
+func (s *Server) acquireStream(w http.ResponseWriter, id inbox.ID) (release func(), ok bool) {
+	s.streamMu.Lock()
+	defer s.streamMu.Unlock()
+	refuse := func(msg string) (func(), bool) {
+		w.Header().Set("Retry-After", "5")
+		writeError(w, http.StatusServiceUnavailable, "overloaded", msg)
+		return nil, false
+	}
+	if s.streamCounts[id] >= s.opts.MaxStreamsPerInbox {
+		return refuse("too many streams are open on this inbox; retry shortly")
+	}
+	select {
+	case s.streams <- struct{}{}:
+	default:
+		return refuse("too many streams are open; retry shortly")
+	}
+	s.streamCounts[id]++
+	return func() {
+		s.streamMu.Lock()
+		defer s.streamMu.Unlock()
+		if s.streamCounts[id]--; s.streamCounts[id] <= 0 {
+			delete(s.streamCounts, id)
+		}
+		<-s.streams
+	}, true
+}
+
+// stillAllowed returns a check, run periodically, that a stream's credential is
+// still valid and its inbox still exists and is readable. It reports false only
+// when it has been told no. If the answer cannot be had (the Store is having a
+// moment) it reports true with the error: not being able to check is not the same
+// as being refused, and a passing database error must not disconnect every agent.
+func (s *Server) stillAllowed(r *http.Request, id inbox.ID) func(ctx context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
+		principal, err := s.opts.Authenticator.Authenticate(r.WithContext(ctx))
+		switch {
+		case errors.Is(err, inbox.ErrUnauthenticated):
+			return false, nil
+		case err != nil:
+			return true, err
+		}
+		current, err := s.opts.Store.GetInbox(ctx, id)
+		switch {
+		case errors.Is(err, inbox.ErrNotFound):
+			return false, nil
+		case err != nil:
+			return true, err
+		}
+		return principal.CanReadInbox(current), nil
+	}
+}
+
+// jitter spreads d by up to 10% either way, so that streams opened together do
+// not all come due at the same instant forever.
+func jitter(d time.Duration) time.Duration {
+	return d - d/10 + rand.N(d/5+1) //nolint:gosec // timing noise, not security
 }
 
 // follow delivers events until the client leaves, the server shuts down, or
 // something fails. Each trip around the loop reads everything after the cursor,
 // then waits to be told there may be more.
 func (s *Server) follow(ctx context.Context, w http.ResponseWriter, rc *http.ResponseController, in *inbox.Inbox,
-	req wire.StreamRequest, cursor int64, signal <-chan struct{}) error {
+	req wire.StreamRequest, cursor int64, signal <-chan struct{}, stillAllowed func(context.Context) (bool, error)) error {
 
 	heartbeat := time.NewTimer(s.opts.SSEHeartbeat)
 	defer heartbeat.Stop()
@@ -131,12 +223,18 @@ func (s *Server) follow(ctx context.Context, w http.ResponseWriter, rc *http.Res
 		}
 		heartbeat.Reset(s.opts.SSEHeartbeat)
 	}
+
+	// Timers, not tickers, so each interval can be jittered and the first one
+	// starts at a random point in it.
 	var recheck <-chan time.Time
-	if s.opts.SSERecheckInterval > 0 {
-		ticker := time.NewTicker(s.opts.SSERecheckInterval)
-		defer ticker.Stop()
-		recheck = ticker.C
+	var recheckTimer *time.Timer
+	if iv := s.opts.SSERecheckInterval; iv > 0 {
+		recheckTimer = time.NewTimer(rand.N(iv) + 1) //nolint:gosec // timing noise, not security
+		defer recheckTimer.Stop()
+		recheck = recheckTimer.C
 	}
+	revalidateTimer := time.NewTimer(jitter(s.opts.StreamRevalidateInterval))
+	defer revalidateTimer.Stop()
 
 	read := true
 	for {
@@ -155,6 +253,18 @@ func (s *Server) follow(ctx context.Context, w http.ResponseWriter, rc *http.Res
 		select {
 		case <-signal:
 		case <-recheck:
+			recheckTimer.Reset(jitter(s.opts.SSERecheckInterval))
+		case <-revalidateTimer.C:
+			revalidateTimer.Reset(jitter(s.opts.StreamRevalidateInterval))
+			read = false
+			ok, err := stillAllowed(ctx)
+			if err != nil {
+				s.log.LogAttrs(ctx, slog.LevelWarn, "could not recheck a stream's authorization; keeping it open",
+					slog.String("slug", in.Slug), slog.String("err", err.Error()))
+			}
+			if !ok {
+				return errStreamRevoked
+			}
 		case <-heartbeat.C:
 			if err := s.writeStream(w, rc, []byte(wire.Ping)); err != nil {
 				return err
@@ -179,6 +289,10 @@ func (s *Server) drain(ctx context.Context, w http.ResponseWriter, rc *http.Resp
 		if err != nil {
 			return sent, cursor, err
 		}
+
+		// Encode the page and let go of the messages: only the encoded bytes are
+		// held while writing, which may take a while if the client is slow.
+		var frames bytes.Buffer
 		for _, m := range page.Messages {
 			frame, err := wire.Event(m)
 			if err != nil {
@@ -187,13 +301,20 @@ func (s *Server) drain(ctx context.Context, w http.ResponseWriter, rc *http.Resp
 				s.log.LogAttrs(ctx, slog.LevelError, "event not sent", slog.String("slug", in.Slug), slog.Int64("seq", m.Seq), slog.String("err", err.Error()))
 				continue
 			}
-			if err := s.writeStream(w, rc, frame); err != nil {
+			frames.Write(frame)
+		}
+		// Assign, don't declare: the cursor must carry over to the next page.
+		cursor = page.Cursor
+		complete := page.Complete
+		page.Messages = nil
+
+		if frames.Len() > 0 {
+			if err := s.writeStream(w, rc, frames.Bytes()); err != nil {
 				return sent, cursor, err
 			}
 			sent = true
 		}
-		cursor = page.Cursor
-		if page.Complete {
+		if complete {
 			return sent, cursor, nil
 		}
 		// Replaying a long backlog: stay responsive to shutdown and disconnects.
@@ -232,15 +353,22 @@ func (s *Server) fetchForStream(ctx context.Context, in *inbox.Inbox, req wire.S
 }
 
 // writeStream writes and flushes one chunk, giving the client a bounded time to
-// accept it.
+// accept it. A failure is the client's: it left or stopped reading.
 func (s *Server) writeStream(w http.ResponseWriter, rc *http.ResponseController, data []byte) error {
 	// Servers that cannot set a deadline (a test recorder) just do without one.
 	_ = rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
+	// Checked after the deadline is set: shutdown sets the deadline to "now", and
+	// if that lands before ours it also closes this channel, so we see it here.
+	select {
+	case <-s.closing:
+		return errStreamClosed
+	default:
+	}
 	if _, err := w.Write(data); err != nil {
-		return err
+		return &clientGoneError{err}
 	}
 	if err := rc.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		return err
+		return &clientGoneError{err}
 	}
 	return nil
 }
