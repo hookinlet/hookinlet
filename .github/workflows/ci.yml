@@ -40,15 +40,5 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
         run: docker build -t hookinlet:ci .
-      - name: Image runs and serves /healthz
-        run: |
-          docker run -d --name hi -p 8080:8080 \
-            -e HOOKINLET_ADMIN_TOKEN=ci-admin-token \
-            -e HOOKINLET_MASTER_KEY="$(openssl rand -base64 32)" \
-            hookinlet:ci
-          for i in $(seq 1 20); do
-            curl -fsS http://127.0.0.1:8080/healthz && exit 0
-            sleep 0.5
-          done
-          docker logs hi
-          exit 1
+      - name: Smoke test the image
+        run: scripts/smoke-docker.sh hookinlet:ci
