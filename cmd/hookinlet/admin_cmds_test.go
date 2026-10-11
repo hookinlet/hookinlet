@@ -559,3 +559,33 @@ func TestBackupRefusesBeforeDownloadingAndNeverClobbers(t *testing.T) {
 		t.Errorf("--force did not replace: %q", b)
 	}
 }
+
+func TestRenewEpochs(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{"HOOKINLET_DATA_DIR": dir}
+	if code, _, e := runCmd(t, env, "inbox", "create", "--slug", "epoch-one", "--verifier", "none"); code != 0 {
+		t.Fatal(e)
+	}
+	read := func() string {
+		s, err := sqlite.Open(t.Context(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = s.Close() }()
+		in, err := s.GetInboxBySlug(t.Context(), "epoch-one")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return in.Epoch
+	}
+	before := read()
+	if code, out, e := runCmd(t, env, "renew-epochs"); code != 0 || !strings.Contains(out, "new epoch") {
+		t.Fatalf("renew-epochs: %d %q %q", code, out, e)
+	}
+	if after := read(); after == "" || after == before {
+		t.Errorf("epoch %q after renewing, was %q", after, before)
+	}
+	if code, _, e := runCmd(t, map[string]string{"HOOKINLET_DATA_DIR": filepath.Join(dir, "typo")}, "renew-epochs"); code != exitRuntime || !strings.Contains(e, "no database") {
+		t.Errorf("a mistyped directory: %d %q", code, e)
+	}
+}

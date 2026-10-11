@@ -41,6 +41,8 @@ func (s *Server) classifyRead(ctx context.Context, what string, err error) readF
 		return readFail{http.StatusBadRequest, "invalid_parameter", err.Error()}
 	case errors.Is(err, inbox.ErrNotFound):
 		return readFail{http.StatusNotFound, "not_found", "not found"}
+	case errors.Is(err, inbox.ErrEpochChanged):
+		return readFail{http.StatusConflict, "epoch_changed", "the cursor is from an earlier epoch of this inbox; start again from the inbox's current epoch"}
 	}
 	level := slog.LevelError
 	if errors.Is(err, context.Canceled) {
@@ -55,6 +57,12 @@ func (rf readFail) badRequest(ctx context.Context) api.BadRequestJSONResponse {
 	return badRequest(ctx, fail{status: rf.status, code: rf.code, msg: rf.msg})
 }
 
+func (rf readFail) epochChanged(ctx context.Context) api.EpochChangedJSONResponse {
+	var b api.ErrorEpochChanged
+	b.Error.Code, b.Error.Message = api.ErrorEpochChangedErrorCodeEpochChanged, rf.msg
+	return api.EpochChangedJSONResponse{Body: b, Headers: api.EpochChangedResponseHeaders{XRequestId: requestIDOf(ctx)}}
+}
+
 func (rf readFail) notFound(ctx context.Context) api.NotFoundJSONResponse {
 	return notFoundResp(ctx, fail{status: rf.status, code: rf.code, msg: rf.msg})
 }
@@ -63,7 +71,7 @@ func (rf readFail) notFound(ctx context.Context) api.NotFoundJSONResponse {
 // one the document does not have cannot be sent by accident.
 func message(m wire.Message) api.Message {
 	return api.Message{
-		Body: m.Body, BodyBase64: m.BodyBase64, BodyText: m.BodyText, ContentType: m.ContentType,
+		Epoch: m.Epoch, Body: m.Body, BodyBase64: m.BodyBase64, BodyText: m.BodyText, ContentType: m.ContentType,
 		DeliveryId: m.DeliveryID, EventType: m.EventType, Headers: m.Headers, Inbox: m.Inbox,
 		Method: api.MessageMethod(m.Method), Path: m.Path, Query: m.Query, ReceivedAt: m.ReceivedAt,
 		Seq: int(m.Seq), Size: int(m.Size), SourceIp: m.SourceIP, Verified: m.Verified,
@@ -72,7 +80,7 @@ func message(m wire.Message) api.Message {
 }
 
 func page(p *wire.Page) api.MessagePage {
-	out := api.MessagePage{LatestSeq: int(p.LatestSeq), Next: p.Next, Messages: make([]api.Message, len(p.Messages))}
+	out := api.MessagePage{LatestSeq: int(p.LatestSeq), Epoch: p.Epoch, Gap: p.Gap, Next: p.Next, Messages: make([]api.Message, len(p.Messages))}
 	for i, m := range p.Messages {
 		out.Messages[i] = message(m)
 	}
@@ -101,7 +109,7 @@ func (a *readAPI) info(ctx context.Context) (api.InboxInfo, *readFail) {
 		return api.InboxInfo{}, &f
 	}
 	return api.InboxInfo{
-		LatestSeq: int(info.LatestSeq), MessageCount: int(info.MessageCount), Name: info.Name,
+		Epoch: info.Epoch, LatestSeq: int(info.LatestSeq), MessageCount: int(info.MessageCount), Name: info.Name,
 		OldestSeq: int(info.OldestSeq), Slug: info.Slug, Verifier: info.Verifier,
 	}, nil
 }
@@ -190,6 +198,8 @@ func (a *readAPI) ListMessages(ctx context.Context, req api.ListMessagesRequestO
 			return api.ListMessages400JSONResponse{BadRequestJSONResponse: f.badRequest(ctx)}, nil
 		case http.StatusNotFound:
 			return api.ListMessages404JSONResponse{NotFoundJSONResponse: f.notFound(ctx)}, nil
+		case http.StatusConflict:
+			return api.ListMessages409JSONResponse{EpochChangedJSONResponse: f.epochChanged(ctx)}, nil
 		}
 		return api.ListMessages500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 	}
@@ -215,6 +225,8 @@ func (a *readAPI) HeadListMessages(ctx context.Context, req api.HeadListMessages
 			return api.HeadListMessages400Response{Headers: api.HeadListMessages400ResponseHeaders{XRequestId: id}}, nil
 		case http.StatusNotFound:
 			return api.HeadListMessages404Response{Headers: api.HeadListMessages404ResponseHeaders{XRequestId: id}}, nil
+		case http.StatusConflict:
+			return api.HeadListMessages409Response{Headers: api.HeadListMessages409ResponseHeaders{XRequestId: id}}, nil
 		}
 		return api.HeadListMessages500Response{Headers: api.HeadListMessages500ResponseHeaders{XRequestId: id}}, nil
 	}
@@ -226,8 +238,12 @@ func (a *readAPI) HeadListMessages(ctx context.Context, req api.HeadListMessages
 
 // load reads the seq from the path and loads that message. A seq that cannot be a
 // sequence number is simply a message that does not exist.
-func (a *readAPI) load(ctx context.Context) (*inbox.Message, *readFail) {
+func (a *readAPI) load(ctx context.Context, epoch *string) (*inbox.Message, *readFail) {
 	rr := readFrom(ctx)
+	if err := wire.CheckEpoch(rr.in, stringOf(epoch)); err != nil {
+		f := a.s.classifyRead(ctx, "message", err)
+		return nil, &f
+	}
 	raw := rr.r.PathValue("seq")
 	seq, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || seq < 1 || strconv.FormatInt(seq, 10) != raw {
@@ -241,7 +257,7 @@ func (a *readAPI) load(ctx context.Context) (*inbox.Message, *readFail) {
 	return m, nil
 }
 
-func (a *readAPI) GetMessage(ctx context.Context, _ api.GetMessageRequestObject) (api.GetMessageResponseObject, error) {
+func (a *readAPI) GetMessage(ctx context.Context, req api.GetMessageRequestObject) (api.GetMessageResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -252,24 +268,26 @@ func (a *readAPI) GetMessage(ctx context.Context, _ api.GetMessageRequestObject)
 		return api.GetMessage503JSONResponse{OverloadedJSONResponse: *busy}, nil
 	}
 	defer release()
-	m, f := a.load(ctx)
+	m, f := a.load(ctx, req.Params.Epoch)
 	if f != nil {
 		switch f.status {
 		case http.StatusBadRequest:
 			return api.GetMessage400JSONResponse{BadRequestJSONResponse: f.badRequest(ctx)}, nil
 		case http.StatusNotFound:
 			return api.GetMessage404JSONResponse{NotFoundJSONResponse: f.notFound(ctx)}, nil
+		case http.StatusConflict:
+			return api.GetMessage409JSONResponse{EpochChangedJSONResponse: f.epochChanged(ctx)}, nil
 		}
 		return api.GetMessage500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 	}
 	in := readFrom(ctx).in
 	return api.GetMessage200JSONResponse{
-		Body:    message(wire.FromStored(m, in.Slug, in.Verifier, true)),
+		Body:    message(fromStored(m, in)),
 		Headers: api.GetMessage200ResponseHeaders{XRequestId: requestIDOf(ctx)},
 	}, nil
 }
 
-func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageRequestObject) (api.HeadGetMessageResponseObject, error) {
+func (a *readAPI) HeadGetMessage(ctx context.Context, req api.HeadGetMessageRequestObject) (api.HeadGetMessageResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -280,7 +298,7 @@ func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageReques
 		return api.HeadGetMessage503Response{Headers: api.HeadGetMessage503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
 	}
 	defer release()
-	m, f := a.load(ctx)
+	m, f := a.load(ctx, req.Params.Epoch)
 	id := requestIDOf(ctx)
 	if f != nil {
 		switch f.status {
@@ -288,11 +306,13 @@ func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageReques
 			return api.HeadGetMessage400Response{Headers: api.HeadGetMessage400ResponseHeaders{XRequestId: id}}, nil
 		case http.StatusNotFound:
 			return api.HeadGetMessage404Response{Headers: api.HeadGetMessage404ResponseHeaders{XRequestId: id}}, nil
+		case http.StatusConflict:
+			return api.HeadGetMessage409Response{Headers: api.HeadGetMessage409ResponseHeaders{XRequestId: id}}, nil
 		}
 		return api.HeadGetMessage500Response{Headers: api.HeadGetMessage500ResponseHeaders{XRequestId: id}}, nil
 	}
 	rr := readFrom(ctx)
-	head(rr, message(wire.FromStored(m, rr.in.Slug, rr.in.Verifier, true)))
+	head(rr, message(fromStored(m, rr.in)))
 	return api.HeadGetMessage200Response{Headers: api.HeadGetMessage200ResponseHeaders{XRequestId: id}}, nil
 }
 
@@ -306,7 +326,7 @@ func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageReques
 // from guessing a more dangerous type, the sandbox policy neutralizes any script
 // in HTML or SVG that does get rendered, and attachment tells it to save the file
 // instead. None of this changes the body or the Content-Type.
-func (a *readAPI) GetMessageRaw(ctx context.Context, _ api.GetMessageRawRequestObject) (api.GetMessageRawResponseObject, error) {
+func (a *readAPI) GetMessageRaw(ctx context.Context, req api.GetMessageRawRequestObject) (api.GetMessageRawResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -317,13 +337,15 @@ func (a *readAPI) GetMessageRaw(ctx context.Context, _ api.GetMessageRawRequestO
 		return api.GetMessageRaw503JSONResponse{OverloadedJSONResponse: *busy}, nil
 	}
 	defer release()
-	m, f := a.load(ctx)
+	m, f := a.load(ctx, req.Params.Epoch)
 	if f != nil {
 		switch f.status {
 		case http.StatusBadRequest:
 			return api.GetMessageRaw400JSONResponse{BadRequestJSONResponse: f.badRequest(ctx)}, nil
 		case http.StatusNotFound:
 			return api.GetMessageRaw404JSONResponse{NotFoundJSONResponse: f.notFound(ctx)}, nil
+		case http.StatusConflict:
+			return api.GetMessageRaw409JSONResponse{EpochChangedJSONResponse: f.epochChanged(ctx)}, nil
 		}
 		return api.GetMessageRaw500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 	}
@@ -338,7 +360,7 @@ func (a *readAPI) GetMessageRaw(ctx context.Context, _ api.GetMessageRawRequestO
 	}, nil
 }
 
-func (a *readAPI) HeadGetMessageRaw(ctx context.Context, _ api.HeadGetMessageRawRequestObject) (api.HeadGetMessageRawResponseObject, error) {
+func (a *readAPI) HeadGetMessageRaw(ctx context.Context, req api.HeadGetMessageRawRequestObject) (api.HeadGetMessageRawResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -349,7 +371,7 @@ func (a *readAPI) HeadGetMessageRaw(ctx context.Context, _ api.HeadGetMessageRaw
 		return api.HeadGetMessageRaw503Response{Headers: api.HeadGetMessageRaw503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
 	}
 	defer release()
-	m, f := a.load(ctx)
+	m, f := a.load(ctx, req.Params.Epoch)
 	id := requestIDOf(ctx)
 	if f != nil {
 		switch f.status {
@@ -357,6 +379,8 @@ func (a *readAPI) HeadGetMessageRaw(ctx context.Context, _ api.HeadGetMessageRaw
 			return api.HeadGetMessageRaw400Response{Headers: api.HeadGetMessageRaw400ResponseHeaders{XRequestId: id}}, nil
 		case http.StatusNotFound:
 			return api.HeadGetMessageRaw404Response{Headers: api.HeadGetMessageRaw404ResponseHeaders{XRequestId: id}}, nil
+		case http.StatusConflict:
+			return api.HeadGetMessageRaw409Response{Headers: api.HeadGetMessageRaw409ResponseHeaders{XRequestId: id}}, nil
 		}
 		return api.HeadGetMessageRaw500Response{Headers: api.HeadGetMessageRaw500ResponseHeaders{XRequestId: id}}, nil
 	}
@@ -405,13 +429,22 @@ func messagesParams(p api.ListMessagesParams) wire.MessagesParams {
 	return wire.MessagesParams{
 		After: p.After, Before: p.Before, Limit: p.Limit, Types: deref(p.Type), Since: p.Since, Until: p.Until,
 		Verified: p.Verified, DeliveryID: p.DeliveryId, Summary: p.Fields != nil && *p.Fields == api.ListMessagesParamsFields("summary"),
+		Epoch: p.Epoch,
 	}
+}
+
+// fromStored is a stored message of an inbox, with the inbox's epoch on it.
+func fromStored(m *inbox.Message, in *inbox.Inbox) wire.Message {
+	out := wire.FromStored(m, in.Slug, in.Verifier, true)
+	out.Epoch = in.Epoch
+	return out
 }
 
 func headMessagesParams(p api.HeadListMessagesParams) wire.MessagesParams {
 	return wire.MessagesParams{
 		After: p.After, Before: p.Before, Limit: p.Limit, Types: deref(p.Type), Since: p.Since, Until: p.Until,
 		Verified: p.Verified, DeliveryID: p.DeliveryId, Summary: p.Fields != nil && *p.Fields == api.HeadListMessagesParamsFields("summary"),
+		Epoch: p.Epoch,
 	}
 }
 

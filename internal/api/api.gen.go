@@ -93,6 +93,21 @@ func (e ErrorConflictErrorCode) Valid() bool {
 	}
 }
 
+// Defines values for ErrorEpochChangedErrorCode.
+const (
+	ErrorEpochChangedErrorCodeEpochChanged ErrorEpochChangedErrorCode = "epoch_changed"
+)
+
+// Valid indicates whether the value is a known member of the ErrorEpochChangedErrorCode enum.
+func (e ErrorEpochChangedErrorCode) Valid() bool {
+	switch e {
+	case ErrorEpochChangedErrorCodeEpochChanged:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorForbiddenErrorCode.
 const (
 	ErrorForbiddenErrorCodeForbidden ErrorForbiddenErrorCode = "forbidden"
@@ -506,6 +521,20 @@ type ErrorConflict struct {
 // ErrorConflictErrorCode A stable, machine-readable code.
 type ErrorConflictErrorCode string
 
+// ErrorEpochChanged defines model for ErrorEpochChanged.
+type ErrorEpochChanged struct {
+	Error struct {
+		// Code A stable, machine-readable code.
+		Code ErrorEpochChangedErrorCode `json:"code"`
+
+		// Message Safe to show to a person. Never contains a secret, a token, or any part of a request.
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// ErrorEpochChangedErrorCode A stable, machine-readable code.
+type ErrorEpochChangedErrorCode string
+
 // ErrorForbidden defines model for ErrorForbidden.
 type ErrorForbidden struct {
 	Error struct {
@@ -690,6 +719,8 @@ type ErrorVerificationFailedErrorCode string
 
 // InboxInfo defines model for InboxInfo.
 type InboxInfo struct {
+	// Epoch Identifies one lifetime of this inbox's sequence numbers. It changes if the inbox is deleted and made again, and for a server restored from a backup. Opaque: compare it for equality. Cursors carry it.
+	Epoch        string `json:"epoch"`
 	LatestSeq    int    `json:"latest_seq"`
 	MessageCount int    `json:"message_count"`
 	Name         string `json:"name"`
@@ -706,6 +737,9 @@ type JsonRpcResponse = json.RawMessage
 
 // McpGetMessageInput defines model for McpGetMessageInput.
 type McpGetMessageInput struct {
+	// Epoch the epoch of the message's inbox from your earlier result; if it is not the current one the call fails with epoch_changed instead of returning another message that now has this seq. Omit it to skip the check
+	Epoch *string `json:"epoch,omitempty"`
+
 	// Inbox slug of the inbox
 	Inbox string `json:"inbox"`
 
@@ -723,6 +757,9 @@ type McpQueryMessagesInput struct {
 
 	// Before read backward, newest first, from messages with a seq less than this
 	Before *int `json:"before,omitempty"`
+
+	// Epoch the epoch your cursor came from (the `epoch` of the previous result); if it is not the inbox's current epoch the call fails with epoch_changed instead of reading from sequence numbers that no longer mean what they did. Omit it to skip the check
+	Epoch *string `json:"epoch,omitempty"`
 
 	// Inbox slug of the inbox
 	Inbox string `json:"inbox"`
@@ -751,6 +788,9 @@ type McpWaitForMessagesInput struct {
 	// After return messages with a seq greater than this; use the next_after from your previous call
 	After int `json:"after"`
 
+	// Epoch the epoch your cursor came from (the `epoch` of the previous result); if it is not the inbox's current epoch the call fails with epoch_changed instead of reading from sequence numbers that no longer mean what they did. Omit it to skip the check
+	Epoch *string `json:"epoch,omitempty"`
+
 	// Inbox slug of the inbox
 	Inbox string `json:"inbox"`
 
@@ -778,6 +818,9 @@ type Message struct {
 
 	// DeliveryId From the sender, and only for verified messages.
 	DeliveryId *string `json:"delivery_id"`
+
+	// Epoch The epoch of the inbox this message belongs to (see `InboxInfo`). Keep it with your cursor.
+	Epoch string `json:"epoch"`
 
 	// EventType From the sender, and only for verified messages.
 	EventType *string `json:"event_type"`
@@ -812,6 +855,11 @@ type MessageMethod string
 
 // MessagePage defines model for MessagePage.
 type MessagePage struct {
+	// Epoch The inbox's current epoch.
+	Epoch string `json:"epoch"`
+
+	// Gap With `after`: `true` if messages after your cursor were removed by retention before you read them, so what follows does not continue where you left off. `false` otherwise (including when `after` is `0`).
+	Gap       bool      `json:"gap"`
 	LatestSeq int       `json:"latest_seq"`
 	Messages  []Message `json:"messages"`
 
@@ -854,6 +902,18 @@ type Status struct {
 	Status string `json:"status"`
 }
 
+// StreamGap defines model for StreamGap.
+type StreamGap struct {
+	// After The cursor the stream was asked to start after.
+	After int `json:"after"`
+
+	// Epoch The inbox's current epoch.
+	Epoch string `json:"epoch"`
+
+	// OldestSeq The lowest seq still stored, or 0 if none is. Messages between `after` and this were removed by retention before they could be read.
+	OldestSeq int `json:"oldest_seq"`
+}
+
 // Token defines model for Token.
 type Token struct {
 	// AllInboxes The token reads every inbox, those made later included.
@@ -894,6 +954,9 @@ type BadRequest = ErrorBadRequest
 
 // Conflict defines model for Conflict.
 type Conflict = ErrorConflict
+
+// EpochChanged defines model for EpochChanged.
+type EpochChanged = ErrorEpochChanged
 
 // Forbidden defines model for Forbidden.
 type Forbidden = ErrorForbidden
@@ -948,6 +1011,9 @@ type ListMessagesParams struct {
 	// After Return messages with a seq greater than this, oldest first. This is the polling pattern: keep the `next` link or the last seq you saw.
 	After *int `form:"after,omitempty" json:"after,omitempty"`
 
+	// Epoch The `epoch` your cursor came from (every page, message, and `next` link carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of answering from sequence numbers that no longer mean what they did. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+
 	// Before Return messages with a seq less than this, newest first. With neither `after` nor `before`, the newest messages come first.
 	Before *int `form:"before,omitempty" json:"before,omitempty"`
 
@@ -981,6 +1047,9 @@ type HeadListMessagesParams struct {
 	// After Return messages with a seq greater than this, oldest first. This is the polling pattern: keep the `next` link or the last seq you saw.
 	After *int `form:"after,omitempty" json:"after,omitempty"`
 
+	// Epoch The `epoch` your cursor came from (every page, message, and `next` link carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of answering from sequence numbers that no longer mean what they did. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+
 	// Before Return messages with a seq less than this, newest first. With neither `after` nor `before`, the newest messages come first.
 	Before *int `form:"before,omitempty" json:"before,omitempty"`
 
@@ -1009,10 +1078,37 @@ type HeadListMessagesParams struct {
 // HeadListMessagesParamsFields defines parameters for HeadListMessages.
 type HeadListMessagesParamsFields string
 
+// GetMessageParams defines parameters for GetMessage.
+type GetMessageParams struct {
+	// Epoch The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// HeadGetMessageParams defines parameters for HeadGetMessage.
+type HeadGetMessageParams struct {
+	// Epoch The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// GetMessageRawParams defines parameters for GetMessageRaw.
+type GetMessageRawParams struct {
+	// Epoch The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// HeadGetMessageRawParams defines parameters for HeadGetMessageRaw.
+type HeadGetMessageRawParams struct {
+	// Epoch The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
 // StreamMessagesParams defines parameters for StreamMessages.
 type StreamMessagesParams struct {
 	// After Start after this message, replaying anything newer. `0` replays everything. Without it (and without `Last-Event-ID`) the stream starts from now.
 	After *int `form:"after,omitempty" json:"after,omitempty"`
+
+	// Epoch The `epoch` your cursor came from (every page, message, and `next` link carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of answering from sequence numbers that no longer mean what they did. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
 
 	// Type Only messages with one of these event types. Repeat the parameter.
 	Type *[]string `form:"type,omitempty" json:"type,omitempty"`
@@ -1118,16 +1214,16 @@ type ServerInterface interface {
 	HeadListMessages(w http.ResponseWriter, r *http.Request, slug Slug, params HeadListMessagesParams)
 	// GetMessage One message
 	// (GET /v1/inboxes/{slug}/messages/{seq})
-	GetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq)
+	GetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageParams)
 	// HeadGetMessage Headers only: One message
 	// (HEAD /v1/inboxes/{slug}/messages/{seq})
-	HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq)
+	HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageParams)
 	// GetMessageRaw The exact bytes received
 	// (GET /v1/inboxes/{slug}/messages/{seq}/raw)
-	GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq)
+	GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageRawParams)
 	// HeadGetMessageRaw Headers only: The exact bytes received
 	// (HEAD /v1/inboxes/{slug}/messages/{seq}/raw)
-	HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq)
+	HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageRawParams)
 	// StreamMessages Follow an inbox live (Server-Sent Events)
 	// (GET /v1/inboxes/{slug}/stream)
 	StreamMessages(w http.ResponseWriter, r *http.Request, slug Slug, params StreamMessagesParams)
@@ -1734,6 +1830,19 @@ func (siw *ServerInterfaceWrapper) ListMessages(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "before" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -1880,6 +1989,19 @@ func (siw *ServerInterfaceWrapper) HeadListMessages(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "before" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -2019,8 +2141,24 @@ func (siw *ServerInterfaceWrapper) GetMessage(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMessageParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetMessage(w, r, slug, seq)
+		siw.Handler.GetMessage(w, r, slug, seq, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2054,8 +2192,24 @@ func (siw *ServerInterfaceWrapper) HeadGetMessage(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params HeadGetMessageParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.HeadGetMessage(w, r, slug, seq)
+		siw.Handler.HeadGetMessage(w, r, slug, seq, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2089,8 +2243,24 @@ func (siw *ServerInterfaceWrapper) GetMessageRaw(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMessageRawParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetMessageRaw(w, r, slug, seq)
+		siw.Handler.GetMessageRaw(w, r, slug, seq, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2124,8 +2294,24 @@ func (siw *ServerInterfaceWrapper) HeadGetMessageRaw(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params HeadGetMessageRawParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.HeadGetMessageRaw(w, r, slug, seq)
+		siw.Handler.HeadGetMessageRaw(w, r, slug, seq, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2162,6 +2348,19 @@ func (siw *ServerInterfaceWrapper) StreamMessages(w http.ResponseWriter, r *http
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
 		}
 		return
 	}
@@ -2394,6 +2593,15 @@ type ConflictJSONResponse struct {
 	Body ErrorConflict
 
 	Headers ConflictResponseHeaders
+}
+
+type EpochChangedResponseHeaders struct {
+	XRequestId string
+}
+type EpochChangedJSONResponse struct {
+	Body ErrorEpochChanged
+
+	Headers EpochChangedResponseHeaders
 }
 
 type ForbiddenResponseHeaders struct {
@@ -6867,6 +7075,22 @@ func (response ListMessages405JSONResponse) VisitListMessagesResponse(w http.Res
 	return err
 }
 
+type ListMessages409JSONResponse struct{ EpochChangedJSONResponse }
+
+func (response ListMessages409JSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMessages500JSONResponse struct{ InternalJSONResponse }
 
 func (response ListMessages500JSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
@@ -7027,6 +7251,20 @@ func (response HeadListMessages405Response) VisitHeadListMessagesResponse(w http
 	return nil
 }
 
+type HeadListMessages409ResponseHeaders struct {
+	XRequestId string
+}
+
+type HeadListMessages409Response struct {
+	Headers HeadListMessages409ResponseHeaders
+}
+
+func (response HeadListMessages409Response) VisitHeadListMessagesResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(409)
+	return nil
+}
+
 type HeadListMessages500ResponseHeaders struct {
 	XRequestId string
 }
@@ -7102,8 +7340,9 @@ func (response HeadListMessagesdefaultTextResponse) VisitHeadListMessagesRespons
 }
 
 type GetMessageRequestObject struct {
-	Slug Slug `json:"slug"`
-	Seq  Seq  `json:"seq"`
+	Slug   Slug `json:"slug"`
+	Seq    Seq  `json:"seq"`
+	Params GetMessageParams
 }
 
 type GetMessageResponseObject interface {
@@ -7199,6 +7438,22 @@ func (response GetMessage405JSONResponse) VisitGetMessageResponse(w http.Respons
 	return err
 }
 
+type GetMessage409JSONResponse struct{ EpochChangedJSONResponse }
+
+func (response GetMessage409JSONResponse) VisitGetMessageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetMessage500JSONResponse struct{ InternalJSONResponse }
 
 func (response GetMessage500JSONResponse) VisitGetMessageResponse(w http.ResponseWriter) error {
@@ -7277,8 +7532,9 @@ func (response GetMessagedefaultTextResponse) VisitGetMessageResponse(w http.Res
 }
 
 type HeadGetMessageRequestObject struct {
-	Slug Slug `json:"slug"`
-	Seq  Seq  `json:"seq"`
+	Slug   Slug `json:"slug"`
+	Seq    Seq  `json:"seq"`
+	Params HeadGetMessageParams
 }
 
 type HeadGetMessageResponseObject interface {
@@ -7359,6 +7615,20 @@ func (response HeadGetMessage405Response) VisitHeadGetMessageResponse(w http.Res
 	return nil
 }
 
+type HeadGetMessage409ResponseHeaders struct {
+	XRequestId string
+}
+
+type HeadGetMessage409Response struct {
+	Headers HeadGetMessage409ResponseHeaders
+}
+
+func (response HeadGetMessage409Response) VisitHeadGetMessageResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(409)
+	return nil
+}
+
 type HeadGetMessage500ResponseHeaders struct {
 	XRequestId string
 }
@@ -7434,8 +7704,9 @@ func (response HeadGetMessagedefaultTextResponse) VisitHeadGetMessageResponse(w 
 }
 
 type GetMessageRawRequestObject struct {
-	Slug Slug `json:"slug"`
-	Seq  Seq  `json:"seq"`
+	Slug   Slug `json:"slug"`
+	Seq    Seq  `json:"seq"`
+	Params GetMessageRawParams
 }
 
 type GetMessageRawResponseObject interface {
@@ -7545,6 +7816,22 @@ func (response GetMessageRaw405JSONResponse) VisitGetMessageRawResponse(w http.R
 	return err
 }
 
+type GetMessageRaw409JSONResponse struct{ EpochChangedJSONResponse }
+
+func (response GetMessageRaw409JSONResponse) VisitGetMessageRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetMessageRaw500JSONResponse struct{ InternalJSONResponse }
 
 func (response GetMessageRaw500JSONResponse) VisitGetMessageRawResponse(w http.ResponseWriter) error {
@@ -7623,8 +7910,9 @@ func (response GetMessageRawdefaultTextResponse) VisitGetMessageRawResponse(w ht
 }
 
 type HeadGetMessageRawRequestObject struct {
-	Slug Slug `json:"slug"`
-	Seq  Seq  `json:"seq"`
+	Slug   Slug `json:"slug"`
+	Seq    Seq  `json:"seq"`
+	Params HeadGetMessageRawParams
 }
 
 type HeadGetMessageRawResponseObject interface {
@@ -7712,6 +8000,20 @@ func (response HeadGetMessageRaw405Response) VisitHeadGetMessageRawResponse(w ht
 	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(405)
+	return nil
+}
+
+type HeadGetMessageRaw409ResponseHeaders struct {
+	XRequestId string
+}
+
+type HeadGetMessageRaw409Response struct {
+	Headers HeadGetMessageRaw409ResponseHeaders
+}
+
+func (response HeadGetMessageRaw409Response) VisitHeadGetMessageRawResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(409)
 	return nil
 }
 
@@ -7909,6 +8211,22 @@ func (response StreamMessages405JSONResponse) VisitStreamMessagesResponse(w http
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StreamMessages409JSONResponse struct{ EpochChangedJSONResponse }
+
+func (response StreamMessages409JSONResponse) VisitStreamMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8807,11 +9125,12 @@ func (sh *strictHandler) HeadListMessages(w http.ResponseWriter, r *http.Request
 }
 
 // GetMessage operation middleware
-func (sh *strictHandler) GetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq) {
+func (sh *strictHandler) GetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageParams) {
 	var request GetMessageRequestObject
 
 	request.Slug = slug
 	request.Seq = seq
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetMessage(ctx, request.(GetMessageRequestObject))
@@ -8834,11 +9153,12 @@ func (sh *strictHandler) GetMessage(w http.ResponseWriter, r *http.Request, slug
 }
 
 // HeadGetMessage operation middleware
-func (sh *strictHandler) HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq) {
+func (sh *strictHandler) HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageParams) {
 	var request HeadGetMessageRequestObject
 
 	request.Slug = slug
 	request.Seq = seq
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.HeadGetMessage(ctx, request.(HeadGetMessageRequestObject))
@@ -8861,11 +9181,12 @@ func (sh *strictHandler) HeadGetMessage(w http.ResponseWriter, r *http.Request, 
 }
 
 // GetMessageRaw operation middleware
-func (sh *strictHandler) GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq) {
+func (sh *strictHandler) GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageRawParams) {
 	var request GetMessageRawRequestObject
 
 	request.Slug = slug
 	request.Seq = seq
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetMessageRaw(ctx, request.(GetMessageRawRequestObject))
@@ -8888,11 +9209,12 @@ func (sh *strictHandler) GetMessageRaw(w http.ResponseWriter, r *http.Request, s
 }
 
 // HeadGetMessageRaw operation middleware
-func (sh *strictHandler) HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq) {
+func (sh *strictHandler) HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageRawParams) {
 	var request HeadGetMessageRawRequestObject
 
 	request.Slug = slug
 	request.Seq = seq
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.HeadGetMessageRaw(ctx, request.(HeadGetMessageRawRequestObject))

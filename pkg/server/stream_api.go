@@ -48,6 +48,12 @@ func (a *streamAPI) StreamMessages(ctx context.Context, request api.StreamMessag
 		return api.StreamMessages400JSONResponse{BadRequestJSONResponse: badRequest(ctx, fail{status: 400, code: "invalid_parameter", msg: err.Error()})}, nil
 	}
 
+	// A cursor from another epoch of the inbox is refused before anything is sent.
+	if err := wire.CheckEpoch(rr.in, req.Epoch); err != nil {
+		f := s.classifyRead(ctx, "stream start", err)
+		return api.StreamMessages409JSONResponse{EpochChangedJSONResponse: f.epochChanged(ctx)}, nil
+	}
+
 	// Streams have their own limits. They must not use the read slots, which are
 	// held for the length of a request and would cap the server at a handful of
 	// open streams.
@@ -163,5 +169,5 @@ func (b *sseBody) WriteTo(w io.Writer) (int64, error) {
 // streamParams reads the generated parameters of the stream. A test sets every
 // field of the generated struct and fails if one is not read here.
 func streamParams(p api.StreamMessagesParams) wire.StreamParams {
-	return wire.StreamParams{After: p.After, Types: deref(p.Type), Verified: p.Verified, LastEventID: p.LastEventID}
+	return wire.StreamParams{After: p.After, Types: deref(p.Type), Verified: p.Verified, Epoch: p.Epoch, LastEventID: p.LastEventID}
 }

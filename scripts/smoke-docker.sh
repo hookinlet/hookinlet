@@ -135,7 +135,7 @@ case $info in *'"message_count":2'*) ;; *) fail "unexpected inbox info: $info" ;
 case $info in *'"latest_seq":2'*) echo "ok   the inbox reports two messages" ;; *) fail "unexpected inbox info: $info" ;; esac
 page=$(read_api "/v1/inboxes/demo/messages?after=0" "$agent_token")
 case $page in
-  *'"seq":1'*'"seq":2'*'"next":"/v1/inboxes/demo/messages?after=2&limit=50"'*) echo "ok   the page lists both messages and a next link" ;;
+  *'"seq":1'*'"seq":2'*'"next":"/v1/inboxes/demo/messages?after=2&epoch='*'&limit=50"'*) echo "ok   the page lists both messages and a next link" ;;
   *) fail "unexpected page: $page" ;;
 esac
 case $page in *'"body":{"hello":"world"}'*) echo "ok   a JSON body is embedded as JSON" ;; *) fail "the JSON body was not embedded: $page" ;; esac

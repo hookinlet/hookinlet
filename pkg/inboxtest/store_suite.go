@@ -42,6 +42,8 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"InboxSecretsAreRedacted", testInboxSecretsRedacted},
 		{"UpdateInbox", testUpdateInbox},
 		{"UpdateInboxVersioning", testUpdateVersioning},
+		{"Epochs", testEpochs},
+		{"OldestSeqInAPage", testOldestSeqInAPage},
 		{"Tokens", testTokens},
 		{"TokensOfADeletedInbox", testTokensOfADeletedInbox},
 		{"DeleteInbox", testDeleteInbox},
@@ -1264,5 +1266,79 @@ func testTokensOfADeletedInbox(t *testing.T, s inbox.Store, _ *Clock) {
 	}
 	if got, err := s.GetTokenByHash(ctx, tokenHash("everything")); err != nil || !got.AllInboxes {
 		t.Errorf("an all-inboxes token was disturbed: %+v, %v", got, err)
+	}
+}
+
+func testEpochs(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	a := createInbox(t, s, "epoch-a")
+	b := createInbox(t, s, "epoch-b")
+	if a.Epoch == "" || b.Epoch == "" || a.Epoch == b.Epoch {
+		t.Fatalf("epochs of two inboxes: %q and %q; want two different, non-empty values", a.Epoch, b.Epoch)
+	}
+	for name, get := range map[string]func() (*inbox.Inbox, error){
+		"GetInbox":         func() (*inbox.Inbox, error) { return s.GetInbox(ctx, a.ID) },
+		"GetInboxBySlug":   func() (*inbox.Inbox, error) { return s.GetInboxBySlug(ctx, "epoch-a") },
+		"ResolveIngestKey": func() (*inbox.Inbox, error) { return s.ResolveIngestKey(ctx, a.IngestKey) },
+	} {
+		if got, err := get(); err != nil || got.Epoch != a.Epoch {
+			t.Errorf("%s: epoch %q, %v; want %q", name, got.Epoch, err, a.Epoch)
+		}
+	}
+
+	// Neither messages nor edits change it.
+	appendN(t, s, a.ID, 3, nil)
+	got, _ := s.GetInbox(ctx, a.ID)
+	got.Name = "renamed"
+	got.Epoch = "set-by-the-caller"
+	if err := s.UpdateInbox(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.GetInbox(ctx, a.ID); again.Epoch != a.Epoch {
+		t.Errorf("an update changed the epoch to %q", again.Epoch)
+	}
+
+	// Creating an inbox ignores an epoch the caller supplies.
+	c := mkInbox("epoch-c")
+	c.Epoch = "chosen"
+	if err := s.CreateInbox(ctx, c); err != nil || c.Epoch == "chosen" || c.Epoch == "" {
+		t.Errorf("CreateInbox kept the caller's epoch: %q, %v", c.Epoch, err)
+	}
+
+	// The same slug, made again after a delete, is a new lifetime.
+	if err := s.DeleteInbox(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	again := createInbox(t, s, "epoch-a")
+	if again.Epoch == a.Epoch {
+		t.Error("an inbox recreated under the same slug has the old epoch")
+	}
+}
+
+func testOldestSeqInAPage(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	in := createInbox(t, s, "oldest-seq", func(in *inbox.Inbox) { in.RetentionMaxCount = 2 })
+	if p := query(t, s, in.ID, inbox.Query{}); p.OldestSeq != 0 || p.LatestSeq != 0 {
+		t.Errorf("an empty inbox: oldest %d, latest %d", p.OldestSeq, p.LatestSeq)
+	}
+	appendN(t, s, in.ID, 5, nil)
+	if p := query(t, s, in.ID, inbox.Query{}); p.OldestSeq != 1 || p.LatestSeq != 5 {
+		t.Errorf("before pruning: oldest %d, latest %d", p.OldestSeq, p.LatestSeq)
+	}
+	if _, err := s.Prune(ctx, baseTime); err != nil {
+		t.Fatal(err)
+	}
+	for name, q := range map[string]inbox.Query{
+		"newest first":    {},
+		"after a cursor":  {After: ptr(int64(4))},
+		"a filter":        {Types: []string{"no-such-type"}},
+		"past the newest": {After: ptr(int64(9))},
+	} {
+		if p := query(t, s, in.ID, q); p.OldestSeq != 4 || p.LatestSeq != 5 {
+			t.Errorf("%s: oldest %d, latest %d; want 4 and 5 whatever the query", name, p.OldestSeq, p.LatestSeq)
+		}
+	}
+	if st, _ := s.Stats(ctx, in.ID); st.OldestSeq != 4 || st.MessageCount != 2 {
+		t.Errorf("stats = %+v", st)
 	}
 }

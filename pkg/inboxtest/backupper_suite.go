@@ -107,6 +107,13 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 			if err != nil {
 				t.Fatalf("%s: %v", want.Slug, err)
 			}
+			// A restored inbox is a new lifetime of its sequence numbers: the server
+			// that runs on the snapshot may accept different messages from the one
+			// it was taken from, so a cursor from one must not pass for the other.
+			if got.Epoch == "" || got.Epoch == want.Epoch {
+				t.Errorf("%s: epoch %q after restore, was %q; a snapshot must renew it", want.Slug, got.Epoch, want.Epoch)
+			}
+			got.Epoch = want.Epoch
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("%s differs after restore:\n got  %+v\n want %+v", want.Slug, got, want)
 			}

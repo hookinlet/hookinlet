@@ -199,6 +199,13 @@ func (s *Server) drain(ctx context.Context, w http.ResponseWriter, rc *http.Resp
 			}
 			frames.Write(frame)
 		}
+		// A page that starts below what is kept says so, however late in the stream
+		// that happens: a slow client, or retention running during a backlog.
+		if page.Gap {
+			if err := s.writeStream(w, rc, wire.GapEvent(cursor, page.OldestSeq, in.Epoch)); err != nil {
+				return sent, cursor, err
+			}
+		}
 		// Assign, don't declare: the cursor must carry over to the next page.
 		cursor = page.Cursor
 		complete := page.Complete

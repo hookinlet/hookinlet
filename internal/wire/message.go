@@ -29,6 +29,7 @@ const TimeLayout = "2006-01-02T15:04:05.000000Z"
 //   - BodyBase64 holds it otherwise.
 type Message struct {
 	Seq         int64       `json:"seq"`
+	Epoch       string      `json:"epoch"`
 	Inbox       string      `json:"inbox"`
 	ReceivedAt  string      `json:"received_at"`
 	Method      string      `json:"method"`

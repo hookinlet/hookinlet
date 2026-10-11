@@ -11,11 +11,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -143,6 +145,7 @@ func TestShippedMigrationsAreUnchanged(t *testing.T) {
 		"0003_ingest_key_and_dedupe_key.sql": "ab08447e727ec057144111db17dd79ae940f8c9f75fa839e82df8d6646118fa1",
 		"0004_random_ingest_keys.sql":        "c7a59a986049078495f68dd7ff74f3a855993ab0ca8bf42cb08fdd39a8f9c766",
 		"0005_tokens.sql":                    "23fb693300baff378d1743d6c3c1c910ee195c6e46667cc33a4b988316c79772",
+		"0006_epochs_counts_deleting.sql":    "1c73657daaa8c26d56a2d3029d2aaafa2efcff00e7943b0a31726424f4f9b3e4",
 	}
 	entries, err := os.ReadDir("migrations")
 	if err != nil {
@@ -507,5 +510,43 @@ func TestBackupHonorsACancelledContext(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, "backup-*")); len(left) != 0 {
 		t.Errorf("a cancelled backup left %v behind", left)
+	}
+}
+
+// A clock that steps back is survived (received_at keeps its order) and reported,
+// once in a while and not for every message.
+func TestAClockThatSteppedBackIsLogged(t *testing.T) {
+	var logs bytes.Buffer
+	var now atomic.Int64
+	now.Store(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC).UnixNano())
+	s, err := sqlite.Open(t.Context(), t.TempDir(),
+		sqlite.WithClock(func() time.Time { return time.Unix(0, now.Load()).UTC() }),
+		sqlite.WithLogger(slog.New(slog.NewJSONHandler(&logs, nil))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	in := newInbox("clock-step")
+	if err := s.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	add := func() *inbox.Message {
+		m, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Verified: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	first := add()
+	if strings.Contains(logs.String(), "clock") {
+		t.Fatalf("logged without a jump: %s", logs.String())
+	}
+	now.Add(-int64(time.Hour)) // the clock jumps back an hour
+	second, third := add(), add()
+	if second.ReceivedAt.Before(first.ReceivedAt) || third.ReceivedAt.Before(second.ReceivedAt) {
+		t.Error("received_at went backwards")
+	}
+	if got := strings.Count(logs.String(), "the clock is behind"); got != 1 {
+		t.Errorf("the jump was logged %d times, want once:\n%s", got, logs.String())
 	}
 }

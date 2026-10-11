@@ -187,6 +187,8 @@ func (t *mcpTools) fail(ctx context.Context, what string, err error) error {
 		return toolError(err.Error())
 	case errors.Is(err, inbox.ErrNotFound):
 		return errToolNotFound
+	case errors.Is(err, inbox.ErrEpochChanged):
+		return toolError("epoch_changed: the cursor is from an earlier epoch of this inbox (it was deleted and made again, or the server was restored); start again with after=0 and the inbox's current epoch")
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return err
 	}
@@ -249,6 +251,7 @@ type inboxSummary struct {
 	Name      string `json:"name"`
 	Verifier  string `json:"verifier"`
 	LatestSeq int64  `json:"latest_seq"`
+	Epoch     string `json:"epoch"`
 }
 
 type listInboxesOutput struct {
@@ -276,7 +279,7 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 		if err != nil {
 			return err
 		}
-		out.Inboxes = append(out.Inboxes, inboxSummary{Slug: in.Slug, Name: in.Name, Verifier: in.Verifier, LatestSeq: latest})
+		out.Inboxes = append(out.Inboxes, inboxSummary{Slug: in.Slug, Name: in.Name, Verifier: in.Verifier, LatestSeq: latest, Epoch: in.Epoch})
 		return nil
 	}
 
@@ -348,14 +351,24 @@ type queryOutput struct {
 	// null when the oldest message has been returned or the read is forward.
 	NextBefore *int64 `json:"next_before"`
 	LatestSeq  int64  `json:"latest_seq"`
+	// Epoch is the inbox's current epoch. Pass it back as `epoch` with the cursor.
+	Epoch string `json:"epoch"`
+	// Gap is true when messages after the cursor were removed before they were read.
+	Gap bool `json:"gap"`
 }
 
 // pageRequest builds a request the way the REST API does (wire.NewPageRequest),
 // so a parameter means the same thing in both. The values arrive as a tool's
 // arguments, not as a query string the document has approved, so the checks the
 // document would have made are made here.
-func pageRequest(after, before *int64, limit *int, types []string, since, until string, verified *bool, summary bool) (wire.PageRequest, error) {
+func pageRequest(after, before *int64, limit *int, types []string, since, until string, verified *bool, summary bool, epoch string) (wire.PageRequest, error) {
 	p := wire.MessagesParams{Types: types, Verified: verified, Summary: summary}
+	if err := checkEpochArg(epoch); err != nil {
+		return wire.PageRequest{}, err
+	}
+	if epoch != "" {
+		p.Epoch = &epoch
+	}
 	seq := func(name string, v *int64, dst **int) error {
 		if v == nil {
 			return nil
@@ -426,7 +439,7 @@ func (t *mcpTools) queryMessages(ctx context.Context, _ *mcp.CallToolRequest, ar
 	if err != nil {
 		return nil, nil, t.fail(ctx, "query", err)
 	}
-	req, err := pageRequest(optSeq(args.After), optSeq(args.Before), args.Limit, deref(args.Types), stringOf(args.Since), stringOf(args.Until), args.Verified, args.Summary != nil && *args.Summary)
+	req, err := pageRequest(optSeq(args.After), optSeq(args.Before), args.Limit, deref(args.Types), stringOf(args.Since), stringOf(args.Until), args.Verified, args.Summary != nil && *args.Summary, stringOf(args.Epoch))
 	if err != nil {
 		return nil, nil, t.fail(ctx, "query", err)
 	}
@@ -465,7 +478,7 @@ func (t *mcpTools) reply(req wire.PageRequest, page *wire.Page) (*mcp.CallToolRe
 }
 
 func (t *mcpTools) output(req wire.PageRequest, page *wire.Page) queryOutput {
-	out := queryOutput{Messages: page.Messages, LatestSeq: page.LatestSeq}
+	out := queryOutput{Messages: page.Messages, LatestSeq: page.LatestSeq, Epoch: page.Epoch, Gap: page.Gap}
 	if req.Query.Ascending() {
 		c := page.Cursor
 		out.NextAfter = &c
@@ -488,6 +501,12 @@ func (t *mcpTools) getMessage(ctx context.Context, _ *mcp.CallToolRequest, args 
 	if args.Seq < 1 {
 		return nil, nil, errToolNotFound
 	}
+	if err := checkEpochArg(stringOf(args.Epoch)); err != nil {
+		return nil, nil, t.fail(ctx, "get", err)
+	}
+	if err := wire.CheckEpoch(in, stringOf(args.Epoch)); err != nil {
+		return nil, nil, t.fail(ctx, "get", err)
+	}
 	release, err := t.s.readSlot(ctx)
 	if err != nil {
 		return nil, nil, t.fail(ctx, "get", err)
@@ -497,12 +516,12 @@ func (t *mcpTools) getMessage(ctx context.Context, _ *mcp.CallToolRequest, args 
 	if err != nil {
 		return nil, nil, t.fail(ctx, "get", err)
 	}
-	b, err := wire.Marshal(wire.FromStored(m, in.Slug, in.Verifier, true))
+	b, err := wire.Marshal(fromStored(m, in))
 	if err != nil {
 		return nil, nil, t.fail(ctx, "get", err)
 	}
 	if n := wireSize(b); n > mcpMaxMessageResult {
-		return nil, nil, toolError(fmt.Sprintf("this message is too large to return here (%d bytes once encoded); fetch /v1/inboxes/%s/messages/%d/raw over HTTP", n, in.Slug, m.Seq))
+		return nil, nil, toolError(fmt.Sprintf("this message is too large to return here (%d bytes once encoded); fetch /v1/inboxes/%s/messages/%d/raw?epoch=%s over HTTP", n, in.Slug, m.Seq, in.Epoch))
 	}
 	return pack(b), nil, nil
 }
@@ -524,7 +543,7 @@ func (t *mcpTools) waitForMessages(ctx context.Context, _ *mcp.CallToolRequest, 
 		return nil, nil, toolError(fmt.Sprintf("timeout_seconds must be between 0 and %d", mcpMaxWait))
 	}
 	after := int64(args.After)
-	req, err := pageRequest(&after, nil, args.Limit, deref(args.Types), "", "", nil, false)
+	req, err := pageRequest(&after, nil, args.Limit, deref(args.Types), "", "", nil, false, stringOf(args.Epoch))
 	if err != nil {
 		return nil, nil, t.fail(ctx, "wait", err)
 	}
@@ -562,7 +581,7 @@ func (t *mcpTools) waitForMessages(ctx context.Context, _ *mcp.CallToolRequest, 
 		if err != nil {
 			return nil, nil, t.fail(ctx, "wait", err)
 		}
-		if len(page.Messages) > 0 || wait == 0 {
+		if len(page.Messages) > 0 || wait == 0 || page.Gap {
 			return t.reply(req, page)
 		}
 		// Nothing matches yet. Skipping to the cursor means the next look does not
@@ -607,4 +626,21 @@ func stringOf(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// checkEpochArg holds an epoch given as a tool argument to the shape the REST API
+// holds the parameter to, so that the two refuse the same things.
+func checkEpochArg(epoch string) error {
+	if epoch == "" {
+		return nil
+	}
+	if len(epoch) > 64 {
+		return &wire.ParamError{Param: "epoch", Reason: "is not an epoch"}
+	}
+	for _, r := range epoch {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return &wire.ParamError{Param: "epoch", Reason: "is not an epoch"}
+		}
+	}
+	return nil
 }

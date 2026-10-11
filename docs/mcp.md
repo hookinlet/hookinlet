@@ -63,7 +63,7 @@ value.)
 
 ### `list_inboxes`
 
-The inboxes this token can read: `slug`, `name`, `verifier`, and `latest_seq`.
+The inboxes this token can read: `slug`, `name`, `verifier`, `latest_seq`, and `epoch`.
 An agent token lists the inboxes it reads. A token for all inboxes, and the admin
 token, list up to 100;
 `truncated: true` says it can read more than that. Nothing is ever reported about
@@ -81,6 +81,7 @@ inboxes the token cannot read, not even how many there are.
 | `since`, `until` | RFC 3339 times. |
 | `verified` | Only verified (`true`) or unverified (`false`) messages. |
 | `summary` | Leave bodies out. |
+| `epoch` | The `epoch` your cursor came from; see [Epochs and gaps](#epochs-and-gaps). |
 
 With neither `after` nor `before`, you get the newest messages, newest first.
 Parameters are checked as strictly as the REST API checks them: a misspelled
@@ -93,11 +94,30 @@ The result has `messages`, `latest_seq`, and a cursor:
   order, and it skips ahead past messages that did not match your filters.
 - `next_before` (backward reads): pass it as `before` to continue, or `null` when
   the oldest message has been returned.
+- `epoch` and `gap`: see below.
+
+#### Epochs and gaps
+
+A cursor is a sequence number, and a sequence number only means something within
+one life of an inbox. An inbox that is deleted and made again under the same slug
+starts at 1 again, and so does a server restored from a backup (which may have
+accepted different messages since). So every inbox has an **epoch**, an opaque
+string that changes in those cases, and every result carries it (`list_inboxes`
+too). Keep it with your cursor and pass it back as `epoch`: if it is no longer the
+inbox's current one the call fails with `epoch_changed`, instead of quietly
+reading from numbers that no longer mean what they did. Then start again with
+`after: 0` and the new epoch.
+
+`gap: true` means messages after your cursor were removed by retention before you
+read them: what follows does not continue where you left off. (A cursor of `0`
+never reports one.)
 
 ### `get_message`
 
-`inbox` and `seq`. One message with its **full** body, up to the size limit
-described under [Limits](#limits).
+`inbox` and `seq`, and optionally `epoch` (as for `query_messages`, so that a `seq`
+from an earlier life of the inbox is refused rather than answered with another
+message). One message with its **full** body, up to the size limit described under
+[Limits](#limits).
 
 ### `wait_for_messages`
 
@@ -108,6 +128,7 @@ described under [Limits](#limits).
 | `types` | Only messages whose `event_type` is one of these. |
 | `timeout_seconds` | 0 to 60, default 30. |
 | `limit` | 1 to 100, default 20. |
+| `epoch` | The `epoch` your cursor came from; see [Epochs and gaps](#epochs-and-gaps). |
 
 Returns as soon as any matching message exists after `after`, or an empty list
 when the timeout passes. This is the polling loop for agents that cannot hold an

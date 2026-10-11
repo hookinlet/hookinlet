@@ -20,6 +20,10 @@ var (
 	// ErrInvalid means the input failed validation. The wrapped message says why
 	// and is safe to show to the caller.
 	ErrInvalid = errors.New("invalid input")
+	// ErrEpochChanged means a cursor was issued for an earlier life of an inbox
+	// (see Inbox.Epoch). The server answers it with HTTP 409; a Store never
+	// returns it.
+	ErrEpochChanged = errors.New("epoch changed")
 	// ErrUnauthenticated is returned by Authenticator.Authenticate when the
 	// credentials are missing or wrong. It maps to HTTP 401.
 	ErrUnauthenticated = errors.New("unauthenticated")

@@ -163,7 +163,7 @@ func TestNextLinkRoundTrips(t *testing.T) {
 
 	t.Run("ascending carries the last seq and every filter", func(t *testing.T) {
 		req, _ := parse(t, "after=10"+filters)
-		link := req.NextLink("my-inbox", msgs(11, 12, 13))
+		link := req.NextLink("my-inbox", "", msgs(11, 12, 13))
 		next := mustParseLink(t, link, "my-inbox")
 		want := req
 		want.Query.After = ptr(int64(13))
@@ -173,7 +173,7 @@ func TestNextLinkRoundTrips(t *testing.T) {
 	})
 	t.Run("ascending with no messages repeats the cursor", func(t *testing.T) {
 		req, _ := parse(t, "after=500&limit=20")
-		link := req.NextLink("my-inbox", nil)
+		link := req.NextLink("my-inbox", "", nil)
 		next := mustParseLink(t, link, "my-inbox")
 		if next.Query.After == nil || *next.Query.After != 500 || next.Limit != 20 {
 			t.Errorf("link %s -> %+v", link, next)
@@ -181,7 +181,7 @@ func TestNextLinkRoundTrips(t *testing.T) {
 	})
 	t.Run("descending moves before to the oldest returned", func(t *testing.T) {
 		req, _ := parse(t, "before=100"+filters)
-		link := req.NextLink("my-inbox", msgs(99, 98, 97))
+		link := req.NextLink("my-inbox", "", msgs(99, 98, 97))
 		next := mustParseLink(t, link, "my-inbox")
 		want := req
 		want.Query.Before = ptr(int64(97))
@@ -191,26 +191,26 @@ func TestNextLinkRoundTrips(t *testing.T) {
 	})
 	t.Run("newest-first with no cursor becomes before", func(t *testing.T) {
 		req, _ := parse(t, "")
-		next := mustParseLink(t, req.NextLink("my-inbox", msgs(50, 49)), "my-inbox")
+		next := mustParseLink(t, req.NextLink("my-inbox", "", msgs(50, 49)), "my-inbox")
 		if next.Query.Before == nil || *next.Query.Before != 49 || next.Query.After != nil {
 			t.Errorf("next = %+v", next)
 		}
 	})
 	t.Run("descending stops after seq 1 and on an empty page", func(t *testing.T) {
 		req, _ := parse(t, "before=5")
-		if link := req.NextLink("i", msgs(4, 3, 2, 1)); link != "" {
+		if link := req.NextLink("i", "", msgs(4, 3, 2, 1)); link != "" {
 			t.Errorf("link after reaching seq 1: %s", link)
 		}
-		if link := req.NextLink("i", nil); link != "" {
+		if link := req.NextLink("i", "", nil); link != "" {
 			t.Errorf("link after an empty page: %s", link)
 		}
 	})
 	t.Run("the slug is escaped", func(t *testing.T) {
 		req, _ := parse(t, "after=0")
-		if link := req.NextLink("a-b", msgs(1)); !strings.HasPrefix(link, "/v1/inboxes/a-b/messages?") {
+		if link := req.NextLink("a-b", "", msgs(1)); !strings.HasPrefix(link, "/v1/inboxes/a-b/messages?") {
 			t.Errorf("link = %s", link)
 		}
-		if link := req.NextLink("x/../y", msgs(1)); strings.Contains(link, "/../") {
+		if link := req.NextLink("x/../y", "", msgs(1)); strings.Contains(link, "/../") {
 			t.Errorf("an unescaped slug in the link: %s", link)
 		}
 	})

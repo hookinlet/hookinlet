@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
@@ -116,7 +118,7 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 		// transaction claimed.
 		var seq int64
 		if err := tx.QueryRowContext(ctx,
-			`UPDATE inboxes SET last_seq = last_seq + 1 WHERE id = ? RETURNING last_seq`, int64(inboxID)).Scan(&seq); err != nil {
+			`UPDATE inboxes SET last_seq = last_seq + 1, message_count = message_count + 1 WHERE id = ? AND deleting = 0 RETURNING last_seq`, int64(inboxID)).Scan(&seq); err != nil {
 			return notFound(fmt.Errorf("sqlite: assign seq: %w", err), "inbox")
 		}
 
@@ -129,6 +131,7 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 			if p, perr := parseTime(prev); perr != nil {
 				return perr
 			} else if p.After(receivedAt) {
+				s.warnClockStepped(ctx, p.Sub(receivedAt))
 				receivedAt = p
 			}
 		case !errors.Is(err, sql.ErrNoRows):
@@ -178,7 +181,7 @@ func (s *Store) LatestSeq(ctx context.Context, inboxID inbox.ID) (int64, error) 
 		return 0, err
 	}
 	var seq int64
-	if err := s.rdb.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ?`, int64(inboxID)).Scan(&seq); err != nil {
+	if err := s.rdb.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&seq); err != nil {
 		return 0, s.ctxErr(ctx, notFound(err, "inbox"))
 	}
 	return seq, nil
@@ -186,16 +189,15 @@ func (s *Store) LatestSeq(ctx context.Context, inboxID inbox.ID) (int64, error) 
 
 // Stats implements inbox.Store.
 //
-// MessageCount is exact without counting rows. Messages are only ever removed
-// as a prefix of an inbox (retention) or all together (deleting the inbox), and
-// a duplicate delivery never consumes a seq, so the stored seqs are always the
-// contiguous range oldest..latest. That makes the count a subtraction, which
-// stays instant at millions of messages where COUNT(*) took over 100 ms. The
-// conformance suite checks this against a real walk of the inbox.
+// MessageCount is exact without counting rows: the inbox keeps a count that
+// every append and every removal updates in its own transaction. That stays
+// instant at millions of messages where COUNT(*) took over 100 ms, and it does
+// not depend on removal being a prefix of the inbox. The conformance suite checks
+// it against a real walk of the inbox.
 func (s *Store) Stats(ctx context.Context, inboxID inbox.ID) (*inbox.InboxStats, error) {
 	var st inbox.InboxStats
 	err := s.readTx(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ?`, int64(inboxID)).Scan(&st.LatestSeq); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT last_seq, message_count FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&st.LatestSeq, &st.MessageCount); err != nil {
 			return notFound(err, "inbox")
 		}
 		var oldest sql.NullInt64
@@ -204,7 +206,6 @@ func (s *Store) Stats(ctx context.Context, inboxID inbox.ID) (*inbox.InboxStats,
 		}
 		if oldest.Valid {
 			st.OldestSeq = oldest.Int64
-			st.MessageCount = st.LatestSeq - st.OldestSeq + 1
 		}
 		return nil
 	})
@@ -263,9 +264,14 @@ func (s *Store) Query(ctx context.Context, inboxID inbox.ID, q inbox.Query) (*in
 	page := &inbox.Page{Messages: []*inbox.Message{}}
 	// One read transaction gives LatestSeq and the messages the same snapshot.
 	err := s.readTx(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ?`, int64(inboxID)).Scan(&page.LatestSeq); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&page.LatestSeq); err != nil {
 			return notFound(err, "inbox")
 		}
+		var oldest sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT MIN(seq) FROM messages WHERE inbox_id = ?`, int64(inboxID)).Scan(&oldest); err != nil {
+			return fmt.Errorf("sqlite: find oldest message: %w", err)
+		}
+		page.OldestSeq = oldest.Int64
 		rows, err := tx.QueryContext(ctx, stmt, args...)
 		if err != nil {
 			return fmt.Errorf("sqlite: query messages: %w", err)
@@ -290,3 +296,23 @@ func (s *Store) Query(ctx context.Context, inboxID inbox.ID, q inbox.Query) (*in
 // test to check that an index is chosen.
 const queryDeliveryIDPlanSQL = `SELECT ` + messageCols + `, body FROM messages
 	WHERE inbox_id = ? AND delivery_id IS NOT NULL AND delivery_id = ? ORDER BY seq DESC LIMIT ?`
+
+// clockWarnEvery is the least time between two reports of a clock that stepped
+// back, so that a clock that stays wrong does not fill the log.
+const clockWarnEvery = 60 // seconds
+
+// warnClockStepped reports that the clock reads earlier than a message already
+// stored. The new message keeps the earlier time, so received_at never decreases
+// with seq, but whoever runs the server should know their clock jumped.
+func (s *Store) warnClockStepped(ctx context.Context, behind time.Duration) {
+	if behind < time.Second {
+		return // ordinary jitter between writers
+	}
+	now := s.now().Unix()
+	last := s.clockWarn.Load()
+	if now-last < clockWarnEvery || !s.clockWarn.CompareAndSwap(last, now) {
+		return
+	}
+	s.log.LogAttrs(ctx, slog.LevelWarn, "the clock is behind a message already stored; the new message keeps the earlier time",
+		slog.Duration("behind", behind))
+}

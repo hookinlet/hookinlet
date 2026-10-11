@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -544,5 +545,77 @@ func TestBodyCapLeavesOutBigBodiesAndSaysSo(t *testing.T) {
 	}
 	if page.Messages[1].BodyTruncated || page.Messages[1].BodyText == nil {
 		t.Errorf("without a cap the body must be loaded: %+v", page.Messages[1])
+	}
+}
+
+func TestGap(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		after, oldest, latest int64
+		want                  bool
+	}{
+		{"a reader with no history", 0, 40, 50, false},
+		{"exactly up to date", 50, 40, 50, false},
+		{"right behind the oldest", 39, 40, 50, false},
+		{"one message missing", 38, 40, 50, true},
+		{"far behind", 1, 40, 50, true},
+		{"inside what is kept", 45, 40, 50, false},
+		{"everything removed, reader behind", 3, 0, 9, true},
+		{"everything removed, reader caught up", 9, 0, 9, false},
+		{"an empty inbox", 0, 0, 0, false},
+		{"ahead of the newest", 60, 40, 50, false},
+	} {
+		if got := Gap(tc.after, tc.oldest, tc.latest); got != tc.want {
+			t.Errorf("%s: Gap(%d, %d, %d) = %v, want %v", tc.name, tc.after, tc.oldest, tc.latest, got, tc.want)
+		}
+	}
+}
+
+func TestCheckEpoch(t *testing.T) {
+	in := &inbox.Inbox{Epoch: "abc"}
+	if err := CheckEpoch(in, ""); err != nil {
+		t.Errorf("no epoch given: %v", err)
+	}
+	if err := CheckEpoch(in, "abc"); err != nil {
+		t.Errorf("the right epoch: %v", err)
+	}
+	if err := CheckEpoch(in, "abd"); !errors.Is(err, inbox.ErrEpochChanged) {
+		t.Errorf("another epoch: %v", err)
+	}
+}
+
+// getFails is a Store whose Get says the message is gone, as it is when retention
+// removes a message between the query and the load of its large body.
+type getFails struct{ inbox.Store }
+
+func (getFails) Get(context.Context, inbox.ID, int64) (*inbox.Message, error) {
+	return nil, inbox.ErrNotFound
+}
+
+func TestAMessagePrunedWhileThePageIsBuiltIsAGap(t *testing.T) {
+	st, err := sqlite.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	in := &inbox.Inbox{Slug: "pruned-mid-read", IngestKey: "pruned-mid-read", Name: "n", Verifier: "none"}
+	if err := st.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte("x"), InlineBodyBytes+1) // not loaded with the query
+	for _, body := range [][]byte{[]byte("one"), big, []byte("three")} {
+		if _, _, err := st.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: body, Verified: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after := int64(1)
+	req := PageRequest{Query: inbox.Query{After: &after, Limit: 10}, Limit: 10}
+	whole, err := FetchPage(t.Context(), st, in, req)
+	if err != nil || whole.Gap || len(whole.Messages) != 2 {
+		t.Fatalf("with nothing pruned: gap %v, %d messages, %v", whole.Gap, len(whole.Messages), err)
+	}
+	cut, err := FetchPage(t.Context(), getFails{st}, in, req)
+	if err != nil || !cut.Gap || len(cut.Messages) != 1 {
+		t.Errorf("with seq 2 pruned mid-read: gap %v, %d messages, %v", cut.Gap, len(cut.Messages), err)
 	}
 }

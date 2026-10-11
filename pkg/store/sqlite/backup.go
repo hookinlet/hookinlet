@@ -69,6 +69,10 @@ func (s *Store) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 		_ = os.Remove(name)
 		return nil, 0, s.ctxErr(ctx, fmt.Errorf("sqlite: backup: %w", err))
 	}
+	if err := renewEpochs(ctx, name); err != nil {
+		_ = os.Remove(name)
+		return nil, 0, s.ctxErr(ctx, fmt.Errorf("sqlite: backup: %w", err))
+	}
 	snap, err := os.Open(name) //nolint:gosec // a file this function just created in the data directory
 	if err != nil {
 		_ = os.Remove(name)
@@ -81,6 +85,27 @@ func (s *Store) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 		return nil, 0, fmt.Errorf("sqlite: backup: %w", err)
 	}
 	return &snapshotFile{File: snap}, st.Size(), nil
+}
+
+// renewEpochs gives every inbox in a snapshot a new epoch. A server started on a
+// restored snapshot may accept different messages from the one the snapshot was
+// taken from, so the sequence numbers it hands out do not mean what the original
+// meant, and a cursor from one must not be taken for a cursor of the other.
+func renewEpochs(ctx context.Context, path string) error {
+	conn, err := openDB(path, 1, false)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	conn.SetMaxOpenConns(1)
+	if _, err := conn.ExecContext(ctx, `UPDATE inboxes SET epoch = lower(hex(randomblob(16)))`); err != nil {
+		return fmt.Errorf("renew epochs: %w", err)
+	}
+	// Back to a single self-contained file, as VACUUM INTO left it.
+	if _, err := conn.ExecContext(ctx, `PRAGMA journal_mode = DELETE`); err != nil {
+		return fmt.Errorf("renew epochs: %w", err)
+	}
+	return nil
 }
 
 // snapshotFile deletes its file when closed.
@@ -102,7 +127,10 @@ func removeStaleBackups(dir string, now time.Time) {
 	}
 	for _, e := range entries {
 		n := e.Name()
-		if e.IsDir() || !strings.HasPrefix(n, backupPrefix) || !strings.HasSuffix(n, backupSuffix) {
+		// Beside a snapshot that died while its epochs were being renewed there may
+		// be the journal files SQLite keeps for it.
+		base := strings.TrimSuffix(strings.TrimSuffix(n, "-wal"), "-shm")
+		if e.IsDir() || !strings.HasPrefix(base, backupPrefix) || !strings.HasSuffix(base, backupSuffix) {
 			continue
 		}
 		if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > staleBackup {
