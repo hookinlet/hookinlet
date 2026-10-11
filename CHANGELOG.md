@@ -6,6 +6,28 @@ applies.
 
 ## Unreleased
 
+### Phase 8: open-source polish
+
+#### Added
+- `docs/openapi.json`, an OpenAPI 3.1 description of ingest, the read API, the
+  stream, the admin API, and the MCP endpoint. Tests call every operation on a
+  real server, force every response the document lists, and require that nothing
+  the server says is missing from it; requests generated from its schemas must be
+  accepted or refused as it says; and it must list exactly the routes the server
+  registers.
+- `README.md`, `SECURITY.md`, issue and pull request templates, and an expanded
+  `CONTRIBUTING.md`.
+- `examples/`: `curl` (polling and streaming), `python` and `go-agent` agents,
+  `relay` (forwards each message to another URL, at least once and in order), with
+  `examples/README.md`.
+- `scripts/test-docs.sh` runs the marked examples in the documentation; CI runs it
+  and lints the OpenAPI document.
+
+#### Changed
+- Every package under `pkg/` says in its documentation that it is pre-1.0.
+- `GET /admin/inboxes` refuses a repeated `after` or `limit` (400), as the read API
+  does for its parameters. It used to use one of them silently.
+
 ### Phase 7: packaging and docs
 
 #### Added

@@ -10,6 +10,9 @@
 //
 // Every secret or signature comparison in this package is constant-time: they
 // all go through hmac.Equal or crypto/subtle.
+//
+// Stability: this package is pre-1.0. Its API can still change, and every change is
+// listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
 package verify
 
 import (

@@ -13,8 +13,8 @@ can sit in front of an existing service instead of replacing it.
   messages, and SSRF protection for user-supplied URLs.
 - **OSS:** `examples/relay`, a small program that tails an inbox with the
   query API's `after=` cursor (or SSE) and forwards each message. It shows
-  self-hosters how to relay without the core growing a delivery queue. It is
-  built after the query API (Phase 3) exists and ships with Phase 8.
+  self-hosters how to relay without the core growing a delivery queue. It
+  exists: see `examples/relay`.
 
 The core already provides what a relay needs: per-inbox sequence numbers that
 are safe cursors, and `Hooks.AfterIngest` for embedders.

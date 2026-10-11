@@ -8,6 +8,9 @@
 // interfaces and pass the same conformance suites in pkg/inboxtest.
 //
 // Nothing in this package knows about organizations, users, plans, or billing.
+//
+// Stability: this package is pre-1.0. Its API can still change, and every change is
+// listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
 package inbox
 
 import (

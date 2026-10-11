@@ -8,6 +8,9 @@
 // is enough when one process owns the data directory, which is how the SQLite
 // store is deployed. A multi-node deployment needs a notifier that crosses
 // processes.
+//
+// Stability: this package is pre-1.0. Its API can still change, and every change is
+// listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
 package local
 
 import (

@@ -3,7 +3,11 @@
 This document describes hookinlet's HTTP surface: [ingest](#ingest) (webhooks
 come in), the [read API](#read-api) (agents read them back), and
 [operations](#operations). The same reads are available to agents as [MCP
-tools](mcp.md). Setting up inboxes, retention,
+tools](mcp.md). [`openapi.json`](openapi.json) describes the HTTP API in OpenAPI 3.1 (the
+requests, responses, and schemas below, and the admin API); tests check it against
+the server in both directions: every operation is called and every response it lists must
+actually occur and match, and requests are generated from its schemas and must be accepted
+or refused as it says. Setting up inboxes, retention,
 and backups is in [administration](admin.md).
 
 All error responses are JSON:

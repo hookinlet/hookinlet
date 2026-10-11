@@ -49,23 +49,24 @@ Store cannot make backups.
 
 ### Create
 
+<!-- exercise -->
 ```sh
 curl -s -X POST "$BASE/admin/inboxes" \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"slug": "stripe-prod", "verifier": "stripe", "verifier_secret": "whsec_…",
+  -d '{"slug": "stripe-api", "verifier": "stripe", "verifier_secret": "whsec_example",
        "retention_days": 30, "event_type_pointer": "/type"}'
 ```
 
 ```json
 {
   "inbox": {
-    "id": 1, "slug": "stripe-prod", "name": "stripe-prod", "version": 1,
+    "id": 1, "slug": "stripe-api", "name": "stripe-api", "version": 1,
     "verifier": "stripe", "verifier_config": {}, "has_verifier_secret": true,
     "on_verify_fail": "reject", "max_body_bytes": 1048576,
     "retention_days": 30, "retention_max_count": 0, "event_type_pointer": "/type",
     "disabled": false, "last_seq": 0,
-    "ingest_path": "/in/stripe-prod",
-    "ingest_url": "https://hooks.example.com/in/stripe-prod",
+    "ingest_path": "/in/stripe-api",
+    "ingest_url": "https://hooks.example.com/in/stripe-api",
     "created_at": "…", "updated_at": "…"
   },
   "agent_token": "hki_…"
@@ -110,21 +111,26 @@ about 30 seconds.
 
 ## The command line
 
+<!-- exercise -->
 ```sh
-# against a running server
+# against a running server (HOOKINLET_ADMIN_TOKEN holds the admin token)
 export HOOKINLET_URL=https://hooks.example.com
-export HOOKINLET_ADMIN_TOKEN=…
 hookinlet inbox create --slug stripe-prod --verifier stripe     # secret: HOOKINLET_VERIFIER_SECRET
 hookinlet inbox list
 hookinlet inbox show stripe-prod
 hookinlet inbox update stripe-prod --retention-days 30 --disabled=false
-hookinlet inbox set-secret stripe-prod --secret-stdin < secret.txt
+echo whsec_example | hookinlet inbox set-secret stripe-prod --secret-stdin
 hookinlet inbox rotate-token stripe-prod
 hookinlet inbox delete stripe-prod --yes
 hookinlet retention run
 hookinlet backup --out hookinlet-backup.db
+```
 
-# straight in the data directory, with no server (also for first-time setup)
+Without a server, straight in the data directory (also for first-time setup). If `HOOKINLET_URL` is set in
+your shell, unset it first: giving both a server address and a data directory is an error.
+
+```sh
+unset HOOKINLET_URL
 hookinlet inbox create --slug stripe-prod --data-dir ./data
 ```
 
