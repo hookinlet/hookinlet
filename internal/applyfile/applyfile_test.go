@@ -144,7 +144,7 @@ func TestResolveSecrets(t *testing.T) {
 	}
 
 	_, err = applyfile.ResolveSecrets([]applyfile.Spec{
-		{Slug: "unset-one", SecretEnv: "NOPE"},
+		{Slug: "unset-one", SecretEnv: "NOPE", SecretLine: 7},
 		{Slug: "empty-file", SecretFile: empty},
 		{Slug: "huge-file", SecretFile: huge},
 		{Slug: "missing-file", SecretFile: filepath.Join(dir, "absent")},
@@ -153,9 +153,16 @@ func TestResolveSecrets(t *testing.T) {
 	if err == nil {
 		t.Fatal("bad sources accepted")
 	}
-	for _, w := range []string{"NOPE", empty, "larger than", "absent", "not a regular file"} {
+	for _, w := range []string{"larger than", "is empty", "not set or is empty", "no such file", "not a regular file", "line 7"} {
 		if !strings.Contains(err.Error(), w) {
-			t.Errorf("error does not name %q:\n%v", w, err)
+			t.Errorf("error does not say %q:\n%v", w, err)
+		}
+	}
+	// The name of a variable or the path of a file is what a mistyped key could
+	// hold instead of a secret, so it is never repeated.
+	for _, w := range []string{"NOPE", empty, "absent"} {
+		if strings.Contains(err.Error(), w) {
+			t.Errorf("the error repeats %q:\n%v", w, err)
 		}
 	}
 	if strings.Contains(err.Error(), "aaaaaaaa") {

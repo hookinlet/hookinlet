@@ -210,19 +210,21 @@ cannot be `0` here: leave it out to get the default.
 `verifier_secret:`) is an error. Name where to read it from instead, with one of:
 
 - `secret_env: NAME`, an environment variable of the process running `apply`;
-- `secret_file: /path`, a file (such as a mounted secret). One trailing newline
-  is not part of the secret. A file larger than 4,096 bytes is refused.
+- `secret_file: /path`, a file (such as a mounted secret). Trailing newlines
+  are not part of the secret. A file larger than 4,096 bytes is refused.
 
 Giving both is an error, and so is a source that is missing or empty (the
-message names the variable or the path, never a value). Secrets are never
-printed or logged.
+message points at the line of the key and does not repeat the variable name or
+the path, because a secret pasted under the wrong key would look like one).
+Secrets are never printed or logged.
 
 **What `apply` does.** For each entry, in order:
 
 - If the inbox does not exist, it is created, with its secret and its agent
   token. Settings the file leaves out take the server's defaults.
 - If it exists, only the settings that differ from the file are changed (one
-  `PATCH`), and settings the file leaves out are left alone, so changes made by
+  `PATCH`), and settings the file leaves out are left alone (a key with no value, such
+  as `retention_days:`, is an error and not a zero: leave the key out), so changes made by
   hand to those survive. `event_type_pointer: ""` is a setting too: it clears the
   pointer. `verifier_config` is compared by meaning, not spelling.
 - A verifier secret cannot be read back, so there is no telling whether it has
@@ -252,8 +254,11 @@ mistake is found at that inbox and not before.
 to the file named by `--tokens-out`, as JSON (`{"stripe-live": "hki_…"}`), and
 prints it nowhere. The file is created new with mode `0600` and is never
 overwritten: if it already exists, or cannot be created, `apply` stops before
-changing anything. It is written as each inbox is created, so a failure
-part-way does not lose the tokens already issued. If a run would create an
+changing anything. It is replaced, atomically, as each inbox is created, so a failure
+part-way does not lose the tokens already issued; if a run fails before any token was
+issued the file is removed again. After a failure part-way, give the next run a new
+`--tokens-out` file: the first one keeps the tokens already issued and is never
+overwritten. If a run would create an
 inbox and there is no `--tokens-out`, `apply` refuses and changes nothing. A run
 that creates nothing needs no `--tokens-out` and does not touch it, so the same
 command line can be run again.

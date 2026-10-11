@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/hookinlet/hookinlet/internal/admin"
+	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
 // Secrets maps a slug to the verifier secret read for it. Only inboxes whose
@@ -21,8 +22,10 @@ import (
 type Secrets map[string]string
 
 // ResolveSecrets reads every declared secret source. A source that is missing
-// or empty is an error that names the variable or the path (never a value),
-// and all of them are reported together.
+// or empty is an error that points at the line of the key, and all of them are
+// reported together. It never repeats the variable name or the path: a value
+// written under the wrong key could be the secret itself, and that must not be
+// echoed.
 func ResolveSecrets(specs []Spec, getenv func(string) string) (Secrets, error) {
 	out := Secrets{}
 	var errs []error
@@ -32,27 +35,27 @@ func ResolveSecrets(specs []Spec, getenv func(string) string) (Secrets, error) {
 		case s.SecretEnv != "":
 			secret = getenv(s.SecretEnv)
 			if secret == "" {
-				errs = append(errs, s.errorf("secret_env: the environment variable %s is not set or is empty", s.SecretEnv))
+				errs = append(errs, s.errorAt(s.SecretLine, "secret_env: the environment variable it names is not set or is empty"))
 				continue
 			}
 		case s.SecretFile != "":
 			b, err := readSecretFile(s.SecretFile)
 			if err != nil {
-				errs = append(errs, s.errorf("secret_file: %v", err))
+				errs = append(errs, s.errorAt(s.SecretLine, "secret_file: %v", err))
 				continue
 			}
 			// A file made by echo or a secrets manager usually ends in a newline
 			// that is not part of the secret.
 			secret = strings.TrimRight(string(b), "\r\n")
 			if secret == "" {
-				errs = append(errs, s.errorf("secret_file: %s is empty", s.SecretFile))
+				errs = append(errs, s.errorAt(s.SecretLine, "secret_file: the file it names is empty"))
 				continue
 			}
 		default:
 			continue
 		}
 		if len(secret) > admin.MaxSecretBytes {
-			errs = append(errs, s.errorf("the secret is longer than %d bytes", admin.MaxSecretBytes))
+			errs = append(errs, s.errorAt(s.SecretLine, "the secret is longer than %d bytes", admin.MaxSecretBytes))
 			continue
 		}
 		out[s.Slug] = secret
@@ -63,27 +66,27 @@ func ResolveSecrets(specs []Spec, getenv func(string) string) (Secrets, error) {
 func readSecretFile(path string) ([]byte, error) {
 	f, err := os.Open(path) //nolint:gosec // the path is the operator's own, from their file
 	if err != nil {
-		// The error text names the path and the reason, not the contents.
+		// The reason, not the path: see ResolveSecrets.
 		var pe *os.PathError
 		if errors.As(err, &pe) {
-			return nil, fmt.Errorf("cannot read %s: %w", path, pe.Err)
+			return nil, fmt.Errorf("cannot read the file it names: %w", pe.Err)
 		}
-		return nil, fmt.Errorf("cannot read %s", path)
+		return nil, errors.New("cannot read the file it names")
 	}
 	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil || !st.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
+		return nil, errors.New("the file it names is not a regular file")
 	}
 	// One byte over what is allowed, plus room for a trailing newline, so that
 	// a file that is too big is refused and not truncated.
 	limit := int64(admin.MaxSecretBytes) + 3
 	b, err := io.ReadAll(io.LimitReader(f, limit))
 	if err != nil {
-		return nil, fmt.Errorf("cannot read %s", path)
+		return nil, errors.New("cannot read the file it names")
 	}
 	if int64(len(b)) >= limit {
-		return nil, fmt.Errorf("%s is larger than a secret can be (%d bytes)", path, admin.MaxSecretBytes)
+		return nil, fmt.Errorf("the file it names is larger than a secret can be (%d bytes)", admin.MaxSecretBytes)
 	}
 	return b, nil
 }
@@ -208,4 +211,30 @@ func sameJSON(a, b json.RawMessage) bool {
 		return false
 	}
 	return reflect.DeepEqual(x, y)
+}
+
+// Check refuses, before anything is changed, a plan the server would refuse
+// part way: the verifier an inbox will have after the change, with the
+// configuration it will have, must fit together. It looks at the settings after
+// the change, not only the ones the file declares, because a file may change the
+// verifier and leave the configuration, or the reverse.
+func (it Item) Check(cur *admin.View) error {
+	s := it.Spec
+	if s.Verifier == nil && s.VerifierConfig == nil {
+		return nil
+	}
+	verifier, config := "none", json.RawMessage(`{}`)
+	if cur != nil {
+		verifier, config = cur.Verifier, cur.VerifierConfig
+	}
+	if s.Verifier != nil {
+		verifier = *s.Verifier
+	}
+	if s.VerifierConfig != nil {
+		config = *s.VerifierConfig
+	}
+	if err := admin.CheckSettings(admin.CreateParams{Slug: s.Slug, Verifier: verifier, VerifierConfig: config}); err != nil {
+		return s.errorf("verifier %s with its configuration: %s", verifier, strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "))
+	}
+	return nil
 }

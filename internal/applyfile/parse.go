@@ -50,6 +50,9 @@ type Spec struct {
 	// most one is set. The secret itself is never in a Spec.
 	SecretEnv  string
 	SecretFile string
+	// SecretLine is the line of the secret_env or secret_file key. Errors point
+	// there, because the value of a mistyped key could be the secret itself.
+	SecretLine int
 }
 
 // HasSecretSource reports whether the file says where to read a secret from.
@@ -176,6 +179,12 @@ func parseEntry(n *yaml.Node) (Spec, error) {
 		}
 		seen[key] = k.Line
 		decode := func(out any, want string) bool {
+			// A key with no value decodes to the zero value, which would be applied
+			// as a setting: turning retention off, or re-enabling a disabled inbox.
+			if v.Kind == yaml.ScalarNode && v.Tag == "!!null" {
+				fail(v.Line, key, "has no value; leave the key out to leave the setting alone")
+				return false
+			}
 			if v.Kind != yaml.ScalarNode && want != "mapping" {
 				fail(v.Line, key, "must be %s", want)
 				return false
@@ -234,9 +243,9 @@ func parseEntry(n *yaml.Node) (Spec, error) {
 				fail(v.Line, key, "must be a mapping")
 				break
 			}
-			var m map[string]any
-			if err := v.Decode(&m); err != nil {
-				fail(v.Line, key, "must be a mapping with string keys and plain values (%s)", sanitize(err))
+			m, err := nodeValue(v)
+			if err != nil {
+				fail(v.Line, key, "must be a mapping with string keys and plain values (%s)", err)
 				break
 			}
 			raw, err := json.Marshal(m)
@@ -253,6 +262,7 @@ func parseEntry(n *yaml.Node) (Spec, error) {
 					fail(v.Line, key, "must be the name of an environment variable, not the secret itself")
 				} else {
 					spec.SecretEnv = s
+					spec.SecretLine = k.Line
 				}
 			}
 		case "secret_file":
@@ -262,6 +272,7 @@ func parseEntry(n *yaml.Node) (Spec, error) {
 					fail(v.Line, key, "must not be empty")
 				} else {
 					spec.SecretFile = s
+					spec.SecretLine = k.Line
 				}
 			}
 		case "secret", "verifier_secret":
@@ -279,14 +290,55 @@ func parseEntry(n *yaml.Node) (Spec, error) {
 	return spec, errors.Join(errs...)
 }
 
-// sanitize keeps the part of a decoder error that names a problem and drops
-// anything that quotes the input.
-func sanitize(err error) string {
-	s := err.Error()
-	if i := strings.Index(s, "`"); i >= 0 {
-		s = s[:i]
+// nodeValue reads a YAML value as the plain JSON value it stands for. Unlike
+// decoding into any, it keeps a timestamp-looking scalar as the text that was
+// written (a header named 2024-01-01 is a string, not a date), and refuses what
+// JSON cannot hold.
+func nodeValue(n *yaml.Node) (any, error) {
+	switch n.Kind {
+	case yaml.MappingNode:
+		m := make(map[string]any, len(n.Content)/2)
+		for i := 0; i < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			if k.Kind != yaml.ScalarNode {
+				return nil, fmt.Errorf("line %d: a key must be a plain string", k.Line)
+			}
+			if _, dup := m[k.Value]; dup {
+				return nil, fmt.Errorf("line %d: duplicate key %q", k.Line, k.Value)
+			}
+			x, err := nodeValue(v)
+			if err != nil {
+				return nil, err
+			}
+			m[k.Value] = x
+		}
+		return m, nil
+	case yaml.SequenceNode:
+		out := make([]any, 0, len(n.Content))
+		for _, c := range n.Content {
+			x, err := nodeValue(c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, x)
+		}
+		return out, nil
+	case yaml.ScalarNode:
+		switch n.Tag {
+		case "!!str", "!!timestamp":
+			return n.Value, nil
+		case "!!null":
+			return nil, nil
+		case "!!bool", "!!int", "!!float":
+			var x any
+			if err := n.Decode(&x); err != nil {
+				return nil, fmt.Errorf("line %d: not a plain value", n.Line)
+			}
+			return x, nil
+		}
+		return nil, fmt.Errorf("line %d: a value of type %s cannot be used here", n.Line, n.Tag)
 	}
-	return strings.TrimSpace(strings.TrimPrefix(s, "yaml: "))
+	return nil, fmt.Errorf("line %d: not a plain value", n.Line)
 }
 
 // check applies the admin API's own rules to what the entry declares. The
@@ -315,6 +367,11 @@ func check(s Spec) error {
 		}
 	}
 	if s.OnVerifyFail != nil {
+		// Checked here because an empty value is "the default" to the rules below,
+		// and a file that declares it would never converge.
+		if v := *s.OnVerifyFail; v != inbox.OnVerifyFailReject && v != inbox.OnVerifyFailStore {
+			return s.errorf("on_verify_fail must be one of: reject, store")
+		}
 		p.OnVerifyFail = *s.OnVerifyFail
 	}
 	if s.MaxBodyBytes != nil {
@@ -336,6 +393,11 @@ func check(s Spec) error {
 		return s.errorf("%s", strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "))
 	}
 	return nil
+}
+
+// errorAt is errorf for a message about the key on another line.
+func (s Spec) errorAt(line int, format string, args ...any) error {
+	return fmt.Errorf("line %d: inbox %q: %s", line, s.Slug, fmt.Sprintf(format, args...))
 }
 
 func (s Spec) errorf(format string, args ...any) error {

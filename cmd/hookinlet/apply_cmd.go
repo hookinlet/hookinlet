@@ -119,6 +119,17 @@ func applyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 		}
 		items = append(items, it)
 	}
+	// A plan the server would refuse part way is refused now, before any change.
+	var planErrs []error
+	for _, it := range items {
+		if err := it.Check(current[it.Spec.Slug]); err != nil {
+			planErrs = append(planErrs, err)
+		}
+	}
+	if len(planErrs) > 0 {
+		fmt.Fprintf(stderr, "hookinlet: %s cannot be applied as it is (nothing was changed):\n  %s\n", displayName(*file), indentLines(errors.Join(planErrs...)))
+		return exitUsage
+	}
 	var notManaged []string
 	for _, v := range views {
 		if !declared[v.Slug] {
@@ -153,7 +164,11 @@ func applyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 	for _, it := range items {
 		if err := applyOne(ctx, api, it, secrets[it.Spec.Slug], *dryRun, sink, rep, stderr); err != nil {
 			rep.finish(*tokensOut, sink != nil)
-			fmt.Fprintf(stderr, "hookinlet: stopped at inbox %q; changes already made stay in place, and running apply again picks up from here\n", it.Spec.Slug)
+			fmt.Fprintf(stderr, "hookinlet: stopped at inbox %q; changes already made stay in place, and running apply again picks up from here", it.Spec.Slug)
+			if sink != nil && len(sink.tokens) > 0 {
+				fmt.Fprintf(stderr, " (give --tokens-out a new file: %s keeps the tokens already issued and is never overwritten)", *tokensOut)
+			}
+			fmt.Fprintln(stderr)
 			return fail(stderr, err)
 		}
 	}
@@ -299,10 +314,13 @@ func indentLines(err error) string {
 // ---- the file that receives the tokens ----
 
 // tokenSink is the --tokens-out file. It is created exclusively and privately
-// before anything changes, and rewritten after each inbox is created, so that
-// the tokens of the inboxes made before a failure are not lost.
+// before anything changes, so that a path that cannot be used is found out
+// before any inbox is made, and replaced (atomically, privately) after each inbox
+// is created, so that the tokens of the inboxes made before a failure are not lost
+// and a crash cannot leave it half written. A file that holds no token when the
+// run ends is removed: it would only be in the way of the next attempt.
 type tokenSink struct {
-	f      *os.File
+	path   string
 	tokens map[string]string
 }
 
@@ -327,14 +345,13 @@ func openTokenSink(path string) (*tokenSink, error) {
 	case err != nil:
 		return nil, fmt.Errorf("cannot create %s: %w", path, pathReason(err))
 	}
-	s := &tokenSink{f: f, tokens: map[string]string{}}
+	defer func() { _ = f.Close() }()
 	if err := f.Chmod(0o600); err != nil {
-		s.close()
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("cannot make %s private: %w", path, pathReason(err))
 	}
+	s := &tokenSink{path: path, tokens: map[string]string{}}
 	if err := s.write(); err != nil {
-		s.close()
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("cannot write %s: %w", path, pathReason(err))
 	}
@@ -354,22 +371,45 @@ func (s *tokenSink) add(slug, tok string) error {
 	return s.write()
 }
 
+// write replaces the file with one that holds every token so far: a new private
+// file in the same directory, synced, then renamed over the old one.
 func (s *tokenSink) write() error {
 	b, err := json.MarshalIndent(s.tokens, "", "  ")
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	if err := s.f.Truncate(0); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".tokens-*") // mode 0600
+	if err != nil {
 		return err
 	}
-	if _, err := s.f.WriteAt(b, 0); err != nil {
+	name := tmp.Name()
+	fail := func(err error) error {
+		_ = tmp.Close()
+		_ = os.Remove(name)
 		return err
 	}
-	return s.f.Sync()
+	if _, err := tmp.Write(b); err != nil {
+		return fail(err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fail(err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fail(err)
+	}
+	if err := os.Rename(name, s.path); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return nil
 }
 
-func (s *tokenSink) close() { _ = s.f.Close() }
+func (s *tokenSink) close() {
+	if len(s.tokens) == 0 {
+		_ = os.Remove(s.path)
+	}
+}
 
 // ---- the summary ----
 

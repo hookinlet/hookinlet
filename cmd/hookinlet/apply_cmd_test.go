@@ -5,7 +5,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/hookinlet/hookinlet/internal/admin"
+	"github.com/hookinlet/hookinlet/internal/applyfile"
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
 	"github.com/hookinlet/hookinlet/pkg/secretbox"
@@ -379,7 +382,7 @@ func TestApplyDryRunChangesNothing(t *testing.T) {
 	}
 	// A dry run still demands the secret be there.
 	code, _, errOut = runCmd(t, e.env(nil), "apply", "-f", changed, "--dry-run")
-	if code != exitUsage || !strings.Contains(errOut, "HOOK_SECRET") {
+	if code != exitUsage || !strings.Contains(errOut, "not set or is empty") || strings.Contains(errOut, "HOOK_SECRET") {
 		t.Errorf("dry run with a missing secret: %d %q", code, errOut)
 	}
 }
@@ -392,12 +395,15 @@ func TestApplyChecksTheWholeFileBeforeTouchingTheServer(t *testing.T) {
 		yaml, wantErr string
 		env           map[string]string
 	}{
-		"unknown key in the second inbox": {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    retenton_days: 3\n", "line 4", nil},
-		"literal secret":                  {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret: abc\n", "secret_env", nil},
-		"missing environment variable":    {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret_env: NOT_SET_ANYWHERE\n", "NOT_SET_ANYWHERE", nil},
-		"missing secret file":             {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret_file: " + filepath.Join(dir, "absent") + "\n", "absent", nil},
-		"bad verifier configuration":      {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: stripe\n    verifier_config: {tolerance_seconds: soon}\n", "tolerance", nil},
-		"bad slug":                        {"inboxes:\n  - slug: good-one\n  - slug: Bad_One\n", "slug must be", nil},
+		"unknown key in the second inbox":  {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    retenton_days: 3\n", "line 4", nil},
+		"literal secret":                   {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret: abc\n", "secret_env", nil},
+		"missing environment variable":     {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret_env: NOT_SET_ANYWHERE\n", "line 5", nil},
+		"missing secret file":              {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret_file: " + filepath.Join(dir, "absent") + "\n", "line 5", nil},
+		"configuration without a verifier": {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier_config: {tolerance_seconds: 300}\n", "bad-one", nil},
+		"a blank value":                    {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    retention_days:\n", "leave the key out", nil},
+		"an empty on_verify_fail":          {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    on_verify_fail: ''\n", "on_verify_fail must be one of", nil},
+		"bad verifier configuration":       {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: stripe\n    verifier_config: {tolerance_seconds: soon}\n", "tolerance", nil},
+		"bad slug":                         {"inboxes:\n  - slug: good-one\n  - slug: Bad_One\n", "slug must be", nil},
 	} {
 		f := writeTestFile(t, dir, "bad.yaml", tc.yaml)
 		code, out, errOut := runCmd(t, e.env(tc.env), "apply", "-f", f, "--tokens-out", tokens)
@@ -535,4 +541,101 @@ func TestApplyDirectMode(t *testing.T) {
 	if code, _, _ := runCmd(t, both, "apply", "-f", f); code != exitUsage {
 		t.Errorf("url and data-dir together: %d", code)
 	}
+}
+
+// A secret pasted where the name of its variable or its file belongs is not
+// repeated in anything apply says, even when it looks like a name.
+func TestApplyNeverEchoesWhatWasWrittenAsASecretSource(t *testing.T) {
+	e := newApplyEnv(t)
+	dir := t.TempDir()
+	const looksLikeAName = "whsec_9fK2abcDEF0123456789xyz"
+	for _, key := range []string{"secret_env", "secret_file"} {
+		f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: pasted-one\n    verifier: token\n    "+key+": "+looksLikeAName+"\n")
+		for _, dry := range []bool{false, true} {
+			args := []string{"apply", "-f", f, "--tokens-out", filepath.Join(dir, "t.json")}
+			if dry {
+				args = append(args, "--dry-run")
+			}
+			code, out, errOut := runCmd(t, e.env(nil), args...)
+			if code == 0 {
+				t.Errorf("%s dry=%v: accepted", key, dry)
+			}
+			mustNotLeak(t, []string{out, errOut, e.logs.String()}, looksLikeAName)
+		}
+	}
+}
+
+// A blank value is not a zero: it would switch retention off or re-enable an
+// inbox that was disabled.
+func TestApplyDoesNotTreatABlankValueAsASetting(t *testing.T) {
+	e := newApplyEnv(t)
+	dir := t.TempDir()
+	tokens := filepath.Join(dir, "t.json")
+	first := writeTestFile(t, dir, "a.yaml", "inboxes:\n  - slug: kept-one\n    retention_days: 30\n    disabled: true\n")
+	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", first, "--tokens-out", tokens); code != 0 {
+		t.Fatal(errOut)
+	}
+	blank := writeTestFile(t, dir, "b.yaml", "inboxes:\n  - slug: kept-one\n    retention_days:\n    disabled:\n")
+	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", blank); code != exitUsage || !strings.Contains(errOut, "leave the key out") {
+		t.Errorf("a blank value was accepted: %d %q", code, errOut)
+	}
+	if v := e.views()["kept-one"]; v.RetentionDays != 30 || !v.Disabled {
+		t.Errorf("a blank value changed the inbox: %+v", v)
+	}
+}
+
+// A file whose later inbox is bad creates nothing; and a run that fails before any
+// token was issued leaves no empty tokens file in the way of the next try.
+func TestApplyLeavesNoEmptyTokensFileAndNothingHalfDone(t *testing.T) {
+	e := newApplyEnv(t)
+	dir := t.TempDir()
+	tokens := filepath.Join(dir, "t.json")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-ok\n  - slug: second-bad\n    verifier_config: {tolerance_seconds: 300}\n")
+	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", f, "--tokens-out", tokens); code != exitUsage {
+		t.Fatalf("%d %s", code, errOut)
+	}
+	if len(e.views()) != 0 {
+		t.Errorf("a bad file created inboxes: %v", e.views())
+	}
+	// The first create fails at the server: no token was issued, so no file is left.
+	g := writeTestFile(t, dir, "j.yaml", "inboxes:\n  - slug: only-one\n    verifier: custom-thing\n")
+	if code, _, _ := runCmd(t, e.env(nil), "apply", "-f", g, "--tokens-out", tokens); code != exitRuntime {
+		t.Fatalf("code %d", code)
+	}
+	if _, err := os.Stat(tokens); !os.IsNotExist(err) {
+		t.Errorf("an empty tokens file was left behind: %v", err)
+	}
+	// After a partial failure the file holds what was issued, and the message says
+	// to give the next run a new file.
+	h := writeTestFile(t, dir, "k.yaml", "inboxes:\n  - slug: made-one\n  - slug: refused-one\n    verifier: custom-thing\n")
+	code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", h, "--tokens-out", tokens)
+	if code != exitRuntime || !strings.Contains(errOut, "new file") {
+		t.Errorf("code %d err %q", code, errOut)
+	}
+	if toks := readTokens(t, tokens); len(toks) != 1 {
+		t.Errorf("tokens = %v", toks)
+	}
+}
+
+type failingSecretAPI struct{ adminAPI }
+
+func (failingSecretAPI) Update(context.Context, string, admin.Patch) (admin.View, error) {
+	return admin.View{}, nil
+}
+func (failingSecretAPI) SetSecret(context.Context, string, string) (admin.View, error) {
+	return admin.View{}, errors.New("the store is unavailable")
+}
+
+// When the secret cannot be stored, what apply says names the inbox and the
+// reason, and never the secret.
+func TestApplyDoesNotLeakTheSecretWhenStoringItFails(t *testing.T) {
+	const secret = "s3cr3t-value-that-must-not-appear"
+	it := applyfile.Item{Spec: applyfile.Spec{Slug: "abc"}, Action: applyfile.Update, Fields: []string{"retention_days"}, SetSecret: true}
+	var out, errOut bytes.Buffer
+	rep := &applyReport{w: &out}
+	err := applyOne(t.Context(), failingSecretAPI{}, it, secret, false, nil, rep, &errOut)
+	if err == nil {
+		t.Fatal("the failure was swallowed")
+	}
+	mustNotLeak(t, []string{err.Error(), out.String(), errOut.String()}, secret)
 }
