@@ -56,6 +56,15 @@ applies.
   API, the backup download, MCP, and the health checks) is served through it, so a
   status the document does not list for an operation does not compile.
 
+### Durable commits
+
+#### Changed
+- `pkg/store/sqlite` opens its connections with `synchronous=FULL` instead of
+  `NORMAL`. A delivery acknowledged with a `2xx` now survives power loss, not
+  only a crash of the process. A sequential append costs about 36 us more
+  (98 us to 134 us for 1 KiB on the development machine). No exported API
+  changed.
+
 ### Phase 8: open-source polish
 
 #### Added

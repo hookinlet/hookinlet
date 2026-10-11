@@ -39,13 +39,48 @@ with the size of the inbox.
 
 ## What this does not measure
 
-- **Writes.** Ingest throughput is separate. Each delivery is one durable
-  transaction.
+- **Concurrent writes.** Ingest throughput with many senders is not measured.
+  Each delivery is one durable transaction; see "Cost of durable writes" below
+  for one sender.
 - **Many readers at once.** One request at a time was measured. Reads use their
   own pool of connections and do not wait for the writer.
 - **A cold cache.** The first queries after a restart read from disk. The
   working set for the common shapes is the newest few pages.
 - **Slower disks and smaller machines.** Expect the same shape, scaled.
+
+## Cost of durable writes
+
+Each commit is synced to disk (`synchronous=FULL`), so a `2xx` from ingest means
+the message survives power loss, not only a crash of the process. The store used
+`synchronous=NORMAL` until this change, which syncs the WAL only at checkpoints
+and can lose the most recent commits on power loss.
+
+`BenchmarkAppendSequential` is one sender appending 1 KiB messages one after
+another through `Store.Append`, on the same machine as above (Go 1.27.2, macOS,
+internal SSD), five runs of 3,000 appends each:
+
+| `synchronous` | Per append (median of five runs) | Range | Appends per second |
+|---|---:|---:|---:|
+| NORMAL (before) | 98 us | 95 to 115 us | about 10,200 |
+| FULL (now) | 134 us | 126 to 154 us | about 7,500 |
+
+So a sequential writer pays about 36 us more per message, roughly 1.4 times as
+long. This is the figure for one machine and one disk; on a disk with slower
+flushes the difference is larger. On macOS, SQLite's default is `fsync`, which
+does not force the drive's own cache to empty; Linux `fdatasync`/`fsync` does
+ask the device to flush. The numbers say nothing about a host with a network
+volume.
+
+The append-latency gates for large deletes (below) were run again with FULL and
+still pass: append p99 of 24 ms while one million rows are pruned (another inbox
+or the same one), 20 ms while a one-million-message inbox is deleted, and 17 ms
+while large messages are pruned, against the 50 ms gate. These runs gave higher
+p99 values than the table below (16 to 18 ms, and 9 ms for large messages); the
+tables below were measured with NORMAL and have not been redone.
+
+```sh
+go test -run '^$' -bench BenchmarkAppendSequential -benchtime 3000x ./pkg/store/sqlite/
+```
 
 ## What was fixed to get here
 
