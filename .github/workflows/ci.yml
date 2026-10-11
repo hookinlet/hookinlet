@@ -1,9 +1,18 @@
 name: CI
 
+# A pull request gets the fast checks: build, vet, the unit tests, lint, and the
+# static checks on the OpenAPI document and the generated code. Everything that
+# starts a server, builds an image, or builds a release runs when a change lands on
+# main and every night (a tag runs the release workflow, which does the release
+# checks itself), so it is never skipped, only moved off the critical path of a
+# review.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,8 +37,10 @@ jobs:
           go generate ./internal/api
           git diff --exit-code -- internal/api || { echo "::error::internal/api is out of date; run make generate and commit the result"; exit 1; }
           test -z "$(git status --porcelain -- internal/api)"
+      # The race detector doubles the time and is for main, not for every push to a
+      # review.
       - name: Test (everything but pkg/server, which has its own job)
-        run: go test -race $(go list ./... | grep -v '/pkg/server$')
+        run: go test ${{ github.event_name == 'pull_request' && '' || '-race' }} $(go list ./... | grep -v '/pkg/server$')
 
   # pkg/server has several hundred tests that run one after another and takes as
   # long as all the rest together, so it runs alongside them, not after them.
@@ -42,7 +53,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Test pkg/server
-        run: go test -race ./pkg/server/
+        run: go test ${{ github.event_name == 'pull_request' && '' || '-race' }} ./pkg/server/
 
   lint:
     runs-on: ubuntu-latest
@@ -56,6 +67,7 @@ jobs:
           version: v2.14.0
 
   docker:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,13 +93,16 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # Starts servers and runs the examples against them: not for a review.
       - name: Run the examples in the documentation
+        if: github.event_name != 'pull_request'
         run: scripts/test-docs.sh
       - name: Lint the OpenAPI document
         run: npx --yes @redocly/cli@2.62.1 lint docs/openapi.json
 
   # A release is only worth tagging if it would work, so check it on every change.
   release-config:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
