@@ -67,12 +67,7 @@ func TestFiveHundredIdleStreamsStayUnderFiftyMegabytes(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "hookinlet")
-	build := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-o", bin, ".") //nolint:gosec // builds this repository's own command
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
+	bin := builtBinary(t)
 
 	data := filepath.Join(dir, "data")
 	env := append(os.Environ(),

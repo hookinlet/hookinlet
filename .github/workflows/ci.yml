@@ -11,6 +11,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -20,8 +21,21 @@ jobs:
         run: CGO_ENABLED=0 go build ./...
       - name: Vet
         run: go vet ./...
-      - name: Test
-        run: go test -race ./...
+      - name: Test (everything but pkg/server, which has its own job)
+        run: go test -race $(go list ./... | grep -v '/pkg/server$')
+
+  # pkg/server has several hundred tests that run one after another and takes as
+  # long as all the rest together, so it runs alongside them, not after them.
+  test-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Test pkg/server
+        run: go test -race ./pkg/server/
 
   lint:
     runs-on: ubuntu-latest

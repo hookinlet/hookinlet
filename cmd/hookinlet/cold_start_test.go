@@ -7,18 +7,57 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/hookinlet/hookinlet/internal/benchseed"
 )
+
+var (
+	binaryOnce sync.Once
+	binaryPath string
+	binaryErr  error
+	binaryDir  string
+)
+
+// builtBinary builds the command once for every test that runs it as a process,
+// and returns its path. Building is the slowest thing these tests do.
+func builtBinary(t *testing.T) string {
+	t.Helper()
+	binaryOnce.Do(func() {
+		binaryDir, binaryErr = os.MkdirTemp("", "hookinlet-test-bin-*")
+		if binaryErr != nil {
+			return
+		}
+		binaryPath = filepath.Join(binaryDir, "hookinlet")
+		build := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w", "-o", binaryPath, ".") //nolint:gosec,noctx // builds this repository's own command, once
+		build.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if out, err := build.CombinedOutput(); err != nil {
+			binaryErr = fmt.Errorf("go build: %w\n%s", err, out)
+		}
+	})
+	if binaryErr != nil {
+		t.Fatal(binaryErr)
+	}
+	return binaryPath
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if binaryDir != "" {
+		_ = os.RemoveAll(binaryDir)
+	}
+	os.Exit(code)
+}
 
 // timeToReady starts the server on an existing data directory and returns how
 // long it takes from exec to the first successful /readyz. It tries again if
@@ -112,14 +151,8 @@ func TestColdStartWithAnExistingDatabaseIsFast(t *testing.T) {
 		rows, limit = 1_000_000, 500*time.Millisecond
 	}
 
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "hookinlet")
-	build := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-ldflags", "-s -w", "-o", bin, ".") //nolint:gosec // builds this repository's own command
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
-	data := filepath.Join(dir, "data")
+	bin := builtBinary(t)
+	data := filepath.Join(t.TempDir(), "data")
 	if _, err := benchseed.Seed(t.Context(), data, "cold", rows); err != nil {
 		t.Fatal(err)
 	}
