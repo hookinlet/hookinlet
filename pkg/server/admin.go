@@ -215,9 +215,13 @@ func (s *Server) adminList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	var after inbox.ID
 	limit := 0
-	for k := range q {
-		if k != "after" && k != "limit" {
+	for k, vs := range q {
+		switch {
+		case k != "after" && k != "limit":
 			writeError(w, http.StatusBadRequest, "invalid_parameter", "unknown parameter")
+			return
+		case len(vs) > 1:
+			writeError(w, http.StatusBadRequest, "invalid_parameter", `parameter "`+k+`": may be given only once`)
 			return
 		}
 	}
