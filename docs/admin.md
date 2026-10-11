@@ -153,6 +153,120 @@ hookinlet inbox create --slug stripe-prod --data-dir ./data
   is safe to share, and the version check covers a change that lands between a
   command's read and its write.
 
+## Applying a file
+
+`hookinlet apply -f inboxes.yaml` brings a server's inboxes to the state a file
+describes, so that a setup can be kept in version control and repeated. It
+reaches the data the same way the other commands do (`--url` and the admin
+token, or `--data-dir`), and it only ever uses the admin API's own operations
+and rules.
+
+<!-- exercise -->
+```sh
+export HOOKINLET_URL=https://hooks.example.com          # and HOOKINLET_ADMIN_TOKEN, as above
+export STRIPE_WEBHOOK_SECRET=whsec_example              # the secret stays out of the file
+
+cat > inboxes.yaml <<'EOF'
+inboxes:
+  - slug: stripe-live
+    name: Stripe (production)
+    verifier: stripe
+    secret_env: STRIPE_WEBHOOK_SECRET
+    verifier_config: { tolerance_seconds: 300 }
+    retention_days: 30
+    event_type_pointer: /type
+  - slug: deploy-events
+    retention_max_count: 50000
+EOF
+
+hookinlet apply -f inboxes.yaml --tokens-out tokens.json --dry-run   # says what it would do; changes nothing
+hookinlet apply -f inboxes.yaml --tokens-out tokens.json             # does it
+hookinlet apply -f inboxes.yaml                                      # again: nothing to create or change
+```
+
+The second command prints:
+
+```
+created           stripe-live
+secret set        stripe-live
+created           deploy-events
+
+2 created, 0 updated, 0 unchanged, 1 secrets set, 0 not managed
+agent tokens of the new inboxes were written to tokens.json
+```
+
+The third prints `unchanged` for both inboxes, `secret set` for the first, and no
+`created` lines.
+
+**The file.** One key, `inboxes`, a list. An entry is identified by its `slug`
+(3 to 64 characters from `a-z`, `0-9`, and `-`; it is the only required key, and
+it never changes). The other keys are the admin API's fields, with the same names
+and the same rules, because the same code checks them: `name`, `verifier`,
+`verifier_config`, `on_verify_fail`, `max_body_bytes`, `retention_days`,
+`retention_max_count`, `event_type_pointer`, and `disabled`. `max_body_bytes`
+cannot be `0` here: leave it out to get the default.
+
+**Secrets are never in the file.** A literal secret (`secret:` or
+`verifier_secret:`) is an error. Name where to read it from instead, with one of:
+
+- `secret_env: NAME`, an environment variable of the process running `apply`;
+- `secret_file: /path`, a file (such as a mounted secret). Trailing newlines
+  are not part of the secret. A file larger than 4,096 bytes is refused.
+
+Giving both is an error, and so is a source that is missing or empty (the
+message points at the line of the key and does not repeat the variable name or
+the path, because a secret pasted under the wrong key would look like one).
+Secrets are never printed or logged.
+
+**What `apply` does.** For each entry, in order:
+
+- If the inbox does not exist, it is created, with its secret and its agent
+  token. Settings the file leaves out take the server's defaults.
+- If it exists, only the settings that differ from the file are changed (one
+  `PATCH`), and settings the file leaves out are left alone (a key with no value, such
+  as `retention_days:`, is an error and not a zero: leave the key out), so changes made by
+  hand to those survive. `event_type_pointer: ""` is a setting too: it clears the
+  pointer. `verifier_config` is compared by meaning, not spelling.
+- A verifier secret cannot be read back, so there is no telling whether it has
+  drifted. When an entry names a secret source, the secret is set again on every
+  run, and the summary says `secret set`. That changes nothing else about the
+  inbox.
+
+`apply` **never deletes** an inbox or a message. Inboxes on the server that the
+file does not mention are left alone and listed as `not managed`. (Removing an
+inbox is `inbox delete`, a separate and explicit act on purpose.)
+
+**Checked before anything changes.** The whole file is read first, and every
+secret source with it. An unknown key, a repeated key, a literal secret, a bad
+slug or setting, an anchor or alias, or a second YAML document is an error that
+names the key and its line; nothing is touched, and the exit status is 2.
+`--dry-run` does all of that and then prints what would be created and changed
+(`would create`, `would update: retention_days`) without changing anything. A
+failure while applying (the server refuses a setting, or cannot be reached)
+stops at that inbox with exit status 1; what was done before stays done, and
+running `apply` again carries on, because every step is safe to repeat.
+
+A setting that only the server can judge, such as a verifier that an embedding
+program registered, is checked by the server when it is applied, so that kind of
+mistake is found at that inbox and not before.
+
+**Agent tokens.** A new inbox's agent token is shown once, so `apply` writes it
+to the file named by `--tokens-out`, as JSON (`{"stripe-live": "hki_…"}`), and
+prints it nowhere. The file is created new with mode `0600` and is never
+overwritten: if it already exists, or cannot be created, `apply` stops before
+changing anything. It is replaced, atomically, as each inbox is created, so a failure
+part-way does not lose the tokens already issued; if a run fails before any token was
+issued the file is removed again. After a failure part-way, give the next run a new
+`--tokens-out` file: the first one keeps the tokens already issued and is never
+overwritten. If a run would create an
+inbox and there is no `--tokens-out`, `apply` refuses and changes nothing. A run
+that creates nothing needs no `--tokens-out` and does not touch it, so the same
+command line can be run again.
+
+`--json` prints the summary as JSON (`created`, `updated`, `unchanged`,
+`secret_set`, `not_managed`), also without secrets or tokens. `-f -` reads the
+file from standard input.
+
 ## Retention
 
 Each inbox can limit how much it keeps: `retention_days` deletes messages older

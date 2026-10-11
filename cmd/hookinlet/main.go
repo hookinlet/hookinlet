@@ -51,6 +51,8 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		return inboxCmd(args[1:], getenv, stdout, stderr)
 	case "retention":
 		return retentionCmd(args[1:], getenv, stdout, stderr)
+	case "apply":
+		return applyCmd(args[1:], getenv, stdout, stderr)
 	case "backup":
 		return backupCmd(args[1:], getenv, stdout, stderr)
 	case "version":
@@ -74,6 +76,7 @@ Commands:
   migrate   Apply pending database migrations and report the schema version
   inbox     Manage inboxes: create, list, show, update, set-secret, rotate-token, delete
   retention Apply retention policies now (retention run)
+  apply     Bring inboxes to the state a YAML file declares (apply -f FILE)
   backup    Write a consistent copy of the database (backup --out FILE)
   version   Print the version
   help      Show this help
@@ -81,7 +84,7 @@ Commands:
 Every setting is a flag and an environment variable: --listen-addr is also
 HOOKINLET_LISTEN_ADDR. Flags win over the environment.
 
-The inbox, retention, and backup commands call a running server's admin API when
+The inbox, apply, retention, and backup commands call a running server's admin API when
 given --url (with the admin token in HOOKINLET_ADMIN_TOKEN), and otherwise work
 directly in the data directory (--data-dir).
 `)
