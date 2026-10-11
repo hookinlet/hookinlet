@@ -15,7 +15,7 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
-const inboxCols = `id, slug, name, version, verifier, verifier_config, verifier_secret, on_verify_fail,
+const inboxCols = `id, slug, ingest_key, name, version, verifier, verifier_config, verifier_secret, on_verify_fail,
 	agent_token_hash, max_body_bytes, retention_days, retention_max_count, event_type_pointer,
 	last_seq, disabled, created_at, updated_at`
 
@@ -31,7 +31,7 @@ func scanInbox(row rowScanner) (*inbox.Inbox, error) {
 		disabled             int
 		createdAt, updatedAt string
 	)
-	if err := row.Scan(&in.ID, &in.Slug, &in.Name, &in.Version, &in.Verifier, &config, &secret, &in.OnVerifyFail,
+	if err := row.Scan(&in.ID, &in.Slug, &in.IngestKey, &in.Name, &in.Version, &in.Verifier, &config, &secret, &in.OnVerifyFail,
 		&hash, &in.MaxBodyBytes, &in.RetentionDays, &in.RetentionMaxCount, &in.EventTypePointer,
 		&in.LastSeq, &disabled, &createdAt, &updatedAt); err != nil {
 		return nil, err
@@ -79,10 +79,9 @@ func (s *Store) GetInboxBySlug(ctx context.Context, slug string) (*inbox.Inbox, 
 	return s.getInboxWhere(ctx, `slug = ?`, slug, "inbox")
 }
 
-// ResolveIngestKey implements inbox.Store. In the open-source store the ingest
-// key is the slug.
+// ResolveIngestKey implements inbox.Store.
 func (s *Store) ResolveIngestKey(ctx context.Context, key string) (*inbox.Inbox, error) {
-	return s.getInboxWhere(ctx, `slug = ?`, key, "ingest key")
+	return s.getInboxWhere(ctx, `ingest_key = ?`, key, "ingest key")
 }
 
 // GetInboxByTokenHash implements inbox.Store.
@@ -151,6 +150,12 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 		case !errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("sqlite: check slug: %w", err)
 		}
+		switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE ingest_key = ?`, cp.IngestKey).Scan(&one); {
+		case err == nil:
+			return fmt.Errorf("%w: ingest key is already in use", inbox.ErrConflict)
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("sqlite: check ingest key: %w", err)
+		}
 		switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE agent_token_hash = ?`, []byte(cp.AgentTokenHash)).Scan(&one); {
 		case err == nil:
 			return fmt.Errorf("%w: agent token hash is already in use", inbox.ErrConflict)
@@ -158,11 +163,11 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 			return fmt.Errorf("sqlite: check token hash: %w", err)
 		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO inboxes (
-				slug, name, version, verifier, verifier_config, verifier_secret, on_verify_fail, agent_token_hash,
+				slug, ingest_key, name, version, verifier, verifier_config, verifier_secret, on_verify_fail, agent_token_hash,
 				max_body_bytes, retention_days, retention_max_count, event_type_pointer, last_seq, disabled,
 				created_at, updated_at)
-			VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-			cp.Slug, cp.Name, cp.Verifier, string(cp.VerifierConfig), secretArg(cp.VerifierSecret), cp.OnVerifyFail,
+			VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+			cp.Slug, cp.IngestKey, cp.Name, cp.Verifier, string(cp.VerifierConfig), secretArg(cp.VerifierSecret), cp.OnVerifyFail,
 			[]byte(cp.AgentTokenHash), cp.MaxBodyBytes, cp.RetentionDays, cp.RetentionMaxCount, cp.EventTypePointer,
 			boolInt(cp.Disabled), formatTime(now), formatTime(now))
 		if err != nil {
@@ -213,13 +218,22 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 			return fmt.Errorf("sqlite: check token hash: %w", err)
 		}
 
+		var otherKey int64
+		switch err := tx.QueryRowContext(ctx, `SELECT id FROM inboxes WHERE ingest_key = ? AND id <> ?`,
+			cp.IngestKey, int64(cp.ID)).Scan(&otherKey); {
+		case err == nil:
+			return fmt.Errorf("%w: ingest key is already in use", inbox.ErrConflict)
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("sqlite: check ingest key: %w", err)
+		}
+
 		// last_seq, slug, and created_at are deliberately not in this list.
 		if _, err := tx.ExecContext(ctx, `UPDATE inboxes SET
-				name = ?, version = version + 1, verifier = ?, verifier_config = ?, verifier_secret = ?,
+				ingest_key = ?, name = ?, version = version + 1, verifier = ?, verifier_config = ?, verifier_secret = ?,
 				on_verify_fail = ?, agent_token_hash = ?, max_body_bytes = ?, retention_days = ?,
 				retention_max_count = ?, event_type_pointer = ?, disabled = ?, updated_at = ?
 			WHERE id = ?`,
-			cp.Name, cp.Verifier, string(cp.VerifierConfig), secretArg(cp.VerifierSecret), cp.OnVerifyFail,
+			cp.IngestKey, cp.Name, cp.Verifier, string(cp.VerifierConfig), secretArg(cp.VerifierSecret), cp.OnVerifyFail,
 			[]byte(cp.AgentTokenHash), cp.MaxBodyBytes, cp.RetentionDays, cp.RetentionMaxCount, cp.EventTypePointer,
 			boolInt(cp.Disabled), formatTime(now), int64(cp.ID)); err != nil {
 			return fmt.Errorf("sqlite: update inbox: %w", err)

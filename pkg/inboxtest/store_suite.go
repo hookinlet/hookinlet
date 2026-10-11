@@ -37,6 +37,7 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 	}{
 		{"CreateInbox", testCreateInbox},
 		{"CreateInboxValidation", testCreateInboxValidation},
+		{"IngestKeys", testIngestKeys},
 		{"InboxReturnsDoNotAlias", testInboxAliasing},
 		{"InboxSecretsAreRedacted", testInboxSecretsRedacted},
 		{"UpdateInbox", testUpdateInbox},
@@ -48,6 +49,7 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"AppendBasics", testAppendBasics},
 		{"ReceivedAtIsAssignedByTheStore", testReceivedAt},
 		{"AppendDedupe", testAppendDedupe},
+		{"AppendDedupeKey", testAppendDedupeKey},
 		{"AppendDedupeIgnoresUnverified", testDedupeIgnoresUnverified},
 		{"AppendDedupeConcurrent", testAppendDedupeConcurrent},
 		{"BodyAndFieldRoundTrip", testRoundTrip},
@@ -310,6 +312,55 @@ func testCreateInbox(t *testing.T, s inbox.Store, clk *Clock) {
 		"ResolveWithSuffix": func() error { _, err := s.ResolveIngestKey(ctx, "alpha/extra"); return err },
 	} {
 		isErr(t, name, call(), inbox.ErrNotFound)
+	}
+}
+
+// An inbox is reached at its ingest key, which defaults to the slug but is a
+// value of its own.
+func testIngestKeys(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	plain := createInbox(t, s, "keys-plain")
+	if plain.IngestKey != "keys-plain" {
+		t.Errorf("the default ingest key = %q, want the slug", plain.IngestKey)
+	}
+	custom := createInbox(t, s, "keys-custom", func(in *inbox.Inbox) { in.IngestKey = "Zq_9-Mixed" })
+	got, err := s.ResolveIngestKey(ctx, "Zq_9-Mixed")
+	if err != nil || got.ID != custom.ID {
+		t.Fatalf("ResolveIngestKey(custom) = %v, %v", got, err)
+	}
+	// The slug is not a key when the inbox has another one, and keys are case sensitive.
+	isErr(t, "slug of an inbox with its own key", func() error { _, err := s.ResolveIngestKey(ctx, "keys-custom"); return err }(), inbox.ErrNotFound)
+	isErr(t, "key in the wrong case", func() error { _, err := s.ResolveIngestKey(ctx, "zq_9-mixed"); return err }(), inbox.ErrNotFound)
+
+	// A key in use cannot be taken, by create or by update, and a failed attempt changes nothing.
+	isErr(t, "duplicate key", s.CreateInbox(ctx, mkInbox("keys-dup", func(in *inbox.Inbox) { in.IngestKey = "Zq_9-Mixed" })), inbox.ErrConflict)
+	isErr(t, "a slug is a key too", s.CreateInbox(ctx, mkInbox("keys-dup2", func(in *inbox.Inbox) { in.IngestKey = "keys-plain" })), inbox.ErrConflict)
+	taken := *plain
+	taken.IngestKey = "Zq_9-Mixed"
+	isErr(t, "update to a taken key", s.UpdateInbox(ctx, &taken), inbox.ErrConflict)
+	if again, err := s.ResolveIngestKey(ctx, "keys-plain"); err != nil || again.ID != plain.ID {
+		t.Errorf("a refused update changed the key: %v, %v", again, err)
+	}
+
+	// Rotating the key moves the inbox; the old key stops working.
+	moved := *plain
+	moved.IngestKey = "fresh-key-123"
+	if err := s.UpdateInbox(ctx, &moved); err != nil {
+		t.Fatal(err)
+	}
+	if moved.IngestKey != "fresh-key-123" {
+		t.Errorf("UpdateInbox returned key %q", moved.IngestKey)
+	}
+	if r, err := s.ResolveIngestKey(ctx, "fresh-key-123"); err != nil || r.ID != plain.ID {
+		t.Errorf("new key: %v, %v", r, err)
+	}
+	isErr(t, "old key", func() error { _, err := s.ResolveIngestKey(ctx, "keys-plain"); return err }(), inbox.ErrNotFound)
+	if r, err := s.GetInboxBySlug(ctx, "keys-plain"); err != nil || r.IngestKey != "fresh-key-123" {
+		t.Errorf("by slug after rotation: %v, %v", r, err)
+	}
+
+	for name, key := range map[string]string{"too short": "ab", "too long": strings.Repeat("k", 65), "slash": "a/b", "dot": "a.b", "space": "a b", "non-ascii": "clé-clé"} {
+		isErr(t, "ingest key "+name, s.CreateInbox(ctx, mkInbox("keys-bad", func(in *inbox.Inbox) { in.IngestKey = key })), inbox.ErrInvalid)
 	}
 }
 
@@ -779,6 +830,42 @@ func testAppendDedupe(t *testing.T, s inbox.Store, _ *Clock) {
 	}
 	if got := query(t, s, b.ID, inbox.Query{DeliveryID: ""}); len(got.Messages) != 3 {
 		t.Errorf("empty DeliveryID filter should match everything, got %d messages", len(got.Messages))
+	}
+}
+
+// What deduplication compares is the dedupe key, which is the delivery id unless
+// the caller says otherwise: a caller whose ids are not signed makes it the id
+// and a hash of the body.
+func testAppendDedupeKey(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	in := createInbox(t, s, "dedupe-key")
+	first := appendMsg(t, s, in.ID, func(m *inbox.NewMessage) {
+		m.DeliveryID, m.DedupeKey, m.Body = "d-1", "d-1#aaa", []byte("first")
+	})
+	// Same id, different key: a different delivery.
+	second := appendMsg(t, s, in.ID, func(m *inbox.NewMessage) {
+		m.DeliveryID, m.DedupeKey, m.Body = "d-1", "d-1#bbb", []byte("second")
+	})
+	if first.Seq == second.Seq {
+		t.Error("deliveries with the same id and different keys were deduplicated")
+	}
+	if second.DeliveryID != "d-1" {
+		t.Errorf("DeliveryID = %q; the id is kept for display whatever the key", second.DeliveryID)
+	}
+	// Same key: a duplicate, even with another delivery id.
+	dup, created, err := s.Append(ctx, in.ID, nm(func(m *inbox.NewMessage) {
+		m.DeliveryID, m.DedupeKey, m.Body = "other-id", "d-1#aaa", []byte("replay")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || dup.Seq != first.Seq {
+		t.Errorf("same key: created=%v seq=%d, want the first message (seq %d)", created, dup.Seq, first.Seq)
+	}
+	// Without a key, the id is the key.
+	a := appendMsg(t, s, in.ID, func(m *inbox.NewMessage) { m.DeliveryID = "plain" })
+	if _, created, _ := s.Append(ctx, in.ID, nm(func(m *inbox.NewMessage) { m.DeliveryID = "plain" })); created {
+		t.Errorf("a repeated id with no key was stored again (first was seq %d)", a.Seq)
 	}
 }
 

@@ -85,6 +85,14 @@ func runCases(t *testing.T, verifierName string, cases []tc) {
 				if res.DeliveryID != c.want.deliveryID || res.EventType != c.want.eventType || string(res.Challenge) != c.want.challenge {
 					t.Errorf("result = %+v, want id %q type %q challenge %q", res, c.want.deliveryID, c.want.eventType, c.want.challenge)
 				}
+				// Only the schemes whose signature covers the id vouch for it.
+				signedID := (verifierName == "stripe" || verifierName == "slack" || verifierName == "standardwebhooks") && c.want.deliveryID != ""
+				if res.IDSigned != signedID {
+					t.Errorf("%s: IDSigned = %v, want %v", verifierName, res.IDSigned, signedID)
+				}
+				if res.Unauthenticated != (verifierName == "none") {
+					t.Errorf("%s: Unauthenticated = %v", verifierName, res.Unauthenticated)
+				}
 			case c.want.config:
 				if !errors.Is(err, verify.ErrConfig) {
 					t.Fatalf("error = %v, want ErrConfig", err)
@@ -569,4 +577,31 @@ func slackSign(secret, ts, body string) string {
 	m := hmac.New(sha256.New, []byte(secret))
 	m.Write([]byte("v0:" + ts + ":" + body))
 	return "v0=" + hex.EncodeToString(m.Sum(nil))
+}
+
+// A secret that cannot work is found when it is set, not at the first delivery.
+func TestStandardWebhooksSecretIsCheckedWhenSet(t *testing.T) {
+	v, err := verify.Default().New("standardwebhooks", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker, ok := v.(verify.SecretChecker)
+	if !ok {
+		t.Fatal("the standardwebhooks verifier does not check its secret")
+	}
+	for secret, good := range map[string]bool{
+		"whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw": true,
+		"not-a-whsec":                           false,
+		"whsec_":                                false,
+		"whsec_!!!not base64!!!":                false,
+		"":                                      false,
+	} {
+		err := checker.CheckSecret([]byte(secret))
+		if (err == nil) != good {
+			t.Errorf("CheckSecret(%q) = %v, want ok=%v", secret, err, good)
+		}
+		if err != nil && (!errors.Is(err, verify.ErrConfig) || (len(secret) > 8 && strings.Contains(err.Error(), secret))) {
+			t.Errorf("CheckSecret(%q): the error %v is not a config error, or repeats the secret", secret, err)
+		}
+	}
 }

@@ -56,12 +56,29 @@ type Verifier interface {
 type Result struct {
 	// DeliveryID identifies the delivery for deduplication, or is empty.
 	DeliveryID string
+	// IDSigned says the signature covers DeliveryID, so whoever sent it held the
+	// secret and chose the id. When it is false (an id taken from an unsigned
+	// header) the id is only a hint: a captured request could be replayed under a
+	// new id, or an id claimed ahead of the delivery it belongs to, so
+	// deduplication also requires the body to be the same.
+	IDSigned bool
+	// Unauthenticated says nothing was checked: the verifier accepts anything
+	// (the "none" verifier). The delivery is stored, but not as verified.
+	Unauthenticated bool
 	// EventType names the kind of event, or is empty.
 	EventType string
 	// Challenge, when non-nil, is a handshake the sender expects echoed back
 	// (Slack's url_verification). The delivery is answered with it and not
 	// stored.
 	Challenge []byte
+}
+
+// SecretChecker is implemented by verifiers that can say, when a secret is set
+// and not only when the first delivery fails, that it cannot be used.
+type SecretChecker interface {
+	// CheckSecret returns an error that wraps ErrConfig, with a message safe to
+	// show to an administrator (never the secret), if secret is unusable.
+	CheckSecret(secret []byte) error
 }
 
 // HeaderRedactor is implemented by verifiers whose credential travels in a
