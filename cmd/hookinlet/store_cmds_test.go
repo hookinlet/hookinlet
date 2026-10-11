@@ -84,7 +84,7 @@ func TestInboxCreate(t *testing.T) {
 
 	code, out, errOut := runCmd(t, env, "inbox", "create", "--slug", "stripe-prod", "--name", "Stripe (prod)",
 		"--verifier", "stripe", "--on-verify-fail", "store", "--retention-days", "30", "--retention-max-count", "5000",
-		"--max-body-bytes", "65536", "--event-type-pointer", "/type", "--verifier-config", `{"tolerance":300}`)
+		"--max-body-bytes", "65536", "--event-type-pointer", "/type", "--verifier-config", `{"tolerance_seconds":300}`)
 	if code != 0 {
 		t.Fatalf("code %d, stderr %q", code, errOut)
 	}
