@@ -6,6 +6,7 @@ package admin_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -131,5 +132,32 @@ func TestRotatedTokensAreNeverReusedOrReturnedTwice(t *testing.T) {
 		if !token.Equal(c.AgentToken, in.AgentTokenHash) {
 			t.Error("the issued token is not the stored one")
 		}
+	}
+}
+
+func TestCheckSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		p       admin.CreateParams
+		wantErr string
+	}{
+		{"minimal", admin.CreateParams{Slug: "abc"}, ""},
+		{"bad slug", admin.CreateParams{Slug: "A"}, "slug"},
+		{"bad on_verify_fail", admin.CreateParams{Slug: "abc", OnVerifyFail: "maybe"}, "on_verify_fail"},
+		{"body too big", admin.CreateParams{Slug: "abc", MaxBodyBytes: 1 << 40}, "max_body_bytes"},
+		{"bad pointer", admin.CreateParams{Slug: "abc", EventTypePointer: "type"}, "event_type_pointer"},
+		{"known verifier, bad config", admin.CreateParams{Slug: "abc", Verifier: "stripe", VerifierConfig: []byte(`{"tolerance_seconds":"x"}`)}, "tolerance"},
+		{"known verifier, good config", admin.CreateParams{Slug: "abc", Verifier: "stripe", VerifierConfig: []byte(`{"tolerance_seconds":300}`)}, ""},
+		{"unknown verifier is the server's call", admin.CreateParams{Slug: "abc", Verifier: "custom-one"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := admin.CheckSettings(tc.p)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("error = %v, want one mentioning %q", err, tc.wantErr)
+			}
+		})
 	}
 }
