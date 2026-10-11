@@ -119,7 +119,7 @@ var specs = []spec{
 	{name: "sse-recheck-interval", def: "0", usage: "re-read the store on this interval even without a notifier signal; 0 disables"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
 	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},
-	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps"},
+	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps, at least 1s; \"off\" turns the schedule off (sweeps still run on request)"},
 	{name: "shutdown-timeout", def: "10s", usage: "time allowed for in-flight requests to finish on shutdown"},
 }
 
@@ -195,6 +195,9 @@ type DataSettings struct {
 	DataDir string
 	// MasterKey is empty unless one was supplied.
 	MasterKey Secret
+	// DataDirSet reports whether --data-dir was given on the command line, as
+	// opposed to coming from the environment or the default.
+	DataDirSet bool
 }
 
 // AddDataFlags registers --data-dir and --master-key on fs and returns a
@@ -204,7 +207,7 @@ func AddDataFlags(fs *flag.FlagSet, getenv func(string) string) func() (*DataSet
 	src := register(fs, getenv, "data-dir", "master-key")
 	return func() (*DataSettings, error) {
 		src.resolve(fs)
-		d := &DataSettings{DataDir: src.value("data-dir")}
+		d := &DataSettings{DataDir: src.value("data-dir"), DataDirSet: src.set["data-dir"]}
 		var errs []error
 		if d.DataDir == "" {
 			errs = append(errs, fieldErr("data-dir", "must not be empty"))
@@ -320,8 +323,12 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 	if c.SSERecheckInterval, err = parseDuration(vals, "sse-recheck-interval", false); err != nil {
 		collect(err)
 	}
-	if c.RetentionInterval, err = parseDuration(vals, "retention-interval", true); err != nil {
+	if strings.EqualFold(vals["retention-interval"], "off") {
+		c.RetentionInterval = -1 // no schedule; sweeps still run on request
+	} else if c.RetentionInterval, err = parseDuration(vals, "retention-interval", true); err != nil {
 		collect(err)
+	} else if c.RetentionInterval < time.Second {
+		collect(fieldErr("retention-interval", "must be at least 1s, or \"off\""))
 	}
 	if c.ShutdownTimeout, err = parseDuration(vals, "shutdown-timeout", true); err != nil {
 		collect(err)

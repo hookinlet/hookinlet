@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hookinlet/hookinlet/internal/admin"
 	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
@@ -103,6 +104,14 @@ type Options struct {
 	// fetches it with get_message. It protects an agent's context window.
 	// Defaults to 16 KiB and is limited to 64 KiB.
 	MCPInlineBodyBytes int
+	// PublicBaseURL is the externally visible address of the server, such as
+	// "https://hooks.example.com". The admin API builds ingest URLs from it. If
+	// empty, they are built from the request's Host.
+	PublicBaseURL string
+	// RetentionInterval is how often every inbox's retention policy is applied.
+	// Defaults to one hour; a negative value turns the schedule off (the admin
+	// API can still run a sweep).
+	RetentionInterval time.Duration
 	// Version is reported to MCP clients as the server's version. Defaults to "dev".
 	Version string
 }
@@ -114,6 +123,10 @@ type Server struct {
 	handler http.Handler
 	http    *http.Server
 	reads   chan struct{} // a slot per read request being served
+
+	adm       *admin.Service
+	backupMu  sync.Mutex     // one backup at a time
+	retention sync.WaitGroup // the scheduled sweep, so Serve can wait for it
 
 	streams      chan struct{} // a slot per open SSE stream
 	streamMu     sync.Mutex
@@ -177,6 +190,9 @@ func New(opts Options) (*Server, error) {
 	if opts.SSEHeartbeat <= 0 {
 		opts.SSEHeartbeat = 15 * time.Second
 	}
+	if opts.RetentionInterval == 0 {
+		opts.RetentionInterval = time.Hour
+	}
 	if opts.Version == "" {
 		opts.Version = "dev"
 	}
@@ -201,6 +217,7 @@ func New(opts Options) (*Server, error) {
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),
 	}
+	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("GET /readyz", s.readyz)
@@ -210,6 +227,7 @@ func New(opts Options) (*Server, error) {
 	mux.HandleFunc("/in/{key}/{rest...}", s.handleIngest)
 	if opts.Authenticator != nil {
 		s.registerAgentAPI(mux)
+		s.registerAdmin(mux)
 		mux.HandleFunc("/v1/inboxes/{slug}/stream", s.handleStream)
 		if !opts.DisableMCP {
 			s.registerMCP(mux)
@@ -254,6 +272,15 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.http.Serve(ln) }()
 	s.log.Info("listening", "addr", ln.Addr().String())
+
+	// Retention starts once the listener is up and never delays it (guardrail 27).
+	// Serve does not return until the sweep has stopped, so the caller may close
+	// the Store as soon as it does.
+	if s.opts.RetentionInterval > 0 {
+		s.retention.Add(1)
+		go s.retentionLoop()
+	}
+	defer func() { s.closeCancel(); s.retention.Wait() }()
 
 	select {
 	case err := <-errCh:
@@ -320,4 +347,33 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // {"error": {"code": "...", "message": "..."}}.
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+}
+
+// retentionLoop applies every inbox's retention policy once, now, and then every
+// RetentionInterval until the server shuts down.
+func (s *Server) retentionLoop() {
+	defer s.retention.Done()
+	sweep := func() {
+		start := time.Now()
+		n, err := s.adm.SweepRetention(s.closeCtx)
+		switch {
+		case err != nil && s.closeCtx.Err() != nil:
+			// Shutting down: the sweep stopped part way, and the next one resumes.
+		case err != nil:
+			s.log.Warn("retention sweep failed", "deleted", n, "err", err)
+		case n > 0:
+			s.log.Info("retention sweep", "deleted", n, "took", time.Since(start).Round(time.Millisecond).String())
+		}
+	}
+	sweep()
+	t := time.NewTicker(s.opts.RetentionInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			sweep()
+		case <-s.closing:
+			return
+		}
+	}
 }
