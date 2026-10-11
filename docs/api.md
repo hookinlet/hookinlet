@@ -64,13 +64,17 @@ drain what it holds.
   "verifier": "stripe",
   "message_count": 1240,
   "oldest_seq": 1,
-  "latest_seq": 1240
+  "latest_seq": 1240,
+  "epoch": "9f2c41d37b7e4b0c8f4a9d1e5a6b3c20"
 }
 ```
 
 `message_count` is exact. After retention has removed old messages,
 `oldest_seq` is the first one still stored. An empty inbox has zeros. Nothing
 secret is ever included.
+
+`epoch` identifies one life of the inbox's sequence numbers; see
+[Epochs and gaps](#epochs-and-gaps).
 
 ### Messages
 
@@ -150,6 +154,7 @@ With `fields=summary`, none of the three is present.
 | `verified=true\|false` | Only verified, or only unverified, messages. |
 | `delivery_id=<id>` | The message with this delivery id. |
 | `fields=summary` | Leave out the body fields. |
+| `epoch=<epoch>` | The `epoch` your cursor came from. If it is not the inbox's current one the request is a `409`. `next` links carry it. |
 
 `after` and `before` cannot be combined. Filters combine with AND, except
 repeated `type`, which is OR.
@@ -193,6 +198,25 @@ messages with large headers, even with `fields=summary`. Always go by `next`.
 
 `latest_seq` is the inbox's newest sequence number as of the same moment as the
 page, so `latest_seq - seq` tells you how far behind you are.
+
+#### Epochs and gaps
+
+A cursor is a sequence number, and a sequence number only means something within
+one life of an inbox. If an inbox is deleted and made again under the same slug it
+starts at 1 again, and so does a server restored from a backup (which may have
+accepted different messages since the backup was taken). A cursor from before would
+quietly skip or repeat messages. So each inbox has an **epoch**: an opaque string
+that changes in those cases and never otherwise. Pages, messages, stream events and
+`next` links all carry it, and `epoch=` on a request says which one your cursor
+came from. If it is not the current one the answer is `409 epoch_changed`, and
+the thing to do is to read `epoch` from the inbox, and start again from the
+cursor you want (`after=0` for everything stored). A `next` link already includes
+`epoch=`, so following links is protected without doing anything.
+
+`gap` is `true` on a page read with `after=` when retention removed messages after
+your cursor before you got to them: what follows does not continue where you left
+off. `after=0` never reports one. If you must see every message, size retention
+for how long your reader may be away.
 
 ### One message
 
@@ -245,6 +269,11 @@ data: {...}
 
 - **`id`** is the message's `seq`. **`data`** is the same JSON object the REST API
   returns for that message, on one line.
+- **`event: gap`** is sent at most once, first, when the stream was asked to start
+  after a position that retention has since passed (see [Epochs and gaps](#epochs-and-gaps)).
+  Its data is `{"after": 10, "oldest_seq": 40, "epoch": "…"}`: messages between them
+  were removed before you read them. It has no `id`, so it does not move
+  `Last-Event-ID`; the messages that are left follow.
 - **`retry: 3000`** is sent once and tells clients to wait 3 seconds before
   reconnecting.
 - **`: ping`** is a comment sent when the stream has been silent for 15 seconds
@@ -266,7 +295,11 @@ it saw receives every later message exactly once, with no gaps and no repeats,
 even if messages arrived while it was disconnected.
 
 `type=` (repeatable) and `verified=true|false` filter the stream exactly as they
-do for the list endpoint. Other parameters are a `400`.
+do for the list endpoint. `epoch=` names the epoch your cursor came from, as for
+the list endpoint: a stream opened with another one is refused with `409` before
+anything is sent. (A browser reconnects to the URL it first used, so a client that
+opened the stream with `epoch=` is protected on every reconnect.) Other parameters
+are a `400`.
 
 #### What can end a stream
 
@@ -275,7 +308,7 @@ do for the list endpoint. Other parameters are a `400`.
   finish at once; deliveries that are mid-way through being stored are allowed to
   complete. Reconnect with `Last-Event-ID` to carry on.
 - The inbox is deleted.
-- The token the stream was opened with is rotated or revoked, or the inbox it
+- The token the stream was opened with is revoked, or the inbox it
   belonged to is deleted. Open streams are re-checked every 30 seconds
   (`StreamRevalidateInterval`), so access ends within about that long. A
   transient storage error during the re-check does not end the stream.
@@ -324,6 +357,7 @@ server itself: `seq`, `inbox`, `received_at`, `size`, `verified`, `verifier`,
 | `400` | `invalid_parameter` | A query parameter is unknown, repeated, or malformed. The message names it. |
 | `401` | `unauthenticated` | Missing or invalid credentials. The response has `WWW-Authenticate: Bearer`. |
 | `404` | `not_found` | No such inbox, message, or route, **or** the token may not read that inbox. |
+| `409` | `epoch_changed` | `epoch=` is not the inbox's current epoch (it was deleted and made again, or the server was restored from a backup). |
 | `405` | `method_not_allowed` | Not `GET` or `HEAD`. `Allow: GET, HEAD`. |
 | `500` | `internal` | A server-side problem. Details are in the server log. |
 | `503` | `overloaded` | Too many reads are in progress (16 by default) and none finished within 10 seconds, or (for a stream) too many streams are open. `Retry-After` is set. Authentication happens first, so unauthenticated traffic cannot cause this. |

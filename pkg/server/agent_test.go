@@ -281,7 +281,10 @@ func TestInboxInfo(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	info := decode[map[string]any](t, rec)
-	want := map[string]any{"slug": "agent-a", "name": "Inbox agent-a", "verifier": "trusted", "message_count": 3.0, "oldest_seq": 1.0, "latest_seq": 3.0}
+	want := map[string]any{"slug": "agent-a", "name": "Inbox agent-a", "verifier": "trusted", "message_count": 3.0, "oldest_seq": 1.0, "latest_seq": 3.0, "epoch": e.a.Epoch}
+	if e.a.Epoch == "" {
+		t.Error("the inbox has no epoch")
+	}
 	if len(info) != len(want) {
 		t.Errorf("info has fields %v, want exactly %v", info, want)
 	}

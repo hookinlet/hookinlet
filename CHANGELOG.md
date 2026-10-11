@@ -6,6 +6,40 @@ applies.
 
 ## Unreleased
 
+### Phase 14: cursor integrity
+
+#### Added
+- **Epochs.** Every inbox has an `epoch`, an opaque string that is fixed for its life,
+  differs for an inbox made again under the same slug, and is renewed in every backup
+  snapshot (a restored server's sequence numbers are not the original's). Inbox info,
+  pages, messages, `next` links, stream events and the MCP tools carry it. `epoch=` on
+  `GET .../messages` and `.../stream`, and `epoch` on `query_messages` and
+  `wait_for_messages`, name the epoch a cursor came from; another one is `409
+  epoch_changed` (an MCP tool error starting `epoch_changed`). `inbox.Inbox.Epoch`,
+  `inbox.ErrEpochChanged`.
+- **Gaps.** A page read with `after=` has `gap: true` when retention removed messages
+  after the cursor before it was read; an MCP result has the same; a stream sends one
+  `event: gap` first. `inbox.Page.OldestSeq` (set by every Store) is what it is computed
+  from. A cursor of 0 never reports a gap.
+- The store logs a clock that stepped back (`sqlite.WithLogger`).
+
+#### Changed
+- `message_count` is kept by every append and removal, so it no longer assumes that
+  removal takes a prefix of the inbox.
+- `DeleteInbox` marks the inbox as being deleted first: from then on no reader, writer,
+  token or ingest key can reach it. If the process stops part way, the retention sweep
+  finishes the delete (before this it was finished by deleting again).
+- `wire.PageRequest.NextLink` takes the epoch. Every `Message` and `MessagePage` has an
+  `epoch`, and `InboxInfo` too: clients that reject unknown fields must allow them.
+- A Store must now set `Inbox.Epoch` on create (ignoring the caller's value), return
+  `Page.OldestSeq`, and `Backupper` snapshots must renew epochs (all three are in the
+  conformance suites).
+
+#### Upgrading
+- Migration 0006 gives every existing inbox an epoch and a stored count. A cursor a
+  client holds from before the upgrade has no epoch; it keeps working as long as the
+  client does not send one.
+
 ### Phase 13: tokens
 
 #### Added

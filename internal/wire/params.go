@@ -37,6 +37,8 @@ type PageRequest struct {
 	Limit int
 	// Summary asks for messages without bodies.
 	Summary bool
+	// Epoch is the epoch the caller's cursor came from. Empty means it did not say.
+	Epoch string
 	// Budget caps the encoded size of one page. Zero means PageBudget. A
 	// stream uses a smaller one, so replaying a large backlog never builds a
 	// huge page in memory.
@@ -57,6 +59,8 @@ type MessagesParams struct {
 	Verified             *bool
 	DeliveryID           *string
 	Summary              bool // fields=summary
+	// Epoch is the epoch the caller's cursor came from, if it said.
+	Epoch *string
 }
 
 // NewPageRequest builds the request for a page. A limit above the maximum is
@@ -90,6 +94,9 @@ func NewPageRequest(p MessagesParams) (PageRequest, error) {
 		q.DeliveryID = *p.DeliveryID
 	}
 	req.Summary = p.Summary
+	if p.Epoch != nil {
+		req.Epoch = *p.Epoch
+	}
 	if err := q.Validate(); err != nil {
 		return req, bad("", strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "))
 	}
@@ -126,7 +133,7 @@ func formatInt(n int64) string { return strconv.FormatInt(n, 10) }
 // Polling forward (after=) always has a next link, even for an empty page: it is
 // the same cursor again, so an agent can loop on it. Going backward ends when
 // the oldest message has been returned.
-func (r PageRequest) NextLink(slug string, msgs []*inbox.Message) string {
+func (r PageRequest) NextLink(slug, epoch string, msgs []*inbox.Message) string {
 	v := url.Values{}
 	switch {
 	case r.Query.Ascending():
@@ -164,6 +171,9 @@ func (r PageRequest) NextLink(slug string, msgs []*inbox.Message) string {
 	}
 	if r.Summary {
 		v.Set("fields", "summary")
+	}
+	if epoch != "" {
+		v.Set("epoch", epoch)
 	}
 	return "/v1/inboxes/" + url.PathEscape(slug) + "/messages?" + v.Encode()
 }

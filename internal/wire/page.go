@@ -31,6 +31,10 @@ type Page struct {
 	Messages  []Message `json:"messages"`
 	Next      *string   `json:"next"`
 	LatestSeq int64     `json:"latest_seq"`
+	Epoch     string    `json:"epoch"`
+	// Gap is true when an ascending read started below the oldest message kept:
+	// messages after the cursor were removed before they were read.
+	Gap bool `json:"gap"`
 
 	// Cursor is the seq to ask for messages after to continue an ascending read.
 	// It is the last message returned, except that when Complete it may jump
@@ -50,6 +54,9 @@ type Page struct {
 // would exceed PageBudget encoded bytes. Both only shorten the page, so
 // following the next link still visits every message exactly once.
 func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageRequest) (*Page, error) {
+	if err := CheckEpoch(in, req.Epoch); err != nil {
+		return nil, err
+	}
 	q := req.Query
 	limit := int64(InlineBodyBytes)
 	if req.BodyCap > 0 {
@@ -68,7 +75,8 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 	if budget <= 0 {
 		budget = PageBudget
 	}
-	page := &Page{Messages: make([]Message, 0, len(res.Messages)), LatestSeq: res.LatestSeq}
+	page := &Page{Messages: make([]Message, 0, len(res.Messages)), LatestSeq: res.LatestSeq, Epoch: in.Epoch}
+	page.Gap = q.After != nil && Gap(*q.After, res.OldestSeq, res.LatestSeq)
 	kept := make([]*inbox.Message, 0, len(res.Messages))
 	var used int64
 	cut := false
@@ -94,6 +102,7 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 			m = full
 		}
 		enc := FromStored(m, in.Slug, in.Verifier, !req.Summary)
+		enc.Epoch = in.Epoch
 		enc.BodyTruncated = truncated
 		cost := enc.encodedSize()
 		if len(page.Messages) > 0 && used+cost > budget {
@@ -104,7 +113,7 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 		kept = append(kept, m)
 		page.Messages = append(page.Messages, enc)
 	}
-	if next := req.NextLink(in.Slug, kept); next != "" {
+	if next := req.NextLink(in.Slug, in.Epoch, kept); next != "" {
 		page.Next = &next
 	}
 
@@ -136,6 +145,7 @@ type InboxInfo struct {
 	MessageCount int64  `json:"message_count"`
 	OldestSeq    int64  `json:"oldest_seq"`
 	LatestSeq    int64  `json:"latest_seq"`
+	Epoch        string `json:"epoch"`
 }
 
 // FetchInfo returns the metadata of an inbox.
@@ -146,6 +156,29 @@ func FetchInfo(ctx context.Context, st inbox.Store, in *inbox.Inbox) (*InboxInfo
 	}
 	return &InboxInfo{
 		Slug: in.Slug, Name: in.Name, Verifier: in.Verifier,
-		MessageCount: stats.MessageCount, OldestSeq: stats.OldestSeq, LatestSeq: stats.LatestSeq,
+		MessageCount: stats.MessageCount, OldestSeq: stats.OldestSeq, LatestSeq: stats.LatestSeq, Epoch: in.Epoch,
 	}, nil
+}
+
+// CheckEpoch refuses a cursor that came from another epoch of the inbox. An
+// empty epoch means the caller did not say, and passes.
+func CheckEpoch(in *inbox.Inbox, epoch string) error {
+	if epoch != "" && epoch != in.Epoch {
+		return inbox.ErrEpochChanged
+	}
+	return nil
+}
+
+// Gap reports whether a reader that has everything up to seq after has missed
+// messages: some in (after, oldest) were stored once and are gone. oldest is the
+// lowest seq still stored (0 if none is) and latest the newest ever assigned.
+// A cursor of 0 is a reader with no history, which has missed nothing it knew of.
+func Gap(after, oldest, latest int64) bool {
+	if after <= 0 {
+		return false
+	}
+	if oldest == 0 {
+		return after < latest // everything after the cursor was removed
+	}
+	return after < oldest-1
 }

@@ -101,6 +101,7 @@ func ordinaryUse(t *testing.T, c *contract) {
 		cl.call(id("listMessages"), m, "/v1/inboxes/agent-a/messages", nil, agent)
 		cl.call(id("listMessages"), m, "/v1/inboxes/agent-a/messages?after=0&limit=2&fields=summary&type=a&type=b&verified=true", nil, agent)
 		cl.call(id("listMessages"), m, "/v1/inboxes/agent-a/messages?limt=2", nil, agent)
+		cl.call(id("listMessages"), m, "/v1/inboxes/agent-a/messages?after=0&epoch=0badc0de", nil, agent) // another epoch
 		cl.call(id("listMessages"), m, "/v1/inboxes/agent-a/messages", nil, "")
 		cl.call(id("listMessages"), m, "/v1/inboxes/no-such-inbox/messages", nil, agent)
 		cl.call(id("getMessage"), m, "/v1/inboxes/agent-a/messages/1", nil, agent)
@@ -132,6 +133,7 @@ func ordinaryUse(t *testing.T, c *contract) {
 	c.record("streamMessages", resp.StatusCode, resp.Header, first[:n], false, false)
 	cl.call("streamMessages", "GET", "/v1/inboxes/agent-a/stream", nil, "")
 	cl.call("streamMessages", "GET", "/v1/inboxes/agent-a/stream?bogus=1", nil, agent)
+	cl.call("streamMessages", "GET", "/v1/inboxes/agent-a/stream?epoch=0badc0de", nil, agent) // another epoch
 	cl.call("streamMessages", "GET", "/v1/inboxes/no-such-inbox/stream", nil, agent)
 	cl.call("streamMessages", "POST", "/v1/inboxes/agent-a/stream", nil, agent)
 

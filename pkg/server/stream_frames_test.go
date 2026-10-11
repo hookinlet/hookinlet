@@ -21,10 +21,14 @@ func TestStreamFramesAreWhatTheDocumentDescribes(t *testing.T) {
 	sp := loadSpec(t)
 	frames := get(sp.root, "paths", "/v1/inboxes/{slug}/stream", "get", "responses", "200", "content", "text/event-stream", "x-frames").(map[string]any)
 	events := frames["events"].([]any)
-	if len(events) != 1 || frames["heartbeat"] != "ping" {
-		t.Fatalf("the test knows one kind of event and a ping heartbeat, the document has %v", frames)
+	if len(events) != 2 || frames["heartbeat"] != "ping" {
+		t.Fatalf("the test knows a message and a gap event and a ping heartbeat, the document has %v", frames)
 	}
 	ev := events[0].(map[string]any)
+	gapEv := events[1].(map[string]any)
+	if ev["event"] != "message" || gapEv["event"] != "gap" {
+		t.Fatalf("events in the document: %v", events)
+	}
 
 	ae, base, _ := streamEnv(t, func(o *Options) { o.SSEHeartbeat = 100 * time.Millisecond })
 	ae.post("/in/agent-a", `{"a":1,"html":"<b>&</b>"}`)
@@ -51,6 +55,9 @@ func TestStreamFramesAreWhatTheDocumentDescribes(t *testing.T) {
 			pings++
 		case "event":
 			messages++
+			if it.event == "gap" {
+				continue // checked in TestAGapIsAnnouncedOnAStream
+			}
 			if it.event != ev["event"] {
 				t.Errorf("event name %q, the document says %q", it.event, ev["event"])
 			}

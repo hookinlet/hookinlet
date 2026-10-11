@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -544,5 +545,41 @@ func TestBodyCapLeavesOutBigBodiesAndSaysSo(t *testing.T) {
 	}
 	if page.Messages[1].BodyTruncated || page.Messages[1].BodyText == nil {
 		t.Errorf("without a cap the body must be loaded: %+v", page.Messages[1])
+	}
+}
+
+func TestGap(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		after, oldest, latest int64
+		want                  bool
+	}{
+		{"a reader with no history", 0, 40, 50, false},
+		{"exactly up to date", 50, 40, 50, false},
+		{"right behind the oldest", 39, 40, 50, false},
+		{"one message missing", 38, 40, 50, true},
+		{"far behind", 1, 40, 50, true},
+		{"inside what is kept", 45, 40, 50, false},
+		{"everything removed, reader behind", 3, 0, 9, true},
+		{"everything removed, reader caught up", 9, 0, 9, false},
+		{"an empty inbox", 0, 0, 0, false},
+		{"ahead of the newest", 60, 40, 50, false},
+	} {
+		if got := Gap(tc.after, tc.oldest, tc.latest); got != tc.want {
+			t.Errorf("%s: Gap(%d, %d, %d) = %v, want %v", tc.name, tc.after, tc.oldest, tc.latest, got, tc.want)
+		}
+	}
+}
+
+func TestCheckEpoch(t *testing.T) {
+	in := &inbox.Inbox{Epoch: "abc"}
+	if err := CheckEpoch(in, ""); err != nil {
+		t.Errorf("no epoch given: %v", err)
+	}
+	if err := CheckEpoch(in, "abc"); err != nil {
+		t.Errorf("the right epoch: %v", err)
+	}
+	if err := CheckEpoch(in, "abd"); !errors.Is(err, inbox.ErrEpochChanged) {
+		t.Errorf("another epoch: %v", err)
 	}
 }

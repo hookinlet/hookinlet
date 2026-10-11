@@ -48,6 +48,12 @@ func (a *streamAPI) StreamMessages(ctx context.Context, request api.StreamMessag
 		return api.StreamMessages400JSONResponse{BadRequestJSONResponse: badRequest(ctx, fail{status: 400, code: "invalid_parameter", msg: err.Error()})}, nil
 	}
 
+	// A cursor from another epoch of the inbox is refused before anything is sent.
+	if err := wire.CheckEpoch(rr.in, req.Epoch); err != nil {
+		f := s.classifyRead(ctx, "stream start", err)
+		return api.StreamMessages409JSONResponse{EpochChangedJSONResponse: f.epochChanged(ctx)}, nil
+	}
+
 	// Streams have their own limits. They must not use the read slots, which are
 	// held for the length of a request and would cap the server at a handful of
 	// open streams.
@@ -76,13 +82,28 @@ func (a *streamAPI) StreamMessages(ctx context.Context, request api.StreamMessag
 		return api.StreamMessages500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 	}
 	cursor, ahead := latest, req.After != nil && *req.After > latest
+	var oldest int64
+	var gap bool
 	if req.After != nil {
 		cursor = *req.After
+		if cursor > 0 && !ahead {
+			st, err := s.opts.Store.Stats(ctx, rr.in.ID)
+			if err != nil {
+				cancel()
+				release()
+				switch f := s.classifyRead(ctx, "stream start", err); f.status {
+				case http.StatusNotFound:
+					return api.StreamMessages404JSONResponse{NotFoundJSONResponse: f.notFound(ctx)}, nil
+				}
+				return api.StreamMessages500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+			}
+			oldest, gap = st.OldestSeq, wire.Gap(cursor, st.OldestSeq, st.LatestSeq)
+		}
 	}
 
 	rr.w.Header().Set("X-Accel-Buffering", "no") // tell nginx-style proxies not to hold events back
 	return api.StreamMessages200TexteventStreamResponse{
-		Body: &sseBody{s: s, ctx: ctx, rr: rr, req: req, cursor: cursor, latest: latest, ahead: ahead,
+		Body: &sseBody{s: s, ctx: ctx, rr: rr, req: req, cursor: cursor, latest: latest, ahead: ahead, gap: gap, oldest: oldest,
 			signal: signal, release: func() { cancel(); release() }},
 		Headers: api.StreamMessages200ResponseHeaders{XRequestId: id},
 	}, nil
@@ -99,6 +120,8 @@ type sseBody struct {
 	cursor  int64
 	latest  int64
 	ahead   bool
+	gap     bool  // messages after the starting cursor were removed
+	oldest  int64 // the lowest seq stored when the stream opened
 	signal  <-chan struct{}
 	release func()
 }
@@ -127,6 +150,11 @@ func (b *sseBody) WriteTo(w io.Writer) (int64, error) {
 
 	if err := s.writeStream(rw, rc, []byte(wire.Retry)); err != nil {
 		return 0, nil
+	}
+	if b.gap {
+		if err := s.writeStream(rw, rc, wire.GapEvent(b.cursor, b.oldest, in.Epoch)); err != nil {
+			return 0, nil
+		}
 	}
 	if b.ahead {
 		// Typical after an inbox is recreated: the client remembers a position the
@@ -163,5 +191,5 @@ func (b *sseBody) WriteTo(w io.Writer) (int64, error) {
 // streamParams reads the generated parameters of the stream. A test sets every
 // field of the generated struct and fails if one is not read here.
 func streamParams(p api.StreamMessagesParams) wire.StreamParams {
-	return wire.StreamParams{After: p.After, Types: deref(p.Type), Verified: p.Verified, LastEventID: p.LastEventID}
+	return wire.StreamParams{After: p.After, Types: deref(p.Type), Verified: p.Verified, Epoch: p.Epoch, LastEventID: p.LastEventID}
 }

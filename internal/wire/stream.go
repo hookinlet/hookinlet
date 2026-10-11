@@ -16,6 +16,8 @@ type StreamRequest struct {
 	// Query carries the filters (event types, verified).
 	Types    []string
 	Verified *bool
+	// Epoch is the epoch the caller's cursor came from. Empty means it did not say.
+	Epoch string
 }
 
 // StreamParams are the query parameters of a stream request, as the generated
@@ -24,6 +26,7 @@ type StreamParams struct {
 	After    *int
 	Types    []string
 	Verified *bool
+	Epoch    *string
 	// LastEventID is the Last-Event-ID header, if the request had one.
 	LastEventID *string
 }
@@ -48,6 +51,9 @@ func NewStreamRequest(p StreamParams) (StreamRequest, error) {
 	}
 	req.Types = p.Types
 	req.Verified = p.Verified
+	if p.Epoch != nil {
+		req.Epoch = *p.Epoch
+	}
 	return req, nil
 }
 
@@ -81,6 +87,21 @@ func Event(m Message) ([]byte, error) {
 	b.Write(data)
 	b.WriteString("\n\n")
 	return b.Bytes(), nil
+}
+
+// GapEvent is the frame that tells a stream's reader, once and before anything
+// else, that messages after its cursor were removed before it could read them.
+// It has no id, so it does not move a reconnecting client's Last-Event-ID.
+//
+//	event: gap
+//	data: {"after":10,"oldest_seq":40,"epoch":"..."}
+func GapEvent(after, oldest int64, epoch string) []byte {
+	data, _ := Marshal(struct {
+		After     int64  `json:"after"`
+		OldestSeq int64  `json:"oldest_seq"`
+		Epoch     string `json:"epoch"`
+	}{after, oldest, epoch})
+	return []byte("event: gap\ndata: " + string(data) + "\n\n")
 }
 
 type streamError string
