@@ -6,6 +6,41 @@ applies.
 
 ## Unreleased
 
+### Phase 6: admin API, retention, backup, CLI
+
+#### Added
+- The admin API (`/admin/inboxes`, `/admin/inboxes/{slug}`, `…/secret`,
+  `…/rotate-token`, `/admin/retention/run`, `/admin/backup`), mounted when
+  `Options.Authenticator` is set and usable only by a principal with
+  `CanAdmin() == true`. See `docs/admin.md`.
+- `inbox.Backupper`, an optional `Store` capability that returns a consistent
+  snapshot (`Backup(ctx) (io.ReadCloser, int64, error)`); `pkg/inboxtest`:
+  `BackupperSuite`. The SQLite store implements it.
+- `server.Options`: `PublicBaseURL` (used for the ingest URLs the admin API
+  returns) and `RetentionInterval` (default one hour; negative turns the schedule
+  off). Wired to `HOOKINLET_PUBLIC_BASE_URL` and `HOOKINLET_RETENTION_INTERVAL`.
+- Retention runs on a schedule: once after the server is listening, then every
+  `RetentionInterval`. `Server.Serve` does not return until a running sweep has
+  stopped.
+- Commands: `hookinlet inbox list|show|update|set-secret|rotate-token|delete`,
+  `hookinlet retention run`, and `hookinlet backup --out FILE`.
+
+#### Changed
+- `inbox.Inbox.Validate` rejects `RetentionDays` above `inbox.MaxRetentionDays`
+  (36,500). Larger values made the prune cutoff overflow into the future and
+  delete every message.
+- `Store.DeleteInbox` may work in steps: the inbox is closed to ingest and
+  agents first, and an interrupted delete is finished by deleting again. The
+  SQLite store now does this, so deleting a large inbox no longer stalls writes.
+- `HOOKINLET_RETENTION_INTERVAL` accepts `off` and must be at least `1s`.
+- `hookinlet inbox create` and the other inbox commands call a running server
+  when given `--url` (or `HOOKINLET_URL`) and the admin token
+  (`HOOKINLET_ADMIN_TOKEN`); without it they work in the data directory as
+  before. Creating an inbox now checks the verifier name and configuration, so a
+  misspelled `--verifier-config` key is an error at creation.
+- The SQLite store prunes 250 rows per transaction (was 5000), so deliveries
+  arriving during a large prune wait at most a short batch.
+
 ### Phase 5: MCP endpoint
 
 #### Added

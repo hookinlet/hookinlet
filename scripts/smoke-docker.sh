@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Pat Ramsey
+#
 # End-to-end smoke test of a built image. It creates an inbox in a fresh data
 # volume, starts the server, sends signed, tampered, and malformed requests,
 # restarts the container, and checks that stored data and sequence numbers
@@ -19,6 +22,7 @@ tmp=$(mktemp)
 
 stream_pids=()
 cleanup() {
+  rm -rf "${restore_dir-}"
   for pid in "${stream_pids[@]}"; do kill "$pid" 2>/dev/null || true; done
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker volume rm "$vol" >/dev/null 2>&1 || true
@@ -59,6 +63,7 @@ send() {
 }
 
 sign() { printf '%s' "$1" | openssl dgst -sha256 -hmac "$secret" -hex | sed 's/^.* //'; }
+sign_with() { local s=${secret}; printf '%s' "$1" | openssl dgst -sha256 -hmac "$s" -hex | sed 's/^.* //'; }
 
 # wait_for FILE PATTERN [SECONDS]: wait until the file contains the pattern.
 wait_for() {
@@ -196,5 +201,53 @@ wait_for "$stream_file" "id: 4" 5 || fail "reconnecting with Last-Event-ID 3 did
 case $(grep -c "^id: " "$stream_file") in 1) echo "ok   Last-Event-ID resumed exactly after message 3" ;; *) fail "unexpected replay: $(cat "$stream_file")" ;; esac
 expect "messages are still there after a restart" "200" "$(read_api /v1/inboxes/demo/messages/2 "$agent_token" | cut -d' ' -f1)"
 expect "and so is the raw body" "200 $body2" "$(read_api /v1/inboxes/demo/messages/2/raw "$agent_token")"
+
+# The admin API and the command line, against the running container.
+admin_token=smoke-admin-token-0123456789-0123456789
+admin() { # admin METHOD PATH [BODY] -> prints "<status> <body>"
+  local method=$1 path=$2 body=${3-}
+  local args=(-sS -o "$tmp" -w '%{http_code}' -X "$method" "$base$path" -H "Authorization: Bearer ${admin_tok-$admin_token}")
+  [ -n "$body" ] && args+=(-H 'Content-Type: application/json' -d "$body")
+  local code
+  code=$(curl "${args[@]}")
+  echo "$code $(cat "$tmp")"
+}
+expect "the admin API refuses an agent token" '403' "$(admin_tok=$agent_token admin GET /admin/inboxes | cut -d' ' -f1)"
+expect "and no token" '401' "$(curl -sS -o /dev/null -w '%{http_code}' "$base/admin/inboxes")"
+created=$(admin POST /admin/inboxes '{"slug":"made-by-api","verifier":"hmac","verifier_config":{"header":"X-Signature","prefix":"sha256="},"verifier_secret":"api-secret"}')
+case $created in
+  201*'"has_verifier_secret":true'*'"agent_token":"hki_'*) echo "ok   the admin API creates an inbox and returns its token once" ;;
+  *) fail "unexpected create: $created" ;;
+esac
+case $created in *api-secret*) fail "the create response shows the verifier secret" ;; esac
+api_body='{"via":"api"}'
+expect "the new inbox accepts a signed delivery" '200 {"seq":1}' "$(send POST /in/made-by-api "$api_body" "$(secret=api-secret sign_with "$api_body")")"
+case $(admin GET /admin/inboxes/made-by-api) in
+  200*'"message_count":1'*) echo "ok   show reports the message" ;; *) fail "unexpected show" ;;
+esac
+expect "retention runs on demand" '200 {"deleted":0}' "$(admin POST /admin/retention/run)"
+cli() { docker exec -e HOOKINLET_URL=http://127.0.0.1:8080 -e HOOKINLET_ADMIN_TOKEN="$admin_token" "$name" /hookinlet "$@"; }
+case $(cli inbox list) in *made-by-api*demo*|*demo*made-by-api*) echo "ok   the command line lists inboxes through the admin API" ;; *) fail "unexpected inbox list" ;; esac
+rotated=$(cli inbox rotate-token made-by-api)
+new_token=$(printf '%s\n' "$rotated" | sed -n 's/^ *agent token: *//p')
+[ -n "$new_token" ] || fail "rotate-token printed no token"
+expect "the rotated token reads the inbox" '200' "$(read_api /v1/inboxes/made-by-api "$new_token" | cut -d' ' -f1)"
+expect "and the old one does not" '401' "$(read_api /v1/inboxes/made-by-api "$(printf '%s' "$created" | sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p')" | cut -d' ' -f1)"
+
+# A backup taken from the running server restores into a fresh volume.
+backup=$(mktemp)
+stream_files+=("$backup")
+code=$(curl -sS -o "$backup" -w '%{http_code}' "$base/admin/backup" -H "Authorization: Bearer $admin_token")
+expect "the backup downloads" '200' "$code"
+[ "$(head -c 15 "$backup")" = "SQLite format 3" ] || fail "the backup is not a SQLite database"
+echo "ok   and it is a SQLite database ($(wc -c < "$backup" | tr -d ' ') bytes)"
+# The image has no shell, so restore through a host directory the container's
+# unprivileged user may write to.
+restore_dir=$(mktemp -d)
+chmod 777 "$restore_dir"
+cp "$backup" "$restore_dir/hookinlet.db"
+chmod 666 "$restore_dir/hookinlet.db"
+restored=$(docker run --rm -v "$restore_dir:/data" -e HOOKINLET_MASTER_KEY="$key" "$image" inbox list)
+case $restored in *made-by-api*demo*|*demo*made-by-api*) echo "ok   the backup restores into a fresh data directory with both inboxes" ;; *) fail "the restored volume lists: $restored" ;; esac
 
 echo "smoke test passed"
