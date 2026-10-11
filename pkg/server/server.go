@@ -230,8 +230,9 @@ func New(opts Options) (*Server, error) {
 	}
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthz)
-	mux.HandleFunc("GET /readyz", s.readyz)
+	health := s.apiHandlers(&healthAPI{s: s})
+	mux.HandleFunc("GET /healthz", health.Healthz)
+	mux.HandleFunc("GET /readyz", health.Readyz)
 	// Ingest accepts any method here and answers 405 itself, so that the
 	// response is JSON and carries an Allow header.
 	mux.HandleFunc("/in/{key}", s.handleIngest)
@@ -326,23 +327,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // closeStreams tells every open stream to finish. It is safe to call repeatedly.
 func (s *Server) closeStreams() { s.closeCancel() }
-
-func healthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// readyz reports whether the Store is reachable. Unlike /healthz, which only
-// says the process is up, it fails while a dependency is down.
-func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-	defer cancel()
-	if err := s.opts.Store.Ping(ctx); err != nil {
-		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready", slog.String("err", err.Error()))
-		writeError(w, http.StatusServiceUnavailable, "not_ready", "the store is not reachable")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
-}
 
 func notFound(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotFound, "not_found", "not found")
