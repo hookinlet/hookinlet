@@ -38,6 +38,8 @@ var Keywords = map[string]bool{
 	"description": true, "example": true, "default": true, "title": true,
 }
 
+var annotations = map[string]bool{"description": true, "example": true, "default": true, "title": true}
+
 // Formats are the values of "format" that are understood.
 var Formats = map[string]bool{"date-time": true, "binary": true}
 
@@ -60,9 +62,10 @@ func (v Violation) String() string {
 
 // Document is a loaded OpenAPI 3.1 document.
 type Document struct {
-	root map[string]any
-	ops  []*Operation
-	byID map[string]*Operation
+	patterns map[string]*regexp.Regexp // every "pattern" in the document, compiled at Load
+	root     map[string]any
+	ops      []*Operation
+	byID     map[string]*Operation
 }
 
 // Operation is one method on one path.
@@ -95,7 +98,7 @@ func Load(b []byte) (*Document, error) {
 	if v, _ := root["openapi"].(string); !strings.HasPrefix(v, "3.1.") {
 		return nil, fmt.Errorf("specvalidate: openapi is %q, want 3.1.x", v)
 	}
-	d := &Document{root: root, byID: map[string]*Operation{}}
+	d := &Document{root: root, byID: map[string]*Operation{}, patterns: map[string]*regexp.Regexp{}}
 
 	var problems []string
 	d.walkRefs(root, "", &problems)
@@ -200,11 +203,27 @@ func (d *Document) resolve(ref string) any {
 
 // checkKeywords reports keywords and formats this package would ignore.
 func (d *Document) checkKeywords(sm map[string]any, at string, problems *[]string) {
+	if _, isRef := sm["$ref"]; isRef {
+		// Following a reference replaces the schema, so a constraint written beside
+		// one would never be applied.
+		for k := range sm {
+			if k != "$ref" && Keywords[k] && !annotations[k] {
+				*problems = append(*problems, fmt.Sprintf("%s: %q is written beside a $ref, where it would be ignored", at, k))
+			}
+		}
+	}
 	for k, v := range sm {
 		if !Keywords[k] {
 			*problems = append(*problems, fmt.Sprintf("%s: the schema uses the keyword %q, which is not understood", at, k))
 		}
 		switch k {
+		case "pattern":
+			ps, _ := v.(string)
+			if re, err := regexp.Compile(ps); err != nil {
+				*problems = append(*problems, fmt.Sprintf("%s: the pattern %q is not a valid RE2 expression: %v", at, ps, err))
+			} else {
+				d.patterns[ps] = re
+			}
 		case "format":
 			if f, _ := v.(string); !Formats[f] {
 				*problems = append(*problems, fmt.Sprintf("%s: the schema uses the format %q, which is not understood", at, v))
@@ -234,7 +253,7 @@ func (d *Document) Root() map[string]any { return d.root }
 
 // Deref follows $ref until it reaches a value that is not one.
 func (d *Document) Deref(v any) any {
-	for {
+	for range 64 { // a longer chain is a cycle
 		m, ok := v.(map[string]any)
 		if !ok {
 			return v
@@ -245,6 +264,7 @@ func (d *Document) Deref(v any) any {
 		}
 		v = d.resolve(r)
 	}
+	return nil
 }
 
 // Operations returns every operation, ordered by id.
@@ -353,8 +373,10 @@ func (o *Operation) queryValue(name string, schema map[string]any, raw string) [
 		if err != nil || math.IsInf(f, 0) || math.IsNaN(f) || (t == "number" && !numberText.MatchString(raw)) {
 			return []Violation{{Path: name, Reason: "must be a number"}}
 		}
-		if t == "integer" && len(strings.TrimPrefix(raw, "-")) > 18 {
-			return []Violation{{Path: name, Reason: "is too large"}}
+		if t == "integer" {
+			if _, err := strconv.ParseInt(raw, 10, 64); err != nil {
+				return []Violation{{Path: name, Reason: "is too large"}}
+			}
 		}
 		v = f
 	case "boolean":
@@ -524,7 +546,7 @@ func (d *Document) check(schema, v any, at string, opts Options) []Violation {
 			bad("must have at most %v item(s)", n)
 		}
 	case string:
-		if p, ok := sm["pattern"].(string); ok && !regexp.MustCompile(p).MatchString(x) {
+		if p, ok := sm["pattern"].(string); ok && !d.patterns[p].MatchString(x) {
 			bad("is not in the required form")
 		}
 		if n, ok := sm["minLength"].(float64); ok && float64(len([]rune(x))) < n {

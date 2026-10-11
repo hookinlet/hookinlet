@@ -28,6 +28,15 @@ func parameterMessage(vs []specvalidate.Violation) string {
 	return "parameter \"" + truncateName(v.Path) + "\": " + v.Reason
 }
 
+// clip cuts s to at most n bytes, on a character boundary. A field name in a
+// request is the caller's, and is not trusted for length.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "") + "…"
+}
+
 func truncateName(s string) string {
 	if len(s) > 64 {
 		return strings.ToValidUTF8(s[:64], "") + "…"

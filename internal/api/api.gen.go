@@ -2585,6 +2585,21 @@ func (response Backup200ApplicationvndSqlite3Response) VisitBackupResponse(w htt
 	return err
 }
 
+type Backup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response Backup400JSONResponse) VisitBackupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Backup401JSONResponse struct{ UnauthenticatedJSONResponse }
 
 func (response Backup401JSONResponse) VisitBackupResponse(w http.ResponseWriter) error {
@@ -3104,6 +3119,21 @@ func (response DeleteInbox204Response) VisitDeleteInboxResponse(w http.ResponseW
 	return nil
 }
 
+type DeleteInbox400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DeleteInbox400JSONResponse) VisitDeleteInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DeleteInbox401JSONResponse struct{ UnauthenticatedJSONResponse }
 
 func (response DeleteInbox401JSONResponse) VisitDeleteInboxResponse(w http.ResponseWriter) error {
@@ -3250,6 +3280,21 @@ func (response ShowInbox200JSONResponse) VisitShowInboxResponse(w http.ResponseW
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowInbox400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ShowInbox400JSONResponse) VisitShowInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3611,6 +3656,21 @@ func (response RotateAgentToken200JSONResponse) VisitRotateAgentTokenResponse(w 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateAgentToken400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RotateAgentToken400JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4001,6 +4061,21 @@ func (response RunRetention200JSONResponse) VisitRunRetentionResponse(w http.Res
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunRetention400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RunRetention400JSONResponse) VisitRunRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }

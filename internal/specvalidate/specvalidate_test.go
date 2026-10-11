@@ -327,3 +327,47 @@ func TestPathsOfNestedViolations(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestLoadRefusesSchemasItCouldNotApplyFaithfully(t *testing.T) {
+	for name, tc := range map[string]struct{ from, to, want string }{
+		"a constraint beside a $ref": {`"name": {"type": "string", "minLength": 2,`, `"name": {"$ref": "#/components/schemas/Thing", "minLength": 2, "xx": {`, "beside a $ref"},
+		"a lookahead":                {`"pattern": "^[a-z]+$"`, `"pattern": "^(?=a)[a-z]+$"`, "not a valid RE2"},
+	} {
+		s := strings.Replace(doc, tc.from, tc.to, 1)
+		if name == "a constraint beside a $ref" {
+			s = strings.Replace(doc, `"kind": {"const": "thing"}`, `"kind": {"$ref": "#/components/schemas/Thing", "minProperties": 3}`, 1)
+		}
+		if _, err := Load([]byte(s)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: Load = %v, want an error containing %q", name, err, tc.want)
+		}
+	}
+	// An annotation beside a $ref is harmless.
+	s := strings.Replace(doc, `"kind": {"const": "thing"}`, `"kind": {"$ref": "#/components/schemas/Thing", "description": "x"}`, 1)
+	if _, err := Load([]byte(s)); err != nil {
+		t.Errorf("an annotation beside a $ref: %v", err)
+	}
+}
+
+func TestAReferenceCycleEndsInsteadOfHanging(t *testing.T) {
+	s := `{"openapi":"3.1.0","paths":{},"components":{"schemas":{"A":{"$ref":"#/components/schemas/B"},"B":{"$ref":"#/components/schemas/A"}}}}`
+	d, err := Load([]byte(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vs := d.Check(map[string]any{"$ref": "#/components/schemas/A"}, 1.0, Options{}); len(vs) == 0 {
+		t.Error("a cyclic reference accepted a value")
+	}
+}
+
+func TestIntegerQueryValuesUpToInt64AreAccepted(t *testing.T) {
+	op := load(t, doc).Operation("getThing")
+	for _, tc := range []struct {
+		v    string
+		want string
+	}{{"9223372036854775807", "limit: must be at most 10"}, {"9223372036854775808", "limit: is too large"}, {"-9223372036854775808", "limit: must be at least 1"}} {
+		vs := op.CheckQuery(url.Values{"need": {"x"}, "limit": {tc.v}})
+		if !strings.Contains(reasons(vs), tc.want) {
+			t.Errorf("limit=%s: %q, want %q", tc.v, reasons(vs), tc.want)
+		}
+	}
+}

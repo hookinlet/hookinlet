@@ -21,6 +21,8 @@ jobs:
         run: CGO_ENABLED=0 go build ./...
       - name: Vet
         run: go vet ./...
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
       - name: The generated API code matches docs/openapi.json
         run: |
           go generate ./internal/api

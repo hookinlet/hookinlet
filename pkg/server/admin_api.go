@@ -4,6 +4,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,27 +40,34 @@ type fail struct {
 	status int
 	code   string
 	msg    string
+	op     string // set by classify
 }
 
 func (s *Server) classify(ctx context.Context, op string, err error) fail {
+	f := s.classifyErr(ctx, op, err)
+	f.op = op
+	return f
+}
+
+func (s *Server) classifyErr(ctx context.Context, op string, err error) fail {
 	switch {
 	case errors.Is(err, inbox.ErrInvalid):
-		return fail{http.StatusBadRequest, "invalid_parameter", strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": ")}
+		return fail{http.StatusBadRequest, "invalid_parameter", strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "), ""}
 	case errors.Is(err, inbox.ErrNotFound):
-		return fail{http.StatusNotFound, "not_found", "not found"}
+		return fail{http.StatusNotFound, "not_found", "not found", ""}
 	case errors.Is(err, inbox.ErrConflict):
-		return fail{http.StatusConflict, "conflict", "an inbox with that slug already exists, or it was changed at the same time; check and retry"}
+		return fail{http.StatusConflict, "conflict", "an inbox with that slug already exists, or it was changed at the same time; check and retry", ""}
 	case errors.Is(err, admin.ErrBusy):
-		return fail{http.StatusConflict, "busy", "that is already running"}
+		return fail{http.StatusConflict, "busy", "that is already running", ""}
 	case errors.Is(err, admin.ErrNoSecretBox), errors.Is(err, admin.ErrNoBackup):
-		return fail{http.StatusNotImplemented, "not_implemented", err.Error()}
+		return fail{http.StatusNotImplemented, "not_implemented", err.Error(), ""}
 	}
 	level := slog.LevelError
 	if errors.Is(err, context.Canceled) {
 		level = slog.LevelDebug // the client went away; that is not a fault on our side
 	}
 	s.log.LogAttrs(ctx, level, "request failed", slog.String("op", op), slog.String("err", err.Error()))
-	return fail{http.StatusInternalServerError, "internal", "internal error"}
+	return fail{http.StatusInternalServerError, "internal", "internal error", ""}
 }
 
 func requestIDOf(ctx context.Context) string { return RequestID(ctx) }
@@ -88,6 +96,17 @@ func notImplemented(ctx context.Context, f fail) api.NotImplementedJSONResponse 
 	return api.NotImplementedJSONResponse{Body: b, Headers: api.NotImplementedResponseHeaders{XRequestId: requestIDOf(ctx)}}
 }
 
+// fell answers 500 for a failure the operation's document has no status for, and
+// says so in the log: a Store (or anything behind it) failed in a way the caller
+// would have been told about on another operation.
+func (s *Server) fell(ctx context.Context, f fail) api.InternalJSONResponse {
+	if f.status != http.StatusInternalServerError {
+		s.log.LogAttrs(ctx, slog.LevelError, "request failed", slog.String("op", f.op),
+			slog.String("err", "the failure is a "+strconv.Itoa(f.status)+" ("+f.code+"), which the document does not list for this operation"))
+	}
+	return internal(ctx)
+}
+
 func internal(ctx context.Context) api.InternalJSONResponse {
 	var b api.ErrorInternal
 	b.Error.Code, b.Error.Message = api.ErrorInternalErrorCodeInternal, "internal error"
@@ -100,7 +119,10 @@ func view(v admin.View, base string) api.Admin {
 	v = v.WithBase(base)
 	cfg := map[string]any{}
 	if len(v.VerifierConfig) > 0 {
-		_ = json.Unmarshal(v.VerifierConfig, &cfg)
+		// Numbers stay as written: json.Number encodes as its own text.
+		dec := json.NewDecoder(bytes.NewReader(v.VerifierConfig))
+		dec.UseNumber()
+		_ = dec.Decode(&cfg)
 	}
 	out := api.Admin{
 		CreatedAt: v.CreatedAt, Disabled: v.Disabled, EventTypePointer: v.EventTypePointer,
@@ -157,7 +179,8 @@ func (a *adminAPI) CreateInbox(ctx context.Context, req api.CreateInboxRequestOb
 	}
 	c, err := a.s.adm.Create(ctx, p)
 	if err != nil {
-		switch f := a.s.classify(ctx, "create inbox", err); f.status {
+		f := a.s.classify(ctx, "create inbox", err)
+		switch f.status {
 		case http.StatusBadRequest:
 			return api.CreateInbox400JSONResponse{BadRequestJSONResponse: badRequest(ctx, f)}, nil
 		case http.StatusConflict:
@@ -165,7 +188,7 @@ func (a *adminAPI) CreateInbox(ctx context.Context, req api.CreateInboxRequestOb
 		case http.StatusNotImplemented:
 			return api.CreateInbox501JSONResponse{NotImplementedJSONResponse: notImplemented(ctx, f)}, nil
 		}
-		return api.CreateInbox500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+		return api.CreateInbox500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
 	base := a.s.baseURLFor(ctx)
 	a.s.auditCtx(ctx, "create inbox", c.Inbox.Slug)
@@ -183,7 +206,7 @@ func (a *adminAPI) ListInboxes(ctx context.Context, req api.ListInboxesRequestOb
 		if f.status == http.StatusBadRequest {
 			return api.ListInboxes400JSONResponse{BadRequestJSONResponse: badRequest(ctx, f)}, nil
 		}
-		return api.ListInboxes500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+		return api.ListInboxes500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
 	base := a.s.baseURLFor(ctx)
 	out := api.AdminList{Inboxes: make([]api.Admin, len(views))}
@@ -203,10 +226,11 @@ func (a *adminAPI) ListInboxes(ctx context.Context, req api.ListInboxesRequestOb
 func (a *adminAPI) ShowInbox(ctx context.Context, req api.ShowInboxRequestObject) (api.ShowInboxResponseObject, error) {
 	v, err := a.s.adm.Get(ctx, req.Slug)
 	if err != nil {
-		if f := a.s.classify(ctx, "show inbox", err); f.status == http.StatusNotFound {
+		f := a.s.classify(ctx, "show inbox", err)
+		if f.status == http.StatusNotFound {
 			return api.ShowInbox404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, f)}, nil
 		}
-		return api.ShowInbox500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+		return api.ShowInbox500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
 	return api.ShowInbox200JSONResponse{Body: view(v, a.s.baseURLFor(ctx)), Headers: api.ShowInbox200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
 }
@@ -235,7 +259,8 @@ func (a *adminAPI) UpdateInbox(ctx context.Context, req api.UpdateInboxRequestOb
 	}
 	v, err := a.s.adm.Update(ctx, req.Slug, p)
 	if err != nil {
-		switch f := a.s.classify(ctx, "update inbox", err); f.status {
+		f := a.s.classify(ctx, "update inbox", err)
+		switch f.status {
 		case http.StatusBadRequest:
 			return api.UpdateInbox400JSONResponse{BadRequestJSONResponse: badRequest(ctx, f)}, nil
 		case http.StatusNotFound:
@@ -243,7 +268,7 @@ func (a *adminAPI) UpdateInbox(ctx context.Context, req api.UpdateInboxRequestOb
 		case http.StatusConflict:
 			return api.UpdateInbox409JSONResponse{ConflictJSONResponse: conflict(ctx, f)}, nil
 		}
-		return api.UpdateInbox500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+		return api.UpdateInbox500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
 	a.s.auditCtx(ctx, "update inbox", v.Slug)
 	return api.UpdateInbox200JSONResponse{Body: view(v, a.s.baseURLFor(ctx)), Headers: api.UpdateInbox200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
@@ -251,10 +276,11 @@ func (a *adminAPI) UpdateInbox(ctx context.Context, req api.UpdateInboxRequestOb
 
 func (a *adminAPI) DeleteInbox(ctx context.Context, req api.DeleteInboxRequestObject) (api.DeleteInboxResponseObject, error) {
 	if err := a.s.adm.Delete(ctx, req.Slug); err != nil {
-		if f := a.s.classify(ctx, "delete inbox", err); f.status == http.StatusNotFound {
+		f := a.s.classify(ctx, "delete inbox", err)
+		if f.status == http.StatusNotFound {
 			return api.DeleteInbox404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, f)}, nil
 		}
-		return api.DeleteInbox500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+		return api.DeleteInbox500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
 	a.s.auditCtx(ctx, "delete inbox", req.Slug)
 	return api.DeleteInbox204Response{Headers: api.DeleteInbox204ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
@@ -263,7 +289,8 @@ func (a *adminAPI) DeleteInbox(ctx context.Context, req api.DeleteInboxRequestOb
 func (a *adminAPI) SetVerifierSecret(ctx context.Context, req api.SetVerifierSecretRequestObject) (api.SetVerifierSecretResponseObject, error) {
 	v, err := a.s.adm.SetSecret(ctx, req.Slug, req.Body.Secret)
 	if err != nil {
-		switch f := a.s.classify(ctx, "set secret", err); f.status {
+		f := a.s.classify(ctx, "set secret", err)
+		switch f.status {
 		case http.StatusBadRequest:
 			return api.SetVerifierSecret400JSONResponse{BadRequestJSONResponse: badRequest(ctx, f)}, nil
 		case http.StatusNotFound:
@@ -273,7 +300,7 @@ func (a *adminAPI) SetVerifierSecret(ctx context.Context, req api.SetVerifierSec
 		case http.StatusNotImplemented:
 			return api.SetVerifierSecret501JSONResponse{NotImplementedJSONResponse: notImplemented(ctx, f)}, nil
 		}
-		return api.SetVerifierSecret500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+		return api.SetVerifierSecret500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
 	a.s.auditCtx(ctx, "set verifier secret", v.Slug)
 	return api.SetVerifierSecret200JSONResponse{Body: view(v, a.s.baseURLFor(ctx)), Headers: api.SetVerifierSecret200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
@@ -282,13 +309,14 @@ func (a *adminAPI) SetVerifierSecret(ctx context.Context, req api.SetVerifierSec
 func (a *adminAPI) RotateAgentToken(ctx context.Context, req api.RotateAgentTokenRequestObject) (api.RotateAgentTokenResponseObject, error) {
 	c, err := a.s.adm.RotateToken(ctx, req.Slug)
 	if err != nil {
-		switch f := a.s.classify(ctx, "rotate token", err); f.status {
+		f := a.s.classify(ctx, "rotate token", err)
+		switch f.status {
 		case http.StatusNotFound:
 			return api.RotateAgentToken404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, f)}, nil
 		case http.StatusConflict:
 			return api.RotateAgentToken409JSONResponse{ConflictJSONResponse: conflict(ctx, f)}, nil
 		}
-		return api.RotateAgentToken500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+		return api.RotateAgentToken500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
 	a.s.auditCtx(ctx, "rotate agent token", c.Inbox.Slug)
 	return api.RotateAgentToken200JSONResponse{Body: created(c, a.s.baseURLFor(ctx)), Headers: api.RotateAgentToken200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
@@ -300,10 +328,11 @@ func (a *adminAPI) RunRetention(ctx context.Context, _ api.RunRetentionRequestOb
 	defer cancel()
 	n, err := a.s.adm.RunRetention(ctx)
 	if err != nil {
-		if f := a.s.classify(ctx, "retention", err); f.status == http.StatusConflict {
+		f := a.s.classify(ctx, "retention", err)
+		if f.status == http.StatusConflict {
 			return api.RunRetention409JSONResponse{ConflictJSONResponse: conflict(ctx, f)}, nil
 		}
-		return api.RunRetention500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+		return api.RunRetention500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
 	a.s.auditCtx(ctx, "run retention", "", slog.Int64("deleted", n), slog.Duration("took", time.Since(start).Round(time.Millisecond)))
 	return api.RunRetention200JSONResponse{Body: api.Deleted{Deleted: int(n)}, Headers: api.RunRetention200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil

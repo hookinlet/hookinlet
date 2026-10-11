@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/hookinlet/hookinlet/docs"
+	"github.com/hookinlet/hookinlet/internal/admin"
 	"github.com/hookinlet/hookinlet/internal/specvalidate"
 )
 
@@ -149,5 +150,78 @@ func TestAdminBodiesAreHeldToTheDocument(t *testing.T) {
 		if st != http.StatusBadRequest || !strings.Contains(string(data), tc.want) {
 			t.Errorf("%s: %d %s, want 400 containing %q", tc.body, st, data, tc.want)
 		}
+	}
+}
+
+func TestTheAdminQueryGuardRunsAfterAuthentication(t *testing.T) {
+	a := newAdminEnv(t)
+	st, _, _ := a.call(http.MethodGet, "/admin/inboxes?bogus=1", nil, "")
+	if st != http.StatusUnauthorized {
+		t.Errorf("anonymous with a bad query: %d", st)
+	}
+	if st, _, _ := a.call(http.MethodGet, "/admin/inboxes?bogus=1", nil, a.tokenA); st != http.StatusForbidden {
+		t.Errorf("an agent token with a bad query: %d", st)
+	}
+	if st, _, _ := a.call(http.MethodPost, "/admin/inboxes?bogus=1", `{"slug":"abc"}`, ""); st != http.StatusUnauthorized {
+		t.Errorf("anonymous POST with a bad query: %d", st)
+	}
+}
+
+func TestEveryAdminOperationRefusesAnUnknownQueryParameter(t *testing.T) {
+	a := newAdminEnv(t)
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/admin/inboxes?x=1"},
+		{http.MethodGet, "/admin/inboxes/agent-a?x=1"},
+		{http.MethodDelete, "/admin/inboxes/agent-a?x=1"},
+		{http.MethodPost, "/admin/inboxes/agent-a/rotate-token?x=1"},
+		{http.MethodPost, "/admin/retention/run?x=1"},
+		{http.MethodGet, "/admin/backup?x=1"},
+	} {
+		// The response is also checked against the document, which has to list 400.
+		st, data := a.admin(tc.method, tc.path, nil)
+		if st != http.StatusBadRequest || !strings.Contains(string(data), `parameter \"x\": unknown parameter`) {
+			t.Errorf("%s %s: %d %s", tc.method, tc.path, st, data)
+		}
+	}
+	// And nothing was deleted by the refused DELETE.
+	a.mustAdmin(http.MethodGet, "/admin/inboxes/agent-a", nil, http.StatusOK)
+}
+
+func TestAnAdminListAcceptsAnyCursorAnInt64Can(t *testing.T) {
+	a := newAdminEnv(t)
+	a.mustAdmin(http.MethodGet, "/admin/inboxes?after=9223372036854775807", nil, http.StatusOK)
+}
+
+func TestARefusedBodyDoesNotRepeatALongFieldName(t *testing.T) {
+	a := newAdminEnv(t)
+	body := `{"slug":"clipped","` + strings.Repeat("k", 50000) + `":1}`
+	st, data := a.admin(http.MethodPost, "/admin/inboxes", body)
+	if st != http.StatusBadRequest {
+		t.Fatalf("status %d", st)
+	}
+	if len(data) > 1000 {
+		t.Errorf("the answer is %d bytes", len(data))
+	}
+}
+
+func TestAnAdminRouteMissingFromTheDocumentIsRefusedNotServedUnchecked(t *testing.T) {
+	a := newAdminEnv(t)
+	holdTo(t, a.server, func(doc map[string]any) {
+		delete(at(doc, "paths", "/admin/inboxes"), "post")
+	})
+	st, data := a.admin(http.MethodPost, "/admin/inboxes", map[string]any{"slug": "unchecked"})
+	if st != http.StatusInternalServerError {
+		t.Errorf("a route the document lacks: %d %s", st, data)
+	}
+}
+
+func TestVerifierConfigNumbersSurviveTheResponse(t *testing.T) {
+	v := admin.View{VerifierConfig: json.RawMessage(`{"big":9007199254740993,"x":1.50}`)}
+	out, err := json.Marshal(view(v, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"big":9007199254740993`) || !strings.Contains(string(out), `"x":1.50`) {
+		t.Errorf("config numbers changed: %s", out)
 	}
 }

@@ -17,6 +17,9 @@ applies.
 - `admin.CreateParams` and `admin.Patch` omit empty fields when marshalled, where
   they used to write `null`. The admin API now refuses `null` for these fields,
   as its document says.
+- The admin API's `GET`/`DELETE` of one inbox, `rotate-token`, `retention/run`, and
+  `backup` refuse a query parameter, where they used to ignore it, and the document
+  lists 400 for them. `?limit=` with no value is refused on the list.
 
 #### Added
 - `internal/api`, generated from the document, and `make generate`. CI fails when

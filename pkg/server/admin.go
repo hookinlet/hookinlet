@@ -95,7 +95,15 @@ func sortStrings(s []string) {
 // handler. Requests without a body pass through.
 func (s *Server) adminBody(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if op := s.operation(r); op != nil && op.TakesBody() {
+		op := s.operation(r)
+		if op == nil {
+			// A route the document does not describe would be served with none of the
+			// checks below. That is a mistake in the code, so it is refused loudly.
+			s.log.LogAttrs(r.Context(), slog.LevelError, "admin route is not in the document", slog.String("route", r.Pattern), slog.String("method", r.Method))
+			writeError(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
+		if op.TakesBody() {
 			if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 				writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "send application/json")
 				return
@@ -111,7 +119,7 @@ func (s *Server) adminBody(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			if vs := op.CheckBody(body); len(vs) > 0 {
-				writeError(w, http.StatusBadRequest, "invalid_request", "the request body is not valid: "+vs[0].String())
+				writeError(w, http.StatusBadRequest, "invalid_request", "the request body is not valid: "+clip(vs[0].String(), 200))
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
