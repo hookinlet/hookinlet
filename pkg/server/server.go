@@ -21,7 +21,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hookinlet/hookinlet/docs"
 	"github.com/hookinlet/hookinlet/internal/admin"
+	"github.com/hookinlet/hookinlet/internal/api"
+	"github.com/hookinlet/hookinlet/internal/specvalidate"
 	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
@@ -127,6 +130,9 @@ type Server struct {
 	http    *http.Server
 	reads   chan struct{} // a slot per read request being served
 
+	spec      *specvalidate.Document // docs/openapi.json, which requests are held to
+	streamAPI api.ServerInterface    // the stream, through the generated interface
+	mcpStrict api.ServerInterface    // MCP, through the generated interface
 	adm       *admin.Service
 	backupMu  sync.Mutex     // one backup at a time
 	retention sync.WaitGroup // the scheduled sweep, so Serve can wait for it
@@ -209,9 +215,14 @@ func New(opts Options) (*Server, error) {
 		opts.SSERecheckInterval = 0
 	}
 
+	spec, err := specvalidate.Load(docs.OpenAPI)
+	if err != nil {
+		return nil, err
+	}
 	closeCtx, closeCancel := context.WithCancel(context.Background())
 	s := &Server{
 		opts:         opts,
+		spec:         spec,
 		log:          opts.Logger,
 		reads:        make(chan struct{}, opts.MaxConcurrentReads),
 		streams:      make(chan struct{}, opts.MaxStreams),
@@ -220,14 +231,22 @@ func New(opts Options) (*Server, error) {
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),
 	}
+	s.streamAPI = s.strictServer(&streamAPI{s: s})
+	s.mcpStrict = s.strictServer(&mcpAPI{s: s})
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthz)
-	mux.HandleFunc("GET /readyz", s.readyz)
+	health := s.apiHandlers(&healthAPI{s: s})
+	mux.HandleFunc("GET /healthz", health.Healthz)
+	mux.HandleFunc("GET /readyz", health.Readyz)
 	// Ingest accepts any method here and answers 405 itself, so that the
 	// response is JSON and carries an Allow header.
-	mux.HandleFunc("/in/{key}", s.handleIngest)
-	mux.HandleFunc("/in/{key}/{rest...}", s.handleIngest)
+	ingest := s.strictServer(&ingestAPI{s: s})
+	mux.HandleFunc("/in/{key}", withRequest(func(w http.ResponseWriter, r *http.Request) {
+		ingest.Ingest(w, r, r.PathValue("key"))
+	}))
+	mux.HandleFunc("/in/{key}/{rest...}", withRequest(func(w http.ResponseWriter, r *http.Request) {
+		ingest.IngestWithPath(w, r, r.PathValue("key"), r.PathValue("rest"))
+	}))
 	if opts.Authenticator != nil {
 		s.registerAgentAPI(mux)
 		s.registerAdmin(mux)
@@ -318,23 +337,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // closeStreams tells every open stream to finish. It is safe to call repeatedly.
 func (s *Server) closeStreams() { s.closeCancel() }
-
-func healthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// readyz reports whether the Store is reachable. Unlike /healthz, which only
-// says the process is up, it fails while a dependency is down.
-func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-	defer cancel()
-	if err := s.opts.Store.Ping(ctx); err != nil {
-		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready", slog.String("err", err.Error()))
-		writeError(w, http.StatusServiceUnavailable, "not_ready", "the store is not reachable")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
-}
 
 func notFound(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotFound, "not_found", "not found")

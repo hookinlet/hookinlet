@@ -39,7 +39,9 @@ they are useful if you are only reading.
   matters is checked by breaking it on purpose and seeing a test fail. A verifier change includes negative tests
   (wrong secret, tampered body, stale timestamp, malformed header).
 - **Docs move with the code.** A change to a request or response shape updates `docs/api.md`, `docs/openapi.json`
-  (a test compares it with the server), and `docs/mcp.md` if a tool is affected. Examples in the documentation are
+  (a test compares it with the server), and `docs/mcp.md` if a tool is affected. After editing
+  the document, run `make generate`: `internal/api` is generated from it, CI fails if it is stale, and the
+  server refuses requests that break it. Examples in the documentation are
   run by `scripts/test-docs.sh`.
 - **Public Go API.** Everything under `pkg/` is pre-1.0 and may change; every change to it is called out in
   `CHANGELOG.md`. After v1.0.0, semantic versioning applies.
@@ -68,5 +70,10 @@ make run    # serve with throwaway development credentials
 Before a change is ready, run `make lint test`, and `scripts/test-docs.sh` if you touched the documentation or
 the examples. Go is pinned in `go.mod`. The Docker image and its smoke test are `make docker` and
 `scripts/smoke-docker.sh hookinlet:dev`.
+
+A pull request runs the fast checks: build, vet, unit tests (without the race detector), lint, and the static
+checks on the OpenAPI document and the generated code. The race detector, the documentation examples, the image
+build and smoke test, and the release dry run run when a change lands on `main` and every night, so run the ones
+you touched yourself before asking for review.
 
 Commit messages say what changed and why, for whoever reads the history later.

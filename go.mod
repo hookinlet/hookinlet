@@ -4,11 +4,13 @@ go 1.27.2
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/oapi-codegen/runtime v1.7.0
 	go.uber.org/goleak v1.3.0
 	modernc.org/sqlite v1.60.1
 )
 
 require (
+	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect

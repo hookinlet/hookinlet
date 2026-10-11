@@ -51,6 +51,9 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+// Wrote reports whether the status line has been sent.
+func (w *statusWriter) Wrote() bool { return w.wrote }
+
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // requestID assigns every request an id, taken from a well-formed incoming

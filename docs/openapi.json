@@ -2336,6 +2336,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -2504,6 +2507,9 @@
                 "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2688,6 +2694,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -2769,6 +2778,9 @@
                 "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -2856,6 +2868,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -3856,9 +3871,13 @@
             "const": "2.0"
           },
           "id": {
-            "type": [
-              "string",
-              "integer"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
             ]
           },
           "method": {
@@ -3888,10 +3907,16 @@
             "const": "2.0"
           },
           "id": {
-            "type": [
-              "string",
-              "integer",
-              "null"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "result": {},

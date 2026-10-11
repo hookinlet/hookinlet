@@ -1,0 +1,20 @@
+overlay: 1.0.0
+info:
+  title: How the generated Go types differ from the published document
+  version: 1.0.0
+actions:
+  # A message body is the JSON the sender posted. Carry it as raw JSON, so that it
+  # is neither parsed nor re-encoded on the way out: a number such as
+  # 9007199254740993 would not survive being read into a float64.
+  - target: $.components.schemas.Message.properties.body
+    update:
+      x-go-type: json.RawMessage
+      x-go-type-skip-optional-pointer: true
+  # The MCP endpoint hands JSON-RPC to the MCP SDK and takes its answer as it is:
+  # the document describes the messages, and the SDK is what writes them.
+  - target: $.components.schemas.JsonRpcRequest
+    update:
+      x-go-type: json.RawMessage
+  - target: $.components.schemas.JsonRpcResponse
+    update:
+      x-go-type: json.RawMessage

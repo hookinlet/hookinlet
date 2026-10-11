@@ -211,6 +211,7 @@ func (e *env) do(r req) *httptest.ResponseRecorder {
 	}
 	rec := httptest.NewRecorder()
 	e.server.Handler().ServeHTTP(rec, hr)
+	checkAgainstSpec(e.t, r.method, r.path, rec.Code, rec.Header(), rec.Body.Bytes())
 	return rec
 }
 
