@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hookinlet/hookinlet/internal/specvalidate"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
@@ -47,6 +47,7 @@ import (
 // holds it to that.
 type spec struct {
 	root   map[string]any
+	doc    *specvalidate.Document
 	strict bool
 }
 
@@ -60,10 +61,13 @@ func loadSpec(t *testing.T) *spec {
 	if err := json.Unmarshal(b, &root); err != nil {
 		t.Fatalf("docs/openapi.json is not valid JSON: %v", err)
 	}
-	if root["openapi"] != "3.1.0" {
-		t.Fatalf("openapi = %v", root["openapi"])
+	// Load refuses a document that uses a keyword or format the checker would
+	// ignore, so a schema cannot pass because part of it was not understood.
+	doc, err := specvalidate.Load(b)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return &spec{root: root, strict: true}
+	return &spec{root: root, doc: doc, strict: true}
 }
 
 func get(m any, keys ...string) any {
@@ -126,170 +130,19 @@ func (s *spec) response(o operation, status string) map[string]any {
 
 // ---- the schema checker ----
 
-var knownKeywords = map[string]bool{
-	"type": true, "properties": true, "required": true, "additionalProperties": true, "items": true,
-	"enum": true, "const": true, "pattern": true, "minimum": true, "maximum": true, "minLength": true,
-	"maxLength": true, "minItems": true, "maxItems": true, "minProperties": true, "oneOf": true,
-	"format": true, "$ref": true,
-	// annotations: they say things to people and constrain nothing
-	"description": true, "example": true, "default": true, "title": true,
-}
-
-var knownFormats = map[string]bool{"date-time": true, "binary": true}
-
-// check validates v against schema and returns every problem found. It reports
-// a keyword it does not understand as a problem.
+// check validates v against schema with the checker the server itself uses
+// (internal/specvalidate), with response objects closed, and returns every problem
+// found, each prefixed with where it was.
 func (s *spec) check(schema, v any, at string) []string {
-	schema = s.deref(schema)
-	switch sc := schema.(type) {
-	case bool:
-		if !sc {
-			return []string{at + ": nothing is allowed here"}
+	var out []string
+	for _, viol := range s.doc.Check(schema, v, specvalidate.Options{ClosedObjects: s.strict}) {
+		p := at
+		if viol.Path != "" {
+			p += "." + viol.Path
 		}
-		return nil
-	case nil:
-		return []string{at + ": no schema"}
+		out = append(out, p+": "+viol.Reason)
 	}
-	sm := schema.(map[string]any)
-	var errs []string
-	bad := func(f string, a ...any) { errs = append(errs, at+": "+fmt.Sprintf(f, a...)) }
-	for k := range sm {
-		if !knownKeywords[k] {
-			bad("the schema uses the keyword %q, which this test does not check", k)
-		}
-	}
-	if f, ok := sm["format"].(string); ok && !knownFormats[f] {
-		bad("the schema uses the format %q, which this test does not check", f)
-	}
-	if c, ok := sm["const"]; ok && !jsonEqual(c, v) {
-		bad("want %v, got %v", c, v)
-	}
-	if e, ok := sm["enum"].([]any); ok && !slices.ContainsFunc(e, func(x any) bool { return jsonEqual(x, v) }) {
-		bad("%v is not one of %v", v, e)
-	}
-	if one, ok := sm["oneOf"].([]any); ok {
-		matches := 0
-		for _, alt := range one {
-			if len(s.check(alt, v, at)) == 0 {
-				matches++
-			}
-		}
-		if matches != 1 {
-			bad("%v matches %d of the oneOf alternatives, want exactly 1", v, matches)
-		}
-	}
-	if t, ok := sm["type"]; ok {
-		types := []any{t}
-		if ts, ok := t.([]any); ok {
-			types = ts
-		}
-		match := false
-		for _, ty := range types {
-			match = match || typeIs(ty.(string), v)
-		}
-		if !match {
-			return append(errs, fmt.Sprintf("%s: %T %v is not of type %v", at, v, v, t))
-		}
-	}
-	switch x := v.(type) {
-	case map[string]any:
-		props, _ := sm["properties"].(map[string]any)
-		if req, ok := sm["required"].([]any); ok {
-			for _, r := range req {
-				if _, present := x[r.(string)]; !present {
-					bad("missing required field %q", r)
-				}
-			}
-		}
-		for k, val := range x {
-			if p, ok := props[k]; ok {
-				errs = append(errs, s.check(p, val, at+"."+k)...)
-				continue
-			}
-			ap, stated := sm["additionalProperties"]
-			if !stated && s.strict && props != nil {
-				ap = false
-			}
-			switch ap := ap.(type) {
-			case bool:
-				if !ap {
-					bad("field %q is not in the schema", k)
-				}
-			case map[string]any:
-				errs = append(errs, s.check(ap, val, at+"."+k)...)
-			}
-		}
-		if n, ok := sm["minProperties"].(float64); ok && float64(len(x)) < n {
-			bad("fewer than %v properties", n)
-		}
-	case []any:
-		if it, ok := sm["items"]; ok {
-			for i, e := range x {
-				errs = append(errs, s.check(it, e, fmt.Sprintf("%s[%d]", at, i))...)
-			}
-		}
-		if n, ok := sm["minItems"].(float64); ok && float64(len(x)) < n {
-			bad("fewer than %v items", n)
-		}
-		if n, ok := sm["maxItems"].(float64); ok && float64(len(x)) > n {
-			bad("more than %v items", n)
-		}
-	case string:
-		if p, ok := sm["pattern"].(string); ok && !regexp.MustCompile(p).MatchString(x) {
-			bad("%q does not match %s", x, p)
-		}
-		if n, ok := sm["minLength"].(float64); ok && float64(len([]rune(x))) < n {
-			bad("shorter than %v characters", n)
-		}
-		if n, ok := sm["maxLength"].(float64); ok && float64(len([]rune(x))) > n {
-			bad("longer than %v characters", n)
-		}
-		if sm["format"] == "date-time" {
-			if _, err := time.Parse(time.RFC3339Nano, x); err != nil {
-				bad("%q is not a date-time", x)
-			}
-		}
-	case float64:
-		if m, ok := sm["minimum"].(float64); ok && x < m {
-			bad("%v is below the minimum %v", x, m)
-		}
-		if m, ok := sm["maximum"].(float64); ok && x > m {
-			bad("%v is above the maximum %v", x, m)
-		}
-	}
-	return errs
-}
-
-func typeIs(t string, v any) bool {
-	switch t {
-	case "null":
-		return v == nil
-	case "string":
-		_, ok := v.(string)
-		return ok
-	case "boolean":
-		_, ok := v.(bool)
-		return ok
-	case "object":
-		_, ok := v.(map[string]any)
-		return ok
-	case "array":
-		_, ok := v.([]any)
-		return ok
-	case "number":
-		_, ok := v.(float64)
-		return ok
-	case "integer":
-		f, ok := v.(float64)
-		return ok && f == math.Trunc(f)
-	}
-	return false
-}
-
-func jsonEqual(a, b any) bool {
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return bytes.Equal(x, y)
+	return out
 }
 
 // ---- the document itself ----
@@ -338,33 +191,8 @@ func TestOpenAPIIsInternallyConsistent(t *testing.T) {
 		}
 	}
 	refs(sp.root)
-	for name, sc := range get(sp.root, "components", "schemas").(map[string]any) {
-		var keys func(s any, at string)
-		keys = func(s any, at string) {
-			m, ok := s.(map[string]any)
-			if !ok {
-				return
-			}
-			for k, c := range m {
-				if !knownKeywords[k] && k != "properties" {
-					t.Errorf("%s: unknown keyword %q", at, k)
-				}
-				switch k {
-				case "properties":
-					for pn, ps := range c.(map[string]any) {
-						keys(ps, at+"."+pn)
-					}
-				case "items", "additionalProperties":
-					keys(c, at+"."+k)
-				case "oneOf":
-					for i, alt := range c.([]any) {
-						keys(alt, fmt.Sprintf("%s.oneOf[%d]", at, i))
-					}
-				}
-			}
-		}
-		keys(sc, name)
-	}
+	// A schema that uses a keyword the checker would ignore is refused by
+	// loadSpec, so there is nothing more to check for here.
 
 	// Operation ids are unique; every operation has a `default` response and a
 	// request id on every response.

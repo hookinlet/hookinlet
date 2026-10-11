@@ -1,4 +1,4 @@
-.PHONY: build test lint run docker clean
+.PHONY: build test lint generate run docker clean
 
 VERSION ?= dev
 ADDR ?= :8080
@@ -12,6 +12,10 @@ test:
 
 lint:
 	golangci-lint run ./...
+
+# Rewrites internal/api from docs/openapi.json. Run it after editing the document.
+generate:
+	go generate ./internal/api
 
 # Runs with throwaway development credentials. The master key is random on
 # every run, so anything encrypted by a previous run becomes unreadable.

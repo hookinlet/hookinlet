@@ -132,17 +132,20 @@ func (v View) WithBase(base string) View {
 }
 
 // CreateParams describes a new inbox. Zero values mean the default.
+// The fields are omitted when empty, so that a client built on these types sends
+// only what it means and a zero value is never mistaken for a wrong one: the
+// document gives each field a type, and `null` is not one of them.
 type CreateParams struct {
-	Slug              string          `json:"slug"`
-	Name              string          `json:"name"`
-	Verifier          string          `json:"verifier"`
-	VerifierConfig    json.RawMessage `json:"verifier_config"`
-	VerifierSecret    string          `json:"verifier_secret"`
-	OnVerifyFail      string          `json:"on_verify_fail"`
-	MaxBodyBytes      int64           `json:"max_body_bytes"`
-	RetentionDays     int             `json:"retention_days"`
-	RetentionMaxCount int64           `json:"retention_max_count"`
-	EventTypePointer  string          `json:"event_type_pointer"`
+	Slug              string          `json:"slug,omitempty"`
+	Name              string          `json:"name,omitempty"`
+	Verifier          string          `json:"verifier,omitempty"`
+	VerifierConfig    json.RawMessage `json:"verifier_config,omitempty"`
+	VerifierSecret    string          `json:"verifier_secret,omitempty"`
+	OnVerifyFail      string          `json:"on_verify_fail,omitempty"`
+	MaxBodyBytes      int64           `json:"max_body_bytes,omitempty"`
+	RetentionDays     int             `json:"retention_days,omitempty"`
+	RetentionMaxCount int64           `json:"retention_max_count,omitempty"`
+	EventTypePointer  string          `json:"event_type_pointer,omitempty"`
 }
 
 // Created is the result of Create and RotateToken. AgentToken is the only copy
@@ -230,15 +233,15 @@ func (s *Service) List(ctx context.Context, after inbox.ID, limit int) (views []
 // secrets are not here: the slug never changes, and the secret and the token
 // have their own operations.
 type Patch struct {
-	Name              *string          `json:"name"`
-	Verifier          *string          `json:"verifier"`
-	VerifierConfig    *json.RawMessage `json:"verifier_config"`
-	OnVerifyFail      *string          `json:"on_verify_fail"`
-	MaxBodyBytes      *int64           `json:"max_body_bytes"`
-	RetentionDays     *int             `json:"retention_days"`
-	RetentionMaxCount *int64           `json:"retention_max_count"`
-	EventTypePointer  *string          `json:"event_type_pointer"`
-	Disabled          *bool            `json:"disabled"`
+	Name              *string          `json:"name,omitempty"`
+	Verifier          *string          `json:"verifier,omitempty"`
+	VerifierConfig    *json.RawMessage `json:"verifier_config,omitempty"`
+	OnVerifyFail      *string          `json:"on_verify_fail,omitempty"`
+	MaxBodyBytes      *int64           `json:"max_body_bytes,omitempty"`
+	RetentionDays     *int             `json:"retention_days,omitempty"`
+	RetentionMaxCount *int64           `json:"retention_max_count,omitempty"`
+	EventTypePointer  *string          `json:"event_type_pointer,omitempty"`
+	Disabled          *bool            `json:"disabled,omitempty"`
 }
 
 func (p Patch) empty() bool { return p == Patch{} }

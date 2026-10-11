@@ -72,6 +72,7 @@ func (a *adminEnv) call(method, path string, body any, tok string) (int, http.He
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
+	checkAgainstSpec(a.t, method, path, resp.StatusCode, resp.Header, data)
 	return resp.StatusCode, resp.Header, data
 }
 

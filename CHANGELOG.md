@@ -6,6 +6,22 @@ applies.
 
 ## Unreleased
 
+### Phase 9: the spec is the contract, enforced in Go
+
+#### Changed
+- The server refuses a request that breaks `docs/openapi.json`: a query parameter
+  the document does not list, a repeated one, or a value of the wrong type or
+  outside its range, on the read API, the stream, and the admin API; and an admin
+  request body with an unknown field, a wrong type, or a value outside its schema.
+  The answer is 400 in the usual error shape, after authentication.
+- `admin.CreateParams` and `admin.Patch` omit empty fields when marshalled, where
+  they used to write `null`. The admin API now refuses `null` for these fields,
+  as its document says.
+
+#### Added
+- `internal/api`, generated from the document, and `make generate`. CI fails when
+  it is out of date.
+
 ### Phase 8: open-source polish
 
 #### Added
