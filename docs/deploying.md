@@ -26,16 +26,16 @@ Create an inbox, send it a webhook, and read it back:
 ```sh
 curl -s -X POST localhost:8080/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"slug": "demo"}'
-# → {"inbox": {…, "ingest_path": "/in/demo"}, "agent_token": "hki_…"}   (the token is shown once)
+  -d '{"slug": "demo", "verifier": "none"}'
+# → {"inbox": {…, "ingest_path": "/in/q3V9xR1hT0kYz2mP8uWb6A"}, "agent_token": "hki_…"}   (the token is shown once)
 
-curl -s -X POST localhost:8080/in/demo -d '{"hello": "world"}'
+curl -s -X POST localhost:8080/in/q3V9xR1hT0kYz2mP8uWb6A -d '{"hello": "world"}'
 # → {"seq":1}
 
 curl -s localhost:8080/v1/inboxes/demo/messages -H "Authorization: Bearer hki_…"
 ```
 
-An inbox with no verifier (the default) accepts anything sent to its URL. To accept
+An inbox whose verifier is `none` (it has to be asked for) accepts anything sent to its URL and stores it as not verified. To accept
 only signed webhooks from Stripe, GitHub, and others, see
 [verifiers](verifiers.md). All the ways to manage inboxes are in
 [administration](admin.md), the agent-facing API in [api](api.md), and the MCP

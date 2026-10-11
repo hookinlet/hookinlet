@@ -85,6 +85,10 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 	}
 	body := cloneBytes(m.Body)
 	now := inbox.NormalizeTime(s.now())
+	dedupeKey := m.DedupeKey
+	if dedupeKey == "" {
+		dedupeKey = m.DeliveryID
+	}
 
 	var (
 		stored  *inbox.Message
@@ -93,11 +97,11 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 	err = s.writeTx(ctx, func(tx *sql.Tx) error {
 		// Only a verified delivery can be deduplicated, and only against another
 		// verified one. The partial unique index enforces the same rule.
-		if m.Verified && m.DeliveryID != "" {
+		if m.Verified && dedupeKey != "" {
 			existing, err := scanMessage(tx.QueryRowContext(ctx,
 				`SELECT `+messageCols+`, body FROM messages
-				 WHERE inbox_id = ? AND delivery_id = ? AND delivery_id IS NOT NULL AND verified = 1`,
-				int64(inboxID), m.DeliveryID), inboxID, nil)
+				 WHERE inbox_id = ? AND dedupe_key = ? AND dedupe_key IS NOT NULL AND verified = 1`,
+				int64(inboxID), dedupeKey), inboxID, nil)
 			switch {
 			case err == nil:
 				stored, created = existing, false
@@ -133,11 +137,11 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 
 		if _, err := tx.ExecContext(ctx, `INSERT INTO messages (
 				inbox_id, seq, received_at, method, path_suffix, query, headers, content_type, body, size,
-				verified, verify_error, delivery_id, event_type, source_ip)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				verified, verify_error, delivery_id, event_type, source_ip, dedupe_key)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			int64(inboxID), seq, formatTime(receivedAt), m.Method, m.PathSuffix, m.Query, string(headerJSON),
 			m.ContentType, body, len(body), boolInt(m.Verified), nullString(m.VerifyError),
-			nullString(m.DeliveryID), nullString(m.EventType), nullString(m.SourceIP)); err != nil {
+			nullString(m.DeliveryID), nullString(m.EventType), nullString(m.SourceIP), nullString(dedupeKey)); err != nil {
 			return fmt.Errorf("sqlite: insert message: %w", err)
 		}
 

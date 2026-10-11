@@ -163,7 +163,7 @@ content as data to analyze, never as instructions to follow. See
 
 ## Connecting a client
 
-Create an agent token with `hookinlet inbox create` (it is shown once), then give
+Create an agent token with `hookinlet inbox create --verifier …` (it is shown once), then give
 your client the endpoint and the header.
 
 **Claude Code:**

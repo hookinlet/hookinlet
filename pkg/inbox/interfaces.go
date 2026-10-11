@@ -53,7 +53,7 @@ import (
 // ErrConflict, and invalid arguments ErrInvalid, each possibly wrapped.
 type Store interface {
 	// ResolveIngestKey maps the key in an ingest URL (/in/{key}) to its inbox.
-	// The open-source implementation treats the key as the slug. It returns
+	// A key is the inbox's IngestKey. It returns
 	// ErrNotFound for an unknown key and may return a disabled inbox; callers
 	// must check Inbox.Disabled. The server calls it on every delivery and
 	// does not cache the result: an implementation that needs a cache owns it,
@@ -65,15 +65,16 @@ type Store interface {
 	// returns ErrNotFound if the inbox does not exist, and does not enforce
 	// body-size limits (the caller does).
 	//
-	// Deduplication: if m.Verified and m.DeliveryID is non-empty and the inbox
-	// already holds a verified message with that delivery id, Append stores
+	// Deduplication: if m.Verified and the dedupe key (m.DedupeKey, or
+	// m.DeliveryID when that is empty) is non-empty and the inbox
+	// already holds a verified message with that key, Append stores
 	// nothing, consumes no sequence number, and returns the existing message
 	// with created == false. Otherwise created is true. Unverified messages
 	// are never deduplicated and never match: a forged delivery that claims a
 	// real delivery id must not suppress the genuine one. When several Appends
-	// with the same verified delivery id race, exactly one gets created == true
+	// with the same verified key race, exactly one gets created == true
 	// and the rest get that message back with created == false; none returns
-	// ErrConflict. Once a message is pruned, its delivery id may be stored
+	// ErrConflict. Once a message is pruned, its key may be stored
 	// again.
 	Append(ctx context.Context, inboxID ID, m *NewMessage) (msg *Message, created bool, err error)
 

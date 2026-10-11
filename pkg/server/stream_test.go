@@ -187,7 +187,7 @@ func streamEnv(t *testing.T, mods ...func(*Options)) (*agentEnv, string, *local.
 	ae := &agentEnv{env: e.env, a: e.a}
 	tokA := e.tokenFor(e.a)
 	ae.tokenA = tokA
-	b := e.newInbox("agent-b", "none", "")
+	b := e.newInbox("agent-b", "trusted", "")
 	ae.b = b
 	ae.tokenB = e.tokenFor(b)
 	return ae, serveOn(t, ae.env), n

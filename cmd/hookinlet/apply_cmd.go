@@ -124,7 +124,28 @@ func applyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 	for _, it := range items {
 		if err := it.Check(current[it.Spec.Slug]); err != nil {
 			planErrs = append(planErrs, err)
+		} else if err := it.CheckSecret(current[it.Spec.Slug], secrets[it.Spec.Slug]); err != nil {
+			planErrs = append(planErrs, err)
 		}
+	}
+	if len(planErrs) > 0 {
+		fmt.Fprintf(stderr, "hookinlet: %s cannot be applied as it is (nothing was changed):\n  %s\n", displayName(*file), indentLines(errors.Join(planErrs...)))
+		return exitUsage
+	}
+	// Two inboxes cannot share an ingest key; found now, not part way through.
+	keyOwner := map[string]string{}
+	for _, v := range views {
+		keyOwner[v.IngestKey] = v.Slug
+	}
+	for _, it := range items {
+		if it.Action != applyfile.Create || it.Spec.IngestKey == nil {
+			continue
+		}
+		if owner, taken := keyOwner[*it.Spec.IngestKey]; taken {
+			planErrs = append(planErrs, it.Spec.ErrorAt(it.Spec.Line, "ingest_key is already used by the inbox %q", owner))
+			continue
+		}
+		keyOwner[*it.Spec.IngestKey] = it.Spec.Slug
 	}
 	if len(planErrs) > 0 {
 		fmt.Fprintf(stderr, "hookinlet: %s cannot be applied as it is (nothing was changed):\n  %s\n", displayName(*file), indentLines(errors.Join(planErrs...)))
@@ -208,8 +229,16 @@ func applyOne(ctx context.Context, api adminAPI, it applyfile.Item, secret strin
 		rep.created(slug)
 	case applyfile.Update:
 		if !dryRun {
-			if err := call(func(c context.Context) (err error) { _, err = api.Update(c, slug, it.Patch); return }); err != nil {
+			var v admin.View
+			if err := call(func(c context.Context) (err error) { v, err = api.Update(c, slug, it.Patch); return }); err != nil {
 				return err
+			}
+			// A change of verifier removes the old secret; unless the file brings a new
+			// one, the inbox is left unable to verify, and that must be said.
+			if !it.SetSecret {
+				for _, w := range v.Warnings {
+					fmt.Fprintf(stderr, "warning: %s: %s\n", slug, w)
+				}
 			}
 		}
 		rep.updated(slug, it.Fields)

@@ -372,7 +372,10 @@ type Admin struct {
 	EventTypePointer  string `json:"event_type_pointer"`
 	HasVerifierSecret bool   `json:"has_verifier_secret"`
 	Id                int    `json:"id"`
-	IngestPath        string `json:"ingest_path"`
+
+	// IngestKey The key in the inbox's ingest URL. Anyone who has it can post to the inbox.
+	IngestKey  string `json:"ingest_key"`
+	IngestPath string `json:"ingest_path"`
 
 	// IngestUrl Present when the public base URL is known or can be derived from the request.
 	IngestUrl    *string `json:"ingest_url,omitempty"`
@@ -392,6 +395,9 @@ type Admin struct {
 
 	// Version Counts successful updates; changes are checked against it.
 	Version int `json:"version"`
+
+	// Warnings Settings that will make deliveries fail. Present only in the answer to a call that can cause them, and only when there is something to say.
+	Warnings *[]string `json:"warnings,omitempty"`
 }
 
 // AdminOnVerifyFail defines model for Admin.OnVerifyFail.
@@ -408,6 +414,9 @@ type CreateInbox struct {
 	// EventTypePointer An RFC 6901 JSON pointer such as `/type`, or empty for none.
 	EventTypePointer *string `json:"event_type_pointer,omitempty"`
 
+	// IngestKey The key in the inbox's ingest URL (`/in/{key}`). Leave it out to get a random one, which is what an inbox should have: whoever has the key can post to the inbox, and a readable key is a guessable one.
+	IngestKey *string `json:"ingest_key,omitempty"`
+
 	// MaxBodyBytes `0` means the default, 1 MiB.
 	MaxBodyBytes      *int                     `json:"max_body_bytes,omitempty"`
 	Name              *string                  `json:"name,omitempty"`
@@ -418,8 +427,8 @@ type CreateInbox struct {
 	// Slug 3 to 64 characters from `a-z`, `0-9`, and `-`. It never changes.
 	Slug string `json:"slug"`
 
-	// Verifier `none`, `token`, `hmac`, `stripe`, `github`, `slack`, `standardwebhooks`, or one an embedder registered. It must exist.
-	Verifier *string `json:"verifier,omitempty"`
+	// Verifier How deliveries are checked: `stripe`, `github`, `slack`, `standardwebhooks`, `hmac`, `token`, or `none`, which accepts anything and stores it as **not** verified. Required: there is no default. A verifier an embedder registered also works. It must exist.
+	Verifier string `json:"verifier"`
 
 	// VerifierConfig Non-secret parameters; unknown keys are an error. See docs/verifiers.md.
 	VerifierConfig *map[string]interface{} `json:"verifier_config,omitempty"`
@@ -780,7 +789,7 @@ type Message struct {
 	Size     int     `json:"size"`
 	SourceIp *string `json:"source_ip"`
 
-	// Verified Whether the delivery passed the inbox's verifier. Treat unverified content as untrusted input.
+	// Verified `true` only if the inbox's verifier checked something (a signature or a shared token) and it passed. A delivery to an inbox whose verifier is `none` is stored with `false`: nothing vouches for who sent it. Whatever the value, the content was written by the sender.
 	Verified    bool    `json:"verified"`
 	Verifier    string  `json:"verifier"`
 	VerifyError *string `json:"verify_error"`
@@ -994,6 +1003,9 @@ type ServerInterface interface {
 	// UpdateInbox Change an inbox's settings
 	// (PATCH /admin/inboxes/{slug})
 	UpdateInbox(w http.ResponseWriter, r *http.Request, slug Slug)
+	// RotateIngestKey Issue a new ingest key
+	// (POST /admin/inboxes/{slug}/rotate-ingest-key)
+	RotateIngestKey(w http.ResponseWriter, r *http.Request, slug Slug)
 	// RotateAgentToken Issue a new agent token
 	// (POST /admin/inboxes/{slug}/rotate-token)
 	RotateAgentToken(w http.ResponseWriter, r *http.Request, slug Slug)
@@ -1211,6 +1223,32 @@ func (siw *ServerInterfaceWrapper) UpdateInbox(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateInbox(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateIngestKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateIngestKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug Slug
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateIngestKey(w, r, slug)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2177,6 +2215,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/admin/inboxes/{slug}", wrapper.DeleteInbox)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/inboxes/{slug}", wrapper.ShowInbox)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/inboxes/{slug}", wrapper.UpdateInbox)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/inboxes/{slug}/rotate-ingest-key", wrapper.RotateIngestKey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/inboxes/{slug}/rotate-token", wrapper.RotateAgentToken)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/admin/inboxes/{slug}/secret", wrapper.SetVerifierSecret)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/retention/run", wrapper.RunRetention)
@@ -3427,6 +3466,195 @@ type UpdateInboxdefaultTextResponse struct {
 }
 
 func (response UpdateInboxdefaultTextResponse) VisitUpdateInboxResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type RotateIngestKeyRequestObject struct {
+	Slug Slug `json:"slug"`
+}
+
+type RotateIngestKeyResponseObject interface {
+	VisitRotateIngestKeyResponse(w http.ResponseWriter) error
+}
+
+type RotateIngestKey200ResponseHeaders struct {
+	XRequestId string
+}
+
+type RotateIngestKey200JSONResponse struct {
+	Body    Admin
+	Headers RotateIngestKey200ResponseHeaders
+}
+
+func (response RotateIngestKey200JSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RotateIngestKey400JSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RotateIngestKey401JSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKey403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RotateIngestKey403JSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RotateIngestKey404JSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKey405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response RotateIngestKey405JSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RotateIngestKey409JSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RotateIngestKey500JSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKeydefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type RotateIngestKeydefaultJSONResponse struct {
+	Body       Error
+	Headers    RotateIngestKeydefaultResponseHeaders
+	StatusCode int
+}
+
+func (response RotateIngestKeydefaultJSONResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateIngestKeydefaultTextResponse struct {
+	Body       string
+	Headers    RotateIngestKeydefaultResponseHeaders
+	StatusCode int
+}
+
+func (response RotateIngestKeydefaultTextResponse) VisitRotateIngestKeyResponse(w http.ResponseWriter) error {
 
 	w.Header().Set("Content-Type", "text/plain")
 	if response.Headers.XRequestId != nil {
@@ -7290,6 +7518,9 @@ type StrictServerInterface interface {
 	// UpdateInbox Change an inbox's settings
 	// (PATCH /admin/inboxes/{slug})
 	UpdateInbox(ctx context.Context, request UpdateInboxRequestObject) (UpdateInboxResponseObject, error)
+	// RotateIngestKey Issue a new ingest key
+	// (POST /admin/inboxes/{slug}/rotate-ingest-key)
+	RotateIngestKey(ctx context.Context, request RotateIngestKeyRequestObject) (RotateIngestKeyResponseObject, error)
 	// RotateAgentToken Issue a new agent token
 	// (POST /admin/inboxes/{slug}/rotate-token)
 	RotateAgentToken(ctx context.Context, request RotateAgentTokenRequestObject) (RotateAgentTokenResponseObject, error)
@@ -7553,6 +7784,32 @@ func (sh *strictHandler) UpdateInbox(w http.ResponseWriter, r *http.Request, slu
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateInboxResponseObject); ok {
 		if err := validResponse.VisitUpdateInboxResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateIngestKey operation middleware
+func (sh *strictHandler) RotateIngestKey(w http.ResponseWriter, r *http.Request, slug Slug) {
+	var request RotateIngestKeyRequestObject
+
+	request.Slug = slug
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateIngestKey(ctx, request.(RotateIngestKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateIngestKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateIngestKeyResponseObject); ok {
+		if err := validResponse.VisitRotateIngestKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

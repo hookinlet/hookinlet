@@ -13,6 +13,8 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,10 +83,13 @@ func (s *Service) now() time.Time {
 // View is an inbox as the admin API shows it. It has no secrets: the verifier
 // secret appears only as the fact that one is set.
 type View struct {
-	ID                int64           `json:"id"`
-	Slug              string          `json:"slug"`
-	Name              string          `json:"name"`
-	Version           int64           `json:"version"`
+	ID      int64  `json:"id"`
+	Slug    string `json:"slug"`
+	Name    string `json:"name"`
+	Version int64  `json:"version"`
+	// IngestKey is the key in the inbox's ingest URL. Anyone who has it can post to
+	// the inbox, so it is shown to the admin API and to no one else.
+	IngestKey         string          `json:"ingest_key"`
 	Verifier          string          `json:"verifier"`
 	VerifierConfig    json.RawMessage `json:"verifier_config"`
 	HasVerifierSecret bool            `json:"has_verifier_secret"`
@@ -100,8 +105,11 @@ type View struct {
 	IngestPath   string `json:"ingest_path"`
 	// IngestURL is set when the externally visible base URL is known.
 	IngestURL string `json:"ingest_url,omitempty"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	// Warnings lists settings that will make deliveries fail. It is set by the
+	// calls that can cause them, and is empty when there is nothing to say.
+	Warnings  []string `json:"warnings,omitempty"`
+	CreatedAt string   `json:"created_at"`
+	UpdatedAt string   `json:"updated_at"`
 }
 
 const timeLayout = "2006-01-02T15:04:05.000000Z"
@@ -113,12 +121,12 @@ func ViewOf(in *inbox.Inbox) View {
 		cfg = json.RawMessage(`{}`)
 	}
 	return View{
-		ID: int64(in.ID), Slug: in.Slug, Name: in.Name, Version: in.Version,
+		ID: int64(in.ID), Slug: in.Slug, IngestKey: in.IngestKey, Name: in.Name, Version: in.Version,
 		Verifier: in.Verifier, VerifierConfig: append(json.RawMessage(nil), cfg...),
 		HasVerifierSecret: len(in.VerifierSecret) > 0, OnVerifyFail: in.OnVerifyFail,
 		MaxBodyBytes: in.MaxBodyBytes, RetentionDays: in.RetentionDays, RetentionMaxCount: in.RetentionMaxCount,
 		EventTypePointer: in.EventTypePointer, Disabled: in.Disabled, LastSeq: in.LastSeq,
-		IngestPath: "/in/" + in.Slug,
+		IngestPath: "/in/" + in.IngestKey,
 		CreatedAt:  in.CreatedAt.UTC().Format(timeLayout), UpdatedAt: in.UpdatedAt.UTC().Format(timeLayout),
 	}
 }
@@ -136,7 +144,11 @@ func (v View) WithBase(base string) View {
 // only what it means and a zero value is never mistaken for a wrong one: the
 // document gives each field a type, and `null` is not one of them.
 type CreateParams struct {
-	Slug              string          `json:"slug,omitempty"`
+	Slug string `json:"slug,omitempty"`
+	// IngestKey is the key in the ingest URL. Empty means a random one, which is
+	// what an inbox should have: a key chosen to be readable is a key anyone can
+	// guess.
+	IngestKey         string          `json:"ingest_key,omitempty"`
 	Name              string          `json:"name,omitempty"`
 	Verifier          string          `json:"verifier,omitempty"`
 	VerifierConfig    json.RawMessage `json:"verifier_config,omitempty"`
@@ -159,13 +171,25 @@ type Created struct {
 // Create makes an inbox and a token for agents to read it with.
 func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) {
 	if p.Verifier == "" {
-		p.Verifier = "none"
+		return nil, inbox.Invalidf("verifier is required: name how deliveries are checked (stripe, github, slack, standardwebhooks, hmac, token), or none to accept anything unchecked")
 	}
 	if p.Name == "" {
 		p.Name = p.Slug
 	}
+	if p.IngestKey == "" {
+		key, err := newIngestKey()
+		if err != nil {
+			return nil, err
+		}
+		p.IngestKey = key
+	}
 	if err := s.checkVerifier(p.Verifier, p.VerifierConfig); err != nil {
 		return nil, err
+	}
+	if p.VerifierSecret != "" {
+		if err := s.checkSecret(p.Verifier, p.VerifierConfig, p.VerifierSecret); err != nil {
+			return nil, err
+		}
 	}
 	sealed, err := s.seal(p.VerifierSecret)
 	if err != nil {
@@ -176,7 +200,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 		return nil, fmt.Errorf("admin: generate token: %w", err)
 	}
 	in := &inbox.Inbox{
-		Slug: p.Slug, Name: p.Name, Verifier: p.Verifier, VerifierConfig: p.VerifierConfig,
+		Slug: p.Slug, IngestKey: p.IngestKey, Name: p.Name, Verifier: p.Verifier, VerifierConfig: p.VerifierConfig,
 		VerifierSecret: sealed, OnVerifyFail: p.OnVerifyFail, AgentTokenHash: hash,
 		MaxBodyBytes: p.MaxBodyBytes, RetentionDays: p.RetentionDays, RetentionMaxCount: p.RetentionMaxCount,
 		EventTypePointer: p.EventTypePointer,
@@ -187,6 +211,41 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 	return &Created{Inbox: ViewOf(in), AgentToken: tok, Warnings: warnings(in)}, nil
 }
 
+// newIngestKey makes a key for an ingest URL: 128 random bits, URL-safe.
+func newIngestKey() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("admin: generate ingest key: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// RotateIngestKey gives the inbox a new random ingest key. The old key stops
+// working at once, so senders have to be given the new URL.
+func (s *Service) RotateIngestKey(ctx context.Context, slug string) (View, error) {
+	key, err := newIngestKey()
+	if err != nil {
+		return View{}, err
+	}
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	for attempt := 0; ; attempt++ {
+		in, err := s.Store.GetInboxBySlug(ctx, slug)
+		if err != nil {
+			return View{}, err
+		}
+		in.IngestKey = key
+		err = s.Store.UpdateInbox(ctx, in)
+		if errors.Is(err, inbox.ErrConflict) && attempt < maxPatchRetries {
+			continue
+		}
+		if err != nil {
+			return View{}, err
+		}
+		return ViewOf(in), nil
+	}
+}
+
 // warnings lists settings that will make deliveries fail, so an admin who set
 // an inbox up in several steps is not surprised.
 func warnings(in *inbox.Inbox) []string {
@@ -194,6 +253,13 @@ func warnings(in *inbox.Inbox) []string {
 		return []string{fmt.Sprintf("the %q verifier needs a secret; deliveries fail until one is set", in.Verifier)}
 	}
 	return nil
+}
+
+// viewWithWarnings is the view of an inbox that has just been changed.
+func viewWithWarnings(in *inbox.Inbox) View {
+	v := ViewOf(in)
+	v.Warnings = warnings(in)
+	return v
 }
 
 // Get returns one inbox, with its message count.
@@ -262,7 +328,14 @@ func (s *Service) Update(ctx context.Context, slug string, p Patch) (View, error
 		if p.Name != nil {
 			in.Name = *p.Name
 		}
+		var cleared bool
 		if p.Verifier != nil {
+			if *p.Verifier != in.Verifier && len(in.VerifierSecret) > 0 {
+				// The secret was set for another scheme. Keeping it would make it a
+				// credential of the new one: a GitHub signing key accepted as a shared token.
+				in.VerifierSecret = nil
+				cleared = true
+			}
 			in.Verifier = *p.Verifier
 		}
 		if p.VerifierConfig != nil {
@@ -298,7 +371,11 @@ func (s *Service) Update(ctx context.Context, slug string, p Patch) (View, error
 		if err != nil {
 			return View{}, err
 		}
-		return ViewOf(in), nil
+		v := viewWithWarnings(in)
+		if cleared {
+			v.Warnings = append([]string{"the verifier changed, so its secret was removed: set one for the new verifier"}, v.Warnings...)
+		}
+		return v, nil
 	}
 }
 
@@ -318,6 +395,9 @@ func (s *Service) SetSecret(ctx context.Context, slug, secret string) (View, err
 		if err != nil {
 			return View{}, err
 		}
+		if err := s.checkSecret(in.Verifier, in.VerifierConfig, secret); err != nil {
+			return View{}, err
+		}
 		in.VerifierSecret = sealed
 		err = s.Store.UpdateInbox(ctx, in)
 		if errors.Is(err, inbox.ErrConflict) && attempt < maxPatchRetries {
@@ -326,8 +406,30 @@ func (s *Service) SetSecret(ctx context.Context, slug, secret string) (View, err
 		if err != nil {
 			return View{}, err
 		}
-		return ViewOf(in), nil
+		return viewWithWarnings(in), nil
 	}
+}
+
+// checkSecret refuses a secret the inbox's verifier cannot use, when the
+// verifier can tell: a mistake is found when it is made and not on the first
+// delivery, which the sender may never retry.
+func (s *Service) checkSecret(name string, config json.RawMessage, secret string) error {
+	v, err := s.registry().New(name, config)
+	if err != nil {
+		return nil // the verifier itself is checked elsewhere
+	}
+	if c, ok := v.(verify.SecretChecker); ok {
+		if err := c.CheckSecret([]byte(secret)); err != nil {
+			return inbox.Invalidf("%s", strings.TrimPrefix(err.Error(), verify.ErrConfig.Error()+": "))
+		}
+	}
+	return nil
+}
+
+// CheckSecret is checkSecret for a caller that has no Service, such as the
+// command line checking a file before it changes anything.
+func CheckSecret(verifier string, config json.RawMessage, secret string) error {
+	return new(Service).checkSecret(verifier, config, secret)
 }
 
 // RotateToken replaces the inbox's agent token. The old token stops working at

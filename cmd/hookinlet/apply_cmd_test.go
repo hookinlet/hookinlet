@@ -115,7 +115,7 @@ func (e *applyEnv) views() map[string]admin.View {
 // deliver posts to an inbox with the token verifier's header.
 func (e *applyEnv) deliver(slug, tokenHeader string) int {
 	e.t.Helper()
-	req, _ := http.NewRequestWithContext(e.t.Context(), http.MethodPost, e.url+"/in/"+slug, strings.NewReader(`{"n":1}`))
+	req, _ := http.NewRequestWithContext(e.t.Context(), http.MethodPost, e.url+"/in/"+e.views()[slug].IngestKey, strings.NewReader(`{"n":1}`))
 	req.Header.Set("X-Inbox-Token", tokenHeader)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -289,7 +289,7 @@ func TestApplyCreatesThenIsIdempotentThenUpdates(t *testing.T) {
 func TestApplyWithoutTokensOutRefusesToCreate(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: new-one\n  - slug: new-two\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: new-one\n    verifier: none\n  - slug: new-two\n    verifier: none\n")
 	for _, args := range [][]string{{"apply", "-f", f}, {"apply", "-f", f, "--dry-run"}} {
 		code, out, errOut := runCmd(t, e.env(nil), args...)
 		if code != exitUsage || !strings.Contains(errOut, "--tokens-out") {
@@ -312,7 +312,7 @@ func TestApplyWithoutTokensOutRefusesToCreate(t *testing.T) {
 func TestApplyTokensOutIsCheckedBeforeAnyChange(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: new-one\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: new-one\n    verifier: none\n")
 	existing := writeTestFile(t, dir, "taken.json", "precious")
 	link := filepath.Join(dir, "link.json")
 	if err := os.Symlink(existing, link); err != nil {
@@ -395,15 +395,15 @@ func TestApplyChecksTheWholeFileBeforeTouchingTheServer(t *testing.T) {
 		yaml, wantErr string
 		env           map[string]string
 	}{
-		"unknown key in the second inbox":  {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    retenton_days: 3\n", "line 4", nil},
+		"unknown key in the second inbox":  {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: bad-one\n    verifier: none\n    retenton_days: 3\n", "line 6", nil},
 		"literal secret":                   {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret: abc\n", "secret_env", nil},
 		"missing environment variable":     {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret_env: NOT_SET_ANYWHERE\n", "line 5", nil},
 		"missing secret file":              {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret_file: " + filepath.Join(dir, "absent") + "\n", "line 5", nil},
-		"configuration without a verifier": {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier_config: {tolerance_seconds: 300}\n", "bad-one", nil},
-		"a blank value":                    {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    retention_days:\n", "leave the key out", nil},
-		"an empty on_verify_fail":          {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    on_verify_fail: ''\n", "on_verify_fail must be one of", nil},
+		"configuration without a verifier": {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: bad-one\n    verifier: none\n    verifier_config: {tolerance_seconds: 300}\n", "bad-one", nil},
+		"a blank value":                    {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: bad-one\n    verifier: none\n    retention_days:\n", "leave the key out", nil},
+		"an empty on_verify_fail":          {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: bad-one\n    verifier: none\n    on_verify_fail: ''\n", "on_verify_fail must be one of", nil},
 		"bad verifier configuration":       {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: stripe\n    verifier_config: {tolerance_seconds: soon}\n", "tolerance", nil},
-		"bad slug":                         {"inboxes:\n  - slug: good-one\n  - slug: Bad_One\n", "slug must be", nil},
+		"bad slug":                         {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: Bad_One\n    verifier: none\n", "slug must be", nil},
 	} {
 		f := writeTestFile(t, dir, "bad.yaml", tc.yaml)
 		code, out, errOut := runCmd(t, e.env(tc.env), "apply", "-f", f, "--tokens-out", tokens)
@@ -429,13 +429,13 @@ func TestApplyNeverDeletesAndListsWhatItDoesNotManage(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
 	env := e.env(nil)
-	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "legacy-inbox"); code != 0 {
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "legacy-inbox", "--verifier", "none"); code != 0 {
 		t.Fatal(errOut)
 	}
-	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "other-legacy"); code != 0 {
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "other-legacy", "--verifier", "none"); code != 0 {
 		t.Fatal(errOut)
 	}
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: managed-one\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: managed-one\n    verifier: none\n")
 	code, out, errOut := runCmd(t, env, "apply", "-f", f, "--tokens-out", filepath.Join(dir, "t.json"))
 	if code != 0 {
 		t.Fatal(errOut)
@@ -457,7 +457,7 @@ func TestApplyStopsAtAServerRefusalAndKeepsTheTokensAlreadyIssued(t *testing.T) 
 	dir := t.TempDir()
 	// A verifier this binary does not know passes the file check (a server
 	// may have registered it) and is refused by the server.
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-one\n  - slug: second-one\n    verifier: custom-thing\n  - slug: third-one\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-one\n    verifier: none\n  - slug: second-one\n    verifier: custom-thing\n  - slug: third-one\n    verifier: none\n")
 	tokens := filepath.Join(dir, "t.json")
 	code, out, errOut := runCmd(t, e.env(nil), "apply", "-f", f, "--tokens-out", tokens)
 	if code != exitRuntime || !strings.Contains(errOut, "second-one") || !strings.Contains(errOut, "unknown verifier") {
@@ -479,7 +479,7 @@ func TestApplyStopsAtAServerRefusalAndKeepsTheTokensAlreadyIssued(t *testing.T) 
 func TestApplyFromStandardInputAndJSON(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
-	stdin = strings.NewReader("inboxes:\n  - slug: piped-one\n    retention_days: 2\n")
+	stdin = strings.NewReader("inboxes:\n  - slug: piped-one\n    verifier: none\n    retention_days: 2\n")
 	t.Cleanup(func() { stdin = os.Stdin })
 	tokens := filepath.Join(dir, "t.json")
 	code, out, errOut := runCmd(t, e.env(nil), "apply", "-f", "-", "--json", "--tokens-out", tokens)
@@ -571,11 +571,11 @@ func TestApplyDoesNotTreatABlankValueAsASetting(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
 	tokens := filepath.Join(dir, "t.json")
-	first := writeTestFile(t, dir, "a.yaml", "inboxes:\n  - slug: kept-one\n    retention_days: 30\n    disabled: true\n")
+	first := writeTestFile(t, dir, "a.yaml", "inboxes:\n  - slug: kept-one\n    verifier: none\n    retention_days: 30\n    disabled: true\n")
 	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", first, "--tokens-out", tokens); code != 0 {
 		t.Fatal(errOut)
 	}
-	blank := writeTestFile(t, dir, "b.yaml", "inboxes:\n  - slug: kept-one\n    retention_days:\n    disabled:\n")
+	blank := writeTestFile(t, dir, "b.yaml", "inboxes:\n  - slug: kept-one\n    verifier: none\n    retention_days:\n    disabled:\n")
 	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", blank); code != exitUsage || !strings.Contains(errOut, "leave the key out") {
 		t.Errorf("a blank value was accepted: %d %q", code, errOut)
 	}
@@ -590,7 +590,7 @@ func TestApplyLeavesNoEmptyTokensFileAndNothingHalfDone(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
 	tokens := filepath.Join(dir, "t.json")
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-ok\n  - slug: second-bad\n    verifier_config: {tolerance_seconds: 300}\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-ok\n    verifier: none\n  - slug: second-bad\n    verifier: none\n    verifier_config: {tolerance_seconds: 300}\n")
 	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", f, "--tokens-out", tokens); code != exitUsage {
 		t.Fatalf("%d %s", code, errOut)
 	}
@@ -607,7 +607,7 @@ func TestApplyLeavesNoEmptyTokensFileAndNothingHalfDone(t *testing.T) {
 	}
 	// After a partial failure the file holds what was issued, and the message says
 	// to give the next run a new file.
-	h := writeTestFile(t, dir, "k.yaml", "inboxes:\n  - slug: made-one\n  - slug: refused-one\n    verifier: custom-thing\n")
+	h := writeTestFile(t, dir, "k.yaml", "inboxes:\n  - slug: made-one\n    verifier: none\n  - slug: refused-one\n    verifier: custom-thing\n")
 	code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", h, "--tokens-out", tokens)
 	if code != exitRuntime || !strings.Contains(errOut, "new file") {
 		t.Errorf("code %d err %q", code, errOut)
@@ -638,4 +638,67 @@ func TestApplyDoesNotLeakTheSecretWhenStoringItFails(t *testing.T) {
 		t.Fatal("the failure was swallowed")
 	}
 	mustNotLeak(t, []string{err.Error(), out.String(), errOut.String()}, secret)
+}
+
+// What a file asks for is checked as a whole before anything is made: a verifier
+// that is missing, a secret the verifier cannot use, and an ingest key that two
+// inboxes would share each stop the run with nothing created.
+func TestApplyRefusesTheWholeFileForWhatTheServerWouldRefuseLater(t *testing.T) {
+	e := newApplyEnv(t)
+	dir := t.TempDir()
+	tokens := filepath.Join(dir, "t.json")
+	env := e.env(map[string]string{"BAD_SW_SECRET": "not-a-whsec"}) //nolint:gosec // a value made up for a test
+	for name, tc := range map[string]struct{ yaml, want string }{
+		"a new inbox with no verifier":     {"inboxes:\n  - slug: first-ok\n    verifier: none\n  - slug: second-bad\n", "needs a verifier"},
+		"a secret the verifier cannot use": {"inboxes:\n  - slug: first-ok\n    verifier: none\n  - slug: second-bad\n    verifier: standardwebhooks\n    secret_env: BAD_SW_SECRET\n", "cannot be used"},
+		"one ingest key for two inboxes":   {"inboxes:\n  - slug: first-ok\n    verifier: none\n    ingest_key: shared-key\n  - slug: second-bad\n    verifier: none\n    ingest_key: shared-key\n", "ingest_key is already used"},
+	} {
+		f := writeTestFile(t, dir, "bad.yaml", tc.yaml)
+		code, _, errOut := runCmd(t, env, "apply", "-f", f, "--tokens-out", tokens)
+		if code != exitUsage || !strings.Contains(errOut, tc.want) {
+			t.Errorf("%s: code %d err %q, want %q", name, code, errOut, tc.want)
+		}
+		if len(e.views()) != 0 {
+			t.Fatalf("%s: inboxes were created: %v", name, e.views())
+		}
+	}
+	// A key that another inbox already has is found the same way, and the answer
+	// of the server to a conflicting key does not blame the slug.
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "taken-key-owner", "--verifier", "none", "--ingest-key", "owned-key"); code != 0 {
+		t.Fatal(errOut)
+	}
+	f := writeTestFile(t, dir, "k.yaml", "inboxes:\n  - slug: newcomer\n    verifier: none\n    ingest_key: owned-key\n")
+	if code, _, errOut := runCmd(t, env, "apply", "-f", f, "--tokens-out", tokens); code != exitUsage || !strings.Contains(errOut, `"taken-key-owner"`) {
+		t.Errorf("a key that is taken: code %d err %q", code, errOut)
+	}
+	code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "newcomer", "--verifier", "none", "--ingest-key", "owned-key")
+	if code == 0 || !strings.Contains(errOut, "ingest key is already in use") || strings.Contains(errOut, "named") {
+		t.Errorf("the conflict blames the wrong thing: code %d err %q", code, errOut)
+	}
+}
+
+// Changing an inbox's verifier removes its secret, and the commands say so.
+func TestChangingAVerifierSaysThatTheSecretWasRemoved(t *testing.T) {
+	e := newApplyEnv(t)
+	dir := t.TempDir()
+	env := e.env(map[string]string{"HOOKINLET_VERIFIER_SECRET": "a-shared-secret"})
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "was-github", "--verifier", "github"); code != 0 {
+		t.Fatal(errOut)
+	}
+	code, _, errOut := runCmd(t, e.env(nil), "inbox", "update", "was-github", "--verifier", "slack")
+	if code != 0 || !strings.Contains(errOut, "secret was removed") {
+		t.Errorf("inbox update: code %d, stderr %q", code, errOut)
+	}
+	// And apply, which has no secret to give it.
+	if code, _, errOut := runCmd(t, env, "inbox", "update", "was-github", "--verifier", "github"); code != 0 {
+		t.Fatal(errOut)
+	}
+	f := writeTestFile(t, dir, "v.yaml", "inboxes:\n  - slug: was-github\n    verifier: stripe\n")
+	code, out, errOut := runCmd(t, e.env(nil), "apply", "-f", f)
+	if code != 0 || !strings.Contains(out, "updated") {
+		t.Fatalf("apply: %d %s %s", code, out, errOut)
+	}
+	if !strings.Contains(errOut, "was-github") || !strings.Contains(errOut, "secret") {
+		t.Errorf("apply did not warn about the missing secret: %q", errOut)
+	}
 }

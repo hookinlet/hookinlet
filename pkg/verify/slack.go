@@ -97,6 +97,7 @@ func (s slack) Verify(r *http.Request, body, secret []byte, now time.Time) (Resu
 			_ = json.Unmarshal(payload.Event, &ev)
 			res.EventType = cleanID(ev.Type, maxIDLen)
 			res.DeliveryID = cleanID(payload.EventID, maxIDLen)
+			res.IDSigned = res.DeliveryID != ""
 		default:
 			res.EventType = cleanID(payload.Type, maxIDLen)
 		}

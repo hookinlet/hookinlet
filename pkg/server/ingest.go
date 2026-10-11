@@ -5,6 +5,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -107,7 +109,13 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		return verifier.Verify(r, body, secret, s.opts.Now())
 	}()
 
-	verified, verifyReason := true, ""
+	// What was verified is what a verifier checked. The "none" verifier checks
+	// nothing, and what it accepts is stored as unverified.
+	verified, verifyReason := !res.Unauthenticated, ""
+	if res.Unauthenticated {
+		// Nothing was checked, so nothing the sender claimed is kept.
+		res = verify.Result{Unauthenticated: true}
+	}
 	if verr != nil {
 		reason, isFailure := verify.IsFailure(verr)
 		switch {
@@ -155,6 +163,7 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		Verified:    verified,
 		VerifyError: verifyReason,
 		DeliveryID:  res.DeliveryID,
+		DedupeKey:   dedupeKey(res, body),
 		EventType:   eventType,
 		SourceIP:    clientIP(r, s.opts.TrustedProxies),
 	})
@@ -173,6 +182,20 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		slog.String("slug", in.Slug), slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
 		slog.Bool("verified", verified), slog.Bool("duplicate", !created))
 	return ingestResult{status: http.StatusOK, seq: msg.Seq}
+}
+
+// dedupeKey is what a repeated delivery is recognised by. A delivery id that the
+// signature covers is enough. One taken from an unsigned header is not: a request
+// captured in transit could be sent again with an id of the attacker's choosing,
+// or with the id of a delivery that has not happened yet, and the genuine one
+// would then be taken for a duplicate and dropped. So the key also holds a hash of
+// the body, and only a repeat of the same body under the same id is a duplicate.
+func dedupeKey(res verify.Result, body []byte) string {
+	if res.DeliveryID == "" || res.IDSigned {
+		return res.DeliveryID
+	}
+	sum := sha256.Sum256(body)
+	return res.DeliveryID + "#sha256:" + hex.EncodeToString(sum[:])
 }
 
 // rejected is the answer to a delivery that BeforeIngest refused.

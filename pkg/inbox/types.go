@@ -78,8 +78,13 @@ func KnownVerifier(name string) bool {
 
 var (
 	slugRE         = regexp.MustCompile(`^[a-z0-9-]{3,64}$`)
+	ingestKeyRE    = regexp.MustCompile(`^[A-Za-z0-9_-]{3,64}$`)
 	verifierNameRE = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 )
+
+// ValidIngestKey reports whether s can be the key in an ingest URL: 3 to 64
+// characters from letters, digits, underscore, and hyphen.
+func ValidIngestKey(s string) bool { return ingestKeyRE.MatchString(s) }
 
 // ValidSlug reports whether s is a valid inbox slug: 3 to 64 characters from
 // a-z, 0-9, and hyphen.
@@ -89,7 +94,13 @@ func ValidSlug(s string) bool { return slugRE.MatchString(s) }
 type Inbox struct {
 	ID   ID
 	Slug string // immutable after creation; the external name
-	Name string
+	// IngestKey is the key in the inbox's ingest URL (/in/{key}). It is a
+	// capability: whoever has it can post to the inbox. Unique across inboxes.
+	// ApplyDefaults sets it to the slug when it is empty, which is only what
+	// a caller that creates inboxes straight through a Store gets; the admin API
+	// gives new inboxes a random one.
+	IngestKey string
+	Name      string
 
 	// Version counts successful updates, starting at 1. UpdateInbox compares it
 	// to detect concurrent edits; see Store.UpdateInbox.
@@ -151,6 +162,9 @@ func (in *Inbox) LogValue() slog.Value {
 // ApplyDefaults fills zero-valued optional fields. Every Store calls it before
 // validating on create and update so defaults are identical across backends.
 func (in *Inbox) ApplyDefaults() {
+	if in.IngestKey == "" {
+		in.IngestKey = in.Slug
+	}
 	if in.OnVerifyFail == "" {
 		in.OnVerifyFail = OnVerifyFailReject
 	}
@@ -168,6 +182,8 @@ func (in *Inbox) Validate() error {
 	switch {
 	case !ValidSlug(in.Slug):
 		return Invalidf("slug must be 3-64 characters from a-z, 0-9, and hyphen")
+	case !ValidIngestKey(in.IngestKey):
+		return Invalidf("ingest_key must be 3-64 characters from a-z, A-Z, 0-9, underscore, and hyphen")
 	case !utf8.ValidString(in.Name) || in.Name == "" || utf8.RuneCountInString(in.Name) > 200:
 		return Invalidf("name must be 1-200 characters of valid UTF-8")
 	case !verifierNameRE.MatchString(in.Verifier):
@@ -224,9 +240,14 @@ type NewMessage struct {
 	Body        []byte
 	Verified    bool
 	VerifyError string
-	// DeliveryID, when non-empty, identifies the delivery for deduplication
-	// (see Store.Append). Only verified deliveries are deduplicated.
+	// DeliveryID, when non-empty, identifies the delivery.
 	DeliveryID string
+	// DedupeKey, when non-empty, is what deduplication compares (see
+	// Store.Append); when empty it is DeliveryID. A caller whose delivery ids are
+	// not covered by a signature makes the key the id together with a hash of the
+	// body, so that a captured request cannot claim the ids of deliveries that
+	// have not happened yet.
+	DedupeKey string
 	// EventType is empty when unknown.
 	EventType string
 	SourceIP  string

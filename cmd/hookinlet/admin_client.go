@@ -29,6 +29,7 @@ type adminAPI interface {
 	Update(ctx context.Context, slug string, p admin.Patch) (admin.View, error)
 	SetSecret(ctx context.Context, slug, secret string) (admin.View, error)
 	RotateToken(ctx context.Context, slug string) (*admin.Created, error)
+	RotateIngestKey(ctx context.Context, slug string) (admin.View, error)
 	Delete(ctx context.Context, slug string) error
 	RunRetention(ctx context.Context) (deleted int64, err error)
 	Backup(ctx context.Context) (io.ReadCloser, int64, error)
@@ -64,6 +65,9 @@ func (d directAdmin) Update(ctx context.Context, slug string, p admin.Patch) (ad
 }
 func (d directAdmin) SetSecret(ctx context.Context, slug, secret string) (admin.View, error) {
 	return d.svc.SetSecret(ctx, slug, secret)
+}
+func (d directAdmin) RotateIngestKey(ctx context.Context, slug string) (admin.View, error) {
+	return d.svc.RotateIngestKey(ctx, slug)
 }
 func (d directAdmin) RotateToken(ctx context.Context, slug string) (*admin.Created, error) {
 	return d.svc.RotateToken(ctx, slug)
@@ -234,6 +238,11 @@ func (r *remoteAdmin) RotateToken(ctx context.Context, slug string) (*admin.Crea
 		return nil, err
 	}
 	return &out, nil
+}
+func (r *remoteAdmin) RotateIngestKey(ctx context.Context, slug string) (admin.View, error) {
+	var v admin.View
+	err := r.do(ctx, http.MethodPost, slugPath(slug)+"/rotate-ingest-key", nil, &v)
+	return v, err
 }
 func (r *remoteAdmin) Delete(ctx context.Context, slug string) error {
 	return r.do(ctx, http.MethodDelete, slugPath(slug), nil, nil)

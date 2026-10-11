@@ -75,7 +75,7 @@ func TestDirectModeLifecycle(t *testing.T) {
 		t.Errorf("empty list: %d %q", code, out)
 	}
 	for _, slug := range []string{"alpha-inbox", "beta-inbox"} {
-		if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", slug); code != 0 {
+		if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", slug, "--verifier", "none"); code != 0 {
 			t.Fatalf("create %s: %d %s", slug, code, errOut)
 		}
 	}
@@ -178,7 +178,7 @@ func TestDirectModeLifecycle(t *testing.T) {
 func TestDirectModeRetentionAndBackup(t *testing.T) {
 	dir := t.TempDir()
 	env := map[string]string{"HOOKINLET_DATA_DIR": dir}
-	if code, _, e := runCmd(t, env, "inbox", "create", "--slug", "kept-small", "--retention-max-count", "2"); code != 0 {
+	if code, _, e := runCmd(t, env, "inbox", "create", "--slug", "kept-small", "--verifier", "none", "--retention-max-count", "2"); code != 0 {
 		t.Fatal(e)
 	}
 	s, err := sqlite.Open(t.Context(), dir)
@@ -254,7 +254,7 @@ func TestRemoteModeLifecycle(t *testing.T) {
 		t.Fatalf("create: %d %s", code, errOut)
 	}
 	agentTok := tokenIn(t, out)
-	if !strings.Contains(out, "ingest url:   "+url+"/in/remote-one") || !strings.Contains(out, "warning:") {
+	if !strings.Contains(out, "ingest url:   "+url+"/in/") || !strings.Contains(out, "warning:") {
 		t.Errorf("create output:\n%s", out)
 	}
 	if strings.Contains(out+errOut, cliAdminToken) {
@@ -326,7 +326,7 @@ func TestRemoteModeListFollowsEveryPage(t *testing.T) {
 	// store's default of 100, so make 105 and check the command sees them all.
 	for i := range 105 {
 		slug := "page-test-" + strings.Repeat("0", 3-len(itoa(i))) + itoa(i)
-		if code, _, e := runCmd(t, env, "inbox", "create", "--slug", slug); code != 0 {
+		if code, _, e := runCmd(t, env, "inbox", "create", "--slug", slug, "--verifier", "none"); code != 0 {
 			t.Fatalf("create %s: %s", slug, e)
 		}
 	}
@@ -361,7 +361,7 @@ func TestRemoteModeErrorsAreClearAndNeverShowTheToken(t *testing.T) {
 			"HOOKINLET_ADMIN_TOKEN": cliAdminToken}, []string{"inbox", "list"}, exitUsage, "--url must be"},
 		{"url and data dir", map[string]string{"HOOKINLET_URL": url, "HOOKINLET_ADMIN_TOKEN": cliAdminToken}, []string{"inbox", "list", "--data-dir", t.TempDir()}, exitUsage, "not both"},
 		{"nothing listening", map[string]string{"HOOKINLET_URL": "http://127.0.0.1:1", "HOOKINLET_ADMIN_TOKEN": cliAdminToken}, []string{"inbox", "list"}, exitRuntime, "cannot reach the server"},
-		{"invalid input is a 400", map[string]string{"HOOKINLET_URL": url, "HOOKINLET_ADMIN_TOKEN": cliAdminToken}, []string{"inbox", "create", "--slug", "No"}, exitUsage, "slug"},
+		{"invalid input is a 400", map[string]string{"HOOKINLET_URL": url, "HOOKINLET_ADMIN_TOKEN": cliAdminToken}, []string{"inbox", "create", "--slug", "No", "--verifier", "none"}, exitUsage, "slug"},
 	}
 	for _, c := range cases {
 		code, out, errOut := runCmd(t, c.env, c.args...)
@@ -376,8 +376,8 @@ func TestRemoteModeErrorsAreClearAndNeverShowTheToken(t *testing.T) {
 	}
 	// A duplicate names the slug.
 	env := map[string]string{"HOOKINLET_URL": url, "HOOKINLET_ADMIN_TOKEN": cliAdminToken}
-	runCmd(t, env, "inbox", "create", "--slug", "twice-inbox")
-	if code, _, e := runCmd(t, env, "inbox", "create", "--slug", "twice-inbox"); code != exitRuntime || !strings.Contains(e, `"twice-inbox" already exists`) {
+	runCmd(t, env, "inbox", "create", "--slug", "twice-inbox", "--verifier", "none")
+	if code, _, e := runCmd(t, env, "inbox", "create", "--slug", "twice-inbox", "--verifier", "none"); code != exitRuntime || !strings.Contains(e, `"twice-inbox" already exists`) {
 		t.Errorf("duplicate: %d %q", code, e)
 	}
 	// http to loopback is fine, and the flag allows the rest.
@@ -462,7 +462,7 @@ func TestDirectModeRefusesAMissingDatabaseExceptForCreate(t *testing.T) {
 		t.Error("a read-only command created the data directory")
 	}
 	// Creating is how a database comes to exist.
-	if code, _, e := runCmd(t, env, "inbox", "create", "--slug", "first-inbox"); code != 0 {
+	if code, _, e := runCmd(t, env, "inbox", "create", "--slug", "first-inbox", "--verifier", "none"); code != 0 {
 		t.Fatalf("create: %d %s", code, e)
 	}
 	if code, _, e := runCmd(t, env, "inbox", "list"); code != 0 {
@@ -485,7 +485,7 @@ func TestAnUpdateConflictIsExplainedForWhatItIs(t *testing.T) {
 func TestBackupRefusesBeforeDownloadingAndNeverClobbers(t *testing.T) {
 	dir := t.TempDir()
 	env := map[string]string{"HOOKINLET_DATA_DIR": dir}
-	runCmd(t, env, "inbox", "create", "--slug", "one-inbox")
+	runCmd(t, env, "inbox", "create", "--slug", "one-inbox", "--verifier", "none")
 	out := filepath.Join(t.TempDir(), "b.db")
 	if err := os.WriteFile(out, []byte("precious"), 0o600); err != nil {
 		t.Fatal(err)

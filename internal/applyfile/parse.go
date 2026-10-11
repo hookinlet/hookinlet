@@ -36,6 +36,7 @@ type Spec struct {
 	Line int // where the entry starts, for messages
 
 	Slug              string
+	IngestKey         *string
 	Name              *string
 	Verifier          *string
 	VerifierConfig    *json.RawMessage
@@ -198,6 +199,11 @@ func parseEntry(n *yaml.Node) (Spec, error) {
 		switch key {
 		case "slug":
 			slugSet = decode(&spec.Slug, "a string")
+		case "ingest_key":
+			var s string
+			if decode(&s, "a string") {
+				spec.IngestKey = &s
+			}
 		case "name":
 			var s string
 			if decode(&s, "a string") {
@@ -346,6 +352,12 @@ func nodeValue(n *yaml.Node) (any, error) {
 // declared ones can fail.
 func check(s Spec) error {
 	p := admin.CreateParams{Slug: s.Slug}
+	if s.IngestKey != nil {
+		p.IngestKey = *s.IngestKey
+		if !inbox.ValidIngestKey(p.IngestKey) {
+			return s.errorf("ingest_key must be 3-64 characters from a-z, A-Z, 0-9, underscore, and hyphen")
+		}
+	}
 	if s.Name != nil {
 		p.Name = *s.Name
 		if p.Name == "" {
@@ -396,6 +408,11 @@ func check(s Spec) error {
 }
 
 // errorAt is errorf for a message about the key on another line.
+// ErrorAt is an error about the entry, for a message that points at a line.
+func (s Spec) ErrorAt(line int, format string, args ...any) error {
+	return s.errorAt(line, format, args...)
+}
+
 func (s Spec) errorAt(line int, format string, args ...any) error {
 	return fmt.Errorf("line %d: inbox %q: %s", line, s.Slug, fmt.Sprintf(format, args...))
 }

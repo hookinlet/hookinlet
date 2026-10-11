@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -37,12 +38,21 @@ func TestMigrate(t *testing.T) {
 	dir := t.TempDir()
 	env := map[string]string{"HOOKINLET_DATA_DIR": dir}
 
+	files, err := os.ReadDir("../../pkg/store/sqlite/migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all []string
+	for i := range files {
+		all = append(all, strconv.Itoa(i+1))
+	}
+	applied := "[" + strings.Join(all, " ") + "]"
 	code, out, errOut := runCmd(t, env, "migrate")
-	if code != 0 || !strings.Contains(out, "applied migrations [1 2]") {
+	if code != 0 || !strings.Contains(out, "applied migrations "+applied) {
 		t.Fatalf("first migrate: code %d, out %q, err %q", code, out, errOut)
 	}
 	code, out, _ = runCmd(t, env, "migrate")
-	if code != 0 || !strings.Contains(out, "up to date at version 2") {
+	if code != 0 || !strings.Contains(out, "up to date at version "+strconv.Itoa(len(files))) {
 		t.Errorf("second migrate: code %d, out %q", code, out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, sqlite.DBFileName)); err != nil {
@@ -82,7 +92,7 @@ func TestInboxCreate(t *testing.T) {
 	dir := t.TempDir()
 	env := map[string]string{"HOOKINLET_DATA_DIR": dir}
 
-	code, out, errOut := runCmd(t, env, "inbox", "create", "--slug", "stripe-prod", "--name", "Stripe (prod)",
+	code, out, errOut := runCmd(t, env, "inbox", "create", "--slug", "stripe-prod", "--ingest-key", "stripe-prod", "--name", "Stripe (prod)",
 		"--verifier", "stripe", "--on-verify-fail", "store", "--retention-days", "30", "--retention-max-count", "5000",
 		"--max-body-bytes", "65536", "--event-type-pointer", "/type", "--verifier-config", `{"tolerance_seconds":300}`)
 	if code != 0 {
@@ -120,7 +130,7 @@ func TestInboxCreate(t *testing.T) {
 	}
 
 	// Defaults: name falls back to the slug, and tokens differ per inbox.
-	code, out2, _ := runCmd(t, env, "inbox", "create", "--slug", "second-inbox")
+	code, out2, _ := runCmd(t, env, "inbox", "create", "--slug", "second-inbox", "--verifier", "none")
 	if code != 0 {
 		t.Fatalf("second create: code %d", code)
 	}
@@ -171,7 +181,7 @@ func TestInboxCreateSealsTheVerifierSecret(t *testing.T) {
 func TestInboxCreateErrors(t *testing.T) {
 	dir := t.TempDir()
 	env := map[string]string{"HOOKINLET_DATA_DIR": dir}
-	if code, _, _ := runCmd(t, env, "inbox", "create", "--slug", "taken-slug"); code != 0 {
+	if code, _, _ := runCmd(t, env, "inbox", "create", "--slug", "taken-slug", "--verifier", "none"); code != 0 {
 		t.Fatal("setup failed")
 	}
 
@@ -183,16 +193,16 @@ func TestInboxCreateErrors(t *testing.T) {
 		wantErr  string
 	}{
 		{"missing slug", env, []string{"inbox", "create"}, exitUsage, "--slug is required"},
-		{"invalid slug", env, []string{"inbox", "create", "--slug", "Bad Slug"}, exitUsage, "slug must be"},
-		{"duplicate slug", env, []string{"inbox", "create", "--slug", "taken-slug"}, exitRuntime, `"taken-slug" already exists`},
+		{"invalid slug", env, []string{"inbox", "create", "--slug", "Bad Slug", "--verifier", "none"}, exitUsage, "slug must be"},
+		{"duplicate slug", env, []string{"inbox", "create", "--slug", "taken-slug", "--verifier", "none"}, exitRuntime, `"taken-slug" already exists`},
 		{"unknown verifier", env, []string{"inbox", "create", "--slug", "abc", "--verifier", "pigeon"}, exitUsage, "unknown verifier"},
-		{"bad verifier config", env, []string{"inbox", "create", "--slug", "abc", "--verifier-config", "{nope"}, exitUsage, "not valid JSON"},
-		{"bad on-verify-fail", env, []string{"inbox", "create", "--slug", "abc", "--on-verify-fail", "maybe"}, exitUsage, "on_verify_fail"},
-		{"negative retention", env, []string{"inbox", "create", "--slug", "abc", "--retention-days", "-1"}, exitUsage, "retention_days"},
+		{"bad verifier config", env, []string{"inbox", "create", "--slug", "abc", "--verifier", "none", "--verifier-config", "{nope"}, exitUsage, "not valid JSON"},
+		{"bad on-verify-fail", env, []string{"inbox", "create", "--slug", "abc", "--verifier", "none", "--on-verify-fail", "maybe"}, exitUsage, "on_verify_fail"},
+		{"negative retention", env, []string{"inbox", "create", "--slug", "abc", "--verifier", "none", "--retention-days", "-1"}, exitUsage, "retention_days"},
 		{"secret without master key", map[string]string{"HOOKINLET_DATA_DIR": dir, "HOOKINLET_VERIFIER_SECRET": "s"},
-			[]string{"inbox", "create", "--slug", "abc"}, exitUsage, "master-key"},
-		{"unknown flag", env, []string{"inbox", "create", "--slug", "abc", "--bogus"}, exitUsage, "bogus"},
-		{"stray argument", env, []string{"inbox", "create", "--slug", "abc", "extra"}, exitUsage, "unexpected argument"},
+			[]string{"inbox", "create", "--slug", "abc", "--verifier", "none"}, exitUsage, "master-key"},
+		{"unknown flag", env, []string{"inbox", "create", "--slug", "abc", "--verifier", "none", "--bogus"}, exitUsage, "bogus"},
+		{"stray argument", env, []string{"inbox", "create", "--slug", "abc", "--verifier", "none", "extra"}, exitUsage, "unexpected argument"},
 		{"unknown inbox command", env, []string{"inbox", "frobnicate"}, exitUsage, "unknown inbox command"},
 		{"no inbox command", env, []string{"inbox"}, exitUsage, "Usage"},
 	}
@@ -223,7 +233,7 @@ func TestStoreCommandsDoNotLeakSecretsInErrors(t *testing.T) {
 		"HOOKINLET_MASTER_KEY":      "definitely-not-valid-base64-sentinel",
 		"HOOKINLET_VERIFIER_SECRET": "verifier-secret-sentinel",
 	}
-	_, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "leakcheck")
+	_, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "leakcheck", "--verifier", "none")
 	for _, s := range []string{"definitely-not-valid-base64-sentinel", "verifier-secret-sentinel"} {
 		if strings.Contains(errOut, s) {
 			t.Errorf("stderr leaks %q: %s", s, errOut)

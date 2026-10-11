@@ -24,10 +24,11 @@ func newNone(config json.RawMessage) (Verifier, error) {
 	return none{}, nil
 }
 
-// Verify always succeeds. Use it only for inboxes that deliberately accept
-// anything.
+// Verify always succeeds and says that it checked nothing. Use it only for
+// inboxes that deliberately accept anything: what it accepts is stored, but never
+// as verified.
 func (none) Verify(*http.Request, []byte, []byte, time.Time) (Result, error) {
-	return Result{}, nil
+	return Result{Unauthenticated: true}, nil
 }
 
 // ---- token ----

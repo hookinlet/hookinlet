@@ -81,7 +81,15 @@ func (s standardWebhooks) Verify(r *http.Request, body, secret []byte, now time.
 	}
 
 	f := topLevelStrings(body, "type")
-	return Result{DeliveryID: cleanID(id, maxIDLen), EventType: cleanID(f["type"], maxIDLen)}, nil
+	did := cleanID(id, maxIDLen)
+	return Result{DeliveryID: did, IDSigned: did != "", EventType: cleanID(f["type"], maxIDLen)}, nil
+}
+
+// CheckSecret implements SecretChecker.
+func (standardWebhooks) CheckSecret(secret []byte) error {
+	key, err := decodeStandardWebhooksSecret(secret)
+	clear(key)
+	return err
 }
 
 // decodeStandardWebhooksSecret turns "whsec_<base64>" into the signing key. A

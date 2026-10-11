@@ -64,7 +64,8 @@ func (s stripe) Verify(r *http.Request, body, secret []byte, now time.Time) (Res
 	}
 
 	f := topLevelStrings(body, "id", "type")
-	return Result{DeliveryID: cleanID(f["id"], maxIDLen), EventType: cleanID(f["type"], maxIDLen)}, nil
+	id := cleanID(f["id"], maxIDLen)
+	return Result{DeliveryID: id, IDSigned: id != "", EventType: cleanID(f["type"], maxIDLen)}, nil
 }
 
 // parseStripeHeader extracts the timestamp and the decodable v1 signatures.

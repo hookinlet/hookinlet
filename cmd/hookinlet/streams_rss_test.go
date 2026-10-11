@@ -76,7 +76,7 @@ func TestFiveHundredIdleStreamsStayUnderFiftyMegabytes(t *testing.T) {
 		"HOOKINLET_MASTER_KEY="+masterKey(),
 		"HOOKINLET_LOG_LEVEL=warn",
 	)
-	create := exec.CommandContext(t.Context(), bin, "inbox", "create", "--slug", "streamed", "--verifier", "none") //nolint:gosec // runs the binary this test just built
+	create := exec.CommandContext(t.Context(), bin, "inbox", "create", "--slug", "streamed", "--ingest-key", "streamed", "--verifier", "none") //nolint:gosec // runs the binary this test just built
 	create.Env = env
 	created, err := create.Output()
 	if err != nil {

@@ -24,7 +24,7 @@ Each inbox has:
 | `standardwebhooks` | [Standard Webhooks](https://www.standardwebhooks.com/), Svix, and compatible senders | `<id>.<timestamp>.<body>` | yes | `webhook-id` header (signed) | `type` in the body |
 | `hmac` | anything that signs with an HMAC | configurable | optional | optional header (**never signed**) | from the inbox's `event_type_pointer`, for verified deliveries only |
 | `token` | anything that can send a header | not a signature: the header must equal the secret | no | none | from `event_type_pointer` |
-| `none` | anyone | nothing | no | none | from `event_type_pointer` |
+| `none` | anyone | nothing | no | none | none |
 
 Every comparison of a signature, token, or secret is constant-time.
 
@@ -69,7 +69,8 @@ The legacy `X-Hub-Signature` (SHA-1) header is not used.
 > replay it at any time, under any delivery id and with any event type, and the
 > replay is stored as **verified**. GitHub provides no timestamp that would let
 > a receiver stop that. Treat the delivery id as a retry de-duplicator, not as
-> replay protection, and do not let anything with consequences (a deploy, a
+> replay protection (and hookinlet does not trust it to be one: see
+> [duplicates](#duplicate-deliveries)), and do not let anything with consequences (a deploy, a
 > payment) act on the event type alone.
 
 ### `slack`
@@ -149,8 +150,11 @@ Config: `{"header": "X-Inbox-Token"}` (optional; that is the default).
 
 ### `none`
 
-Accepts every delivery. Use it only for an inbox that deliberately takes
-anything, or while you are wiring up a sender and want to see what it sends.
+Accepts every delivery, and says so: what it accepts is stored with
+`verified: false`, and nothing the sender claimed is trusted (no delivery id, no
+event type, no deduplication). Use it only for an inbox that deliberately takes
+anything, or while you are wiring up a sender and want to see what it sends. It
+has to be asked for by name: creating an inbox without a verifier is an error.
 
 ## When verification fails
 
@@ -193,7 +197,7 @@ flag, because flags show up in process listings):
 ```sh
 export HOOKINLET_MASTER_KEY=$(openssl rand -base64 32)   # keep this; it encrypts stored secrets
 HOOKINLET_VERIFIER_SECRET='my-shared-secret' \
-  hookinlet inbox create --slug demo --verifier hmac \
+  hookinlet inbox create --slug demo --ingest-key demo --verifier hmac \
   --verifier-config '{"header":"X-Signature","prefix":"sha256="}'
 ```
 
@@ -210,6 +214,28 @@ curl -i -X POST http://localhost:8080/in/demo \
 ```
 
 Change one character of `$body` and send the same signature: you get a `401`.
+
+## Duplicate deliveries
+
+A verified delivery with a delivery id is a duplicate of an earlier one, and is
+answered with the earlier `seq` and not stored again, when the earlier one has the
+same id **and** the id is one the signature covers (`stripe`, `slack`,
+`standardwebhooks`).
+
+For `github` and `hmac` the id comes from a header the signature does not cover, so
+the id alone proves nothing: whoever captured one signed request could send it
+again with an id of their choosing, or claim the ids of deliveries that have not
+happened yet, and the genuine ones would be taken for duplicates and dropped. For
+those, a duplicate is the same id **and** the same body. The same id with another
+body is stored as a new message, and keeps its id.
+
+## Secrets are checked when they are set
+
+A secret the verifier cannot use is refused when you set it, not discovered at the
+first delivery (which a sender such as GitHub does not retry): a Standard Webhooks
+secret has to be `whsec_` followed by base64. Changing an inbox's verifier removes
+its secret, because a secret set for one scheme must not become a credential of
+another; the answer says so, and warns that the new verifier needs one.
 
 ## Adding your own verifier
 

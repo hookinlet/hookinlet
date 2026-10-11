@@ -94,7 +94,7 @@ for file in "${files[@]}"; do
       echo 'until curl -sf localhost:8080/readyz >/dev/null; do sleep 0.2; done'
       case "$file" in
       docs/mcp.md) # the document talks about an inbox called demo and its agent token
-        echo 'export HOOKINLET_AGENT_TOKEN=$(curl -s -X POST localhost:8080/admin/inboxes -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" -d "{\"slug\": \"demo\"}" | sed -n '"'"'s/.*"agent_token":"\([^"]*\)".*/\1/p'"'"')'
+        echo 'export HOOKINLET_AGENT_TOKEN=$(curl -s -X POST localhost:8080/admin/inboxes -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" -d "{\"slug\": \"demo\", \"ingest_key\": \"demo\", \"verifier\": \"none\"}" | sed -n '"'"'s/.*"agent_token":"\([^"]*\)".*/\1/p'"'"')'
         echo 'curl -s -X POST localhost:8080/in/demo -d "{\"n\":1}" >/dev/null'
         ;;
       esac
@@ -128,7 +128,7 @@ for file in "${files[@]}"; do
     checks='
 n=$(curl -s localhost:8080/v1/inboxes/github-demo -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN" | sed -n '"'"'s/.*"message_count":\([0-9]*\).*/\1/p'"'"')
 [ "$n" = 1 ] || { echo "CHECK: the walk should leave exactly one message (the tampered request must be refused), found: $n" >&2; exit 1; }
-[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST localhost:8080/in/github-demo -H "X-Hub-Signature-256: sha256=00" -d x)" = 401 ] || { echo "CHECK: a wrong signature was not refused" >&2; exit 1; }'
+[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST localhost:8080$INGEST -H "X-Hub-Signature-256: sha256=00" -d x)" = 401 ] || { echo "CHECK: a wrong signature was not refused" >&2; exit 1; }'
     ;;
   examples/README.md)
     needles=('seq=1 {"hello": "examples"}')
@@ -138,7 +138,7 @@ grep -q '"'"'seq=1 {"hello": "examples"}'"'"' received.log || { echo "CHECK: the
   docs/verifiers.md) needles=('{"seq":1}') ;;
   docs/mcp.md) needles=('"structuredContent"') ;;
   docs/admin.md)
-    needles=('"agent_token"' 'rotated the agent token' 'would create' '2 created, 0 updated, 0 unchanged, 1 secrets set' '0 created, 0 updated, 2 unchanged, 1 secrets set')
+    needles=('"agent_token"' 'rotated the agent token' 'would create' '2 created, 0 updated, 0 unchanged, 2 secrets set' '0 created, 0 updated, 2 unchanged, 2 secrets set')
     checks='
 # apply must have written the new tokens, privately.
 [ "$(find tokens.json -perm 600 | wc -l)" -eq 1 ] || { echo "CHECK: tokens.json is missing or is not mode 0600" >&2; exit 1; }

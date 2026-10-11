@@ -168,6 +168,8 @@ func fail(stderr io.Writer, err error) int {
 		fmt.Fprintf(stderr, "hookinlet: %s\n", strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "))
 	case errors.Is(err, inbox.ErrNotFound):
 		fmt.Fprintln(stderr, "hookinlet: no such inbox")
+	case errors.Is(err, inbox.ErrConflict) && strings.Contains(err.Error(), "ingest key"):
+		fmt.Fprintln(stderr, "hookinlet: that ingest key is already in use by another inbox")
 	case errors.Is(err, inbox.ErrConflict):
 		fmt.Fprintln(stderr, "hookinlet: an inbox with that slug already exists, or it was changed at the same time")
 	case errors.Is(err, admin.ErrBusy):
@@ -193,6 +195,7 @@ Commands:
   update SLUG   Change an inbox's settings
   set-secret SLUG    Set or replace the verifier secret
   rotate-token SLUG  Issue a new agent token; the old one stops working
+  rotate-ingest-key SLUG  Give the inbox a new ingest URL; the old one stops working
   delete SLUG   Delete an inbox and all of its messages
 
 With --url (or HOOKINLET_URL) these call a running server's admin API using the
@@ -222,6 +225,8 @@ func inboxCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 		return inboxSetSecret(rest, getenv, stdin, stdout, stderr)
 	case "rotate-token":
 		return inboxRotate(rest, getenv, stdout, stderr)
+	case "rotate-ingest-key":
+		return inboxRotateIngestKey(rest, getenv, stdout, stderr)
 	case "delete":
 		return inboxDelete(rest, getenv, stdout, stderr)
 	default:
@@ -240,7 +245,8 @@ func inboxCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 	var (
 		slug       = fs.String("slug", "", "inbox slug: 3-64 characters from a-z, 0-9, and hyphen (required)")
 		name       = fs.String("name", "", "display name (default: the slug)")
-		verifier   = fs.String("verifier", "none", "none, token, hmac, stripe, github, slack, or standardwebhooks")
+		verifier   = fs.String("verifier", "", "how deliveries are checked: stripe, github, slack, standardwebhooks, hmac, token, or none for no check (required)")
+		ingestKey  = fs.String("ingest-key", "", "the key in the ingest URL; leave it out to get a random one, which is what an inbox should have")
 		onFail     = fs.String("on-verify-fail", inbox.OnVerifyFailReject, "reject or store")
 		vconfig    = fs.String("verifier-config", "{}", "verifier parameters as a JSON object")
 		maxBody    = fs.Int64("max-body-bytes", 0, "largest accepted body; 0 means the default of 1 MiB")
@@ -259,6 +265,10 @@ func inboxCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 		fmt.Fprintln(stderr, "hookinlet: --slug is required")
 		return exitUsage
 	}
+	if *verifier == "" {
+		fmt.Fprintln(stderr, "hookinlet: --verifier is required: say how deliveries are checked (stripe, github, slack, standardwebhooks, hmac, token), or none to accept anything unchecked")
+		return exitUsage
+	}
 	if !json.Valid([]byte(*vconfig)) {
 		fmt.Fprintln(stderr, "hookinlet: --verifier-config is not valid JSON")
 		return exitUsage
@@ -274,7 +284,7 @@ func inboxCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	created, err := api.Create(ctx, admin.CreateParams{
-		Slug: *slug, Name: *name, Verifier: *verifier, VerifierConfig: json.RawMessage(*vconfig),
+		Slug: *slug, IngestKey: *ingestKey, Name: *name, Verifier: *verifier, VerifierConfig: json.RawMessage(*vconfig),
 		VerifierSecret: getenv(verifierSecretEnv), OnVerifyFail: *onFail, MaxBodyBytes: *maxBody,
 		RetentionDays: *retDays, RetentionMaxCount: *retCount, EventTypePointer: *eventPoint,
 	})
@@ -298,6 +308,10 @@ func inboxCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 func failCreate(stderr io.Writer, err error, slug string) int {
 	var ae *apiError
 	if errors.Is(err, inbox.ErrConflict) || (errors.As(err, &ae) && ae.Status == 409) {
+		if strings.Contains(err.Error(), "ingest key") || (ae != nil && strings.Contains(ae.Message, "ingest key")) {
+			fmt.Fprintln(stderr, "hookinlet: that ingest key is already in use by another inbox")
+			return exitRuntime
+		}
 		fmt.Fprintf(stderr, "hookinlet: an inbox named %q already exists\n", slug)
 		return exitRuntime
 	}
@@ -429,6 +443,7 @@ func printView(w io.Writer, v admin.View) {
 	}
 	row := func(k, val string) { fmt.Fprintf(w, "%-20s %s\n", k+":", val) }
 	row("slug", v.Slug)
+	row("ingest key", v.IngestKey)
 	row("name", v.Name)
 	row("state", state)
 	row("verifier", fmt.Sprintf("%s (%s)", v.Verifier, secret))
@@ -544,6 +559,9 @@ func inboxUpdate(args []string, getenv func(string) string, stdout, stderr io.Wr
 		return 0
 	}
 	fmt.Fprintf(stdout, "updated inbox %q (now version %d)\n", v.Slug, v.Version)
+	for _, w := range v.Warnings {
+		fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
 	return 0
 }
 
@@ -595,6 +613,9 @@ func inboxSetSecret(args []string, getenv func(string) string, in io.Reader, std
 		return 0
 	}
 	fmt.Fprintf(stdout, "verifier secret set for inbox %q\n", v.Slug)
+	for _, w := range v.Warnings {
+		fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
 	return 0
 }
 
@@ -626,6 +647,37 @@ func inboxRotate(args []string, getenv func(string) string, stdout, stderr io.Wr
 	fmt.Fprintf(stdout, "rotated the agent token of inbox %q; the old one no longer works\n", created.Inbox.Slug)
 	fmt.Fprintf(stdout, "  agent token:  %s\n", created.AgentToken)
 	fmt.Fprintln(stdout, "\nThe agent token is shown only once and cannot be recovered; store it now.")
+	return 0
+}
+
+func inboxRotateIngestKey(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("hookinlet inbox rotate-ingest-key", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	c := addConn(fs, getenv)
+	slug, code, done := parseSlugArgs(fs, args, stderr)
+	if done {
+		return code
+	}
+	ctx, stop := notifyContext()
+	defer stop()
+	api, closeAPI, code := c.open(ctx, stderr, false)
+	if code != 0 {
+		return code
+	}
+	defer closeAPI()
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	v, err := api.RotateIngestKey(ctx, slug)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if *c.asJSON {
+		printJSON(stdout, v)
+		return 0
+	}
+	fmt.Fprintf(stdout, "gave inbox %q a new ingest key; the old one no longer works\n", v.Slug)
+	fmt.Fprintf(stdout, "  ingest path:  %s\n", v.IngestPath)
+	fmt.Fprintln(stdout, "\nGive senders the new URL.")
 	return 0
 }
 

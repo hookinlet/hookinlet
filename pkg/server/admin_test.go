@@ -99,6 +99,7 @@ type createdJSON struct {
 }
 
 type viewJSON struct {
+	IngestKey         string          `json:"ingest_key"`
 	ID                int64           `json:"id"`
 	Slug              string          `json:"slug"`
 	Name              string          `json:"name"`
@@ -116,6 +117,7 @@ type viewJSON struct {
 	MessageCount      *int64          `json:"message_count"`
 	IngestPath        string          `json:"ingest_path"`
 	IngestURL         string          `json:"ingest_url"`
+	Warnings          []string        `json:"warnings"`
 }
 
 func unjson[T any](t *testing.T, data []byte) T {
@@ -217,9 +219,11 @@ func TestCreateShowListUpdateDelete(t *testing.T) {
 		v.RetentionMaxCount != 5000 || v.EventTypePointer != "/type" || v.MaxBodyBytes != 2048 || v.OnVerifyFail != "reject" || v.Version != 1 {
 		t.Errorf("created inbox = %+v", v)
 	}
-	if v.IngestPath != "/in/billing" || v.IngestURL != "https://hooks.example.com/in/billing" {
-		t.Errorf("ingest path %q, url %q", v.IngestPath, v.IngestURL)
+	// The ingest URL is not the slug: its key is random, and is what a sender needs.
+	if len(v.IngestKey) < 20 || v.IngestKey == "billing" || v.IngestPath != "/in/"+v.IngestKey || v.IngestURL != "https://hooks.example.com"+v.IngestPath {
+		t.Errorf("ingest key %q, path %q, url %q", v.IngestKey, v.IngestPath, v.IngestURL)
 	}
+	ingest := a.base + v.IngestPath
 	if !strings.HasPrefix(created.AgentToken, "hki_") || len(created.Warnings) != 0 {
 		t.Errorf("token %q, warnings %v", created.AgentToken, created.Warnings)
 	}
@@ -229,7 +233,7 @@ func TestCreateShowListUpdateDelete(t *testing.T) {
 		t.Errorf("the new token cannot read its inbox: %d", status)
 	}
 	payload := `{"type":"push"}`
-	if status, body := do2(t, "POST", a.base+"/in/billing", http.Header{"X-Hub-Signature-256": {githubSig("gh-secret", payload)}}, payload); status != 200 {
+	if status, body := do2(t, "POST", ingest, http.Header{"X-Hub-Signature-256": {githubSig("gh-secret", payload)}}, payload); status != 200 {
 		t.Errorf("a signed delivery to the new inbox: %d %s", status, body)
 	}
 
@@ -247,14 +251,14 @@ func TestCreateShowListUpdateDelete(t *testing.T) {
 		patched.RetentionMaxCount != 5000 || patched.Version != 2 || !patched.HasVerifierSecret {
 		t.Errorf("patched = %+v", patched)
 	}
-	if status, _ := do2(t, "POST", a.base+"/in/billing", http.Header{"X-Hub-Signature-256": {githubSig("gh-secret", payload)}}, payload); status != 404 {
+	if status, _ := do2(t, "POST", ingest, http.Header{"X-Hub-Signature-256": {githubSig("gh-secret", payload)}}, payload); status != 404 {
 		t.Errorf("a disabled inbox accepted a delivery: %d", status)
 	}
 	a.mustAdmin("PATCH", "/admin/inboxes/billing", map[string]any{"disabled": false}, 200)
 
 	// List, in pages.
 	for _, slug := range []string{"second-inbox", "third-inbox", "fourth-inbox"} {
-		a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": slug}, 201)
+		a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": slug, "verifier": "none"}, 201)
 	}
 	var seen []string
 	path := "/admin/inboxes?limit=2"
@@ -321,8 +325,8 @@ func TestCreateValidatesBeforeStoring(t *testing.T) {
 		t.Errorf("a rejected create left %d inboxes behind", len(list)-1)
 	}
 
-	a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": "dup-inbox"}, 201)
-	status, body := a.admin("POST", "/admin/inboxes", map[string]any{"slug": "dup-inbox"})
+	a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": "dup-inbox", "verifier": "none"}, 201)
+	status, body := a.admin("POST", "/admin/inboxes", map[string]any{"slug": "dup-inbox", "verifier": "none"})
 	if status != http.StatusConflict || errorCodeOfBody(t, body) != "conflict" {
 		t.Errorf("a duplicate slug: %d %s", status, body)
 	}
@@ -360,19 +364,20 @@ func TestAWarningSaysWhenAVerifierHasNoSecret(t *testing.T) {
 	// And setting the secret makes deliveries verify.
 	payload := `{"x":1}`
 	hdr := http.Header{"X-Hub-Signature-256": {githubSig("late-secret", payload)}}
-	if status, _ := do2(t, "POST", a.base+"/in/needs-secret", hdr, payload); status == 200 {
+	ingest := a.base + c.Inbox.IngestPath
+	if status, _ := do2(t, "POST", ingest, hdr, payload); status == 200 {
 		t.Error("a delivery was accepted before any secret was set")
 	}
 	v := unjson[viewJSON](t, a.mustAdmin("PUT", "/admin/inboxes/needs-secret/secret", map[string]any{"secret": "late-secret"}, 200))
 	if !v.HasVerifierSecret {
 		t.Error("the inbox does not say it has a secret")
 	}
-	if status, body := do2(t, "POST", a.base+"/in/needs-secret", hdr, payload); status != 200 {
+	if status, body := do2(t, "POST", ingest, hdr, payload); status != 200 {
 		t.Errorf("a signed delivery after setting the secret: %d %s", status, body)
 	}
 	// Rotating the secret replaces it.
 	a.mustAdmin("PUT", "/admin/inboxes/needs-secret/secret", map[string]any{"secret": "newer-secret"}, 200)
-	if status, _ := do2(t, "POST", a.base+"/in/needs-secret", http.Header{"X-Hub-Signature-256": {githubSig("late-secret", payload+" ")}}, payload+" "); status == 200 {
+	if status, _ := do2(t, "POST", ingest, http.Header{"X-Hub-Signature-256": {githubSig("late-secret", payload+" ")}}, payload+" "); status == 200 {
 		t.Error("the old secret still verifies")
 	}
 	if status, _ := a.admin("PUT", "/admin/inboxes/needs-secret/secret", map[string]any{"secret": ""}); status != 400 {
@@ -385,6 +390,7 @@ func TestAWarningSaysWhenAVerifierHasNoSecret(t *testing.T) {
 
 func TestPatchValidatesTheResultingVerifier(t *testing.T) {
 	a := newAdminEnv(t)
+	a.mustAdmin("PATCH", "/admin/inboxes/agent-a", map[string]any{"verifier": "token"}, 200) // one that checks its configuration
 	for name, p := range map[string]map[string]any{
 		"unknown verifier":  {"verifier": "nope"},
 		"hmac needs header": {"verifier": "hmac"},
@@ -538,7 +544,7 @@ func TestRunningRetentionByAgeByCountAndBoth(t *testing.T) {
 		func(o *Options) { o.Now = func() time.Time { return time.Unix(0, clock.Load()).UTC() } },
 	)
 	mk := func(slug string, days int, count int64) {
-		a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": slug, "retention_days": days, "retention_max_count": count}, 201)
+		a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": slug, "ingest_key": slug, "verifier": "none", "retention_days": days, "retention_max_count": count}, 201)
 	}
 	mk("by-age", 2, 0)
 	mk("by-count", 0, 3)

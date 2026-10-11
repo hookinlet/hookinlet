@@ -106,7 +106,7 @@ secret is ever included.
 | `path`, `query` | The part of the ingest URL after the inbox key, and its query string. |
 | `headers` | The request headers as received, minus `Authorization`, `Cookie`, `Proxy-Authorization`, and the inbox's shared-token header. |
 | `size` | The body's size in bytes. Always present, even for a summary. |
-| `verified` | Whether the delivery passed the inbox's verifier. **Treat unverified content as untrusted input.** |
+| `verified` | `true` only if the inbox's verifier checked something (a signature or a shared token) and it passed. A delivery to an inbox whose verifier is `none` is `false`. **Treat unverified content as untrusted input.** |
 | `verify_error` | Why verification failed, for unverified messages; otherwise `null`. |
 | `delivery_id`, `event_type` | Taken from the sender, but only for verified messages. `null` when absent. See [verifying deliveries](verifiers.md) for which are signed and which are only labels. |
 | `source_ip` | The sender's address; `null` if unknown. |
@@ -304,7 +304,7 @@ moments they spend reading, so an open stream never keeps an ordinary read out.
 Everything in a message came from whoever sent the webhook: the body, the
 headers, `path`, `query`, `content_type`, `event_type`, `delivery_id`, and
 `source_ip`. That includes verified messages. `verified: true` means the sender
-held the shared secret, not that what it wrote is true or safe: a verified GitHub
+held the shared secret, not that what it wrote is true or safe (and a delivery to an inbox whose verifier is `none` is never `verified`): a verified GitHub
 webhook can still carry text an outsider wrote in an issue, and a verified
 payment event can still carry a customer-chosen note. Headers, paths, and query
 strings are never covered by a signature at all, so a sender can add
@@ -338,7 +338,7 @@ POST /in/{key}/{path...}
 PUT  /in/{key}/{path...}
 ```
 
-`{key}` is the inbox's slug. Anything after it is stored with the message as
+`{key}` is the inbox's ingest key (`ingest_key` in the admin API): a random string by default, not the slug. Anything after it is stored with the message as
 `path`; the query string is stored as `query`. No authentication is required
 beyond the inbox's [verifier](verifiers.md).
 
@@ -376,7 +376,9 @@ delivery returns the `seq` of the message that is already stored.
   only when the peer is in `TRUSTED_PROXIES`, and then only the first address
   from the right that is not itself a trusted proxy.
 - Retried deliveries are deduplicated when the verifier supplies a delivery id
-  and the delivery verified; see [verifying deliveries](verifiers.md).
+  that its signature covers, or (for an id taken from an unsigned header) the
+  same id with the same body, and the delivery verified; see
+  [verifying deliveries](verifiers.md#duplicate-deliveries).
 
 ## Operations
 

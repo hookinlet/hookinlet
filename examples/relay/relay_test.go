@@ -32,6 +32,8 @@ type hookinlet struct {
 	in    *inbox.Inbox
 }
 
+const relaySecret = "relay-test-secret" //nolint:gosec // a value made up for a test
+
 func newHookinlet(t *testing.T) *hookinlet {
 	t.Helper()
 	store, err := sqlite.Open(t.Context(), t.TempDir())
@@ -57,7 +59,12 @@ func newHookinlet(t *testing.T) *hookinlet {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := &inbox.Inbox{Slug: "relayed", Name: "relayed", Verifier: "none", AgentTokenHash: hash}
+	// A relay forwards only what a verifier checked, so the inbox checks a shared token.
+	sealed, err := box.Seal([]byte(relaySecret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &inbox.Inbox{Slug: "relayed", Name: "relayed", Verifier: "token", VerifierSecret: sealed, AgentTokenHash: hash}
 	if err := store.CreateInbox(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +75,7 @@ func (h *hookinlet) send(t *testing.T, body, contentType string, headers ...stri
 	t.Helper()
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, h.url+"/in/relayed", strings.NewReader(body))
 	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("X-Inbox-Token", relaySecret)
 	for i := 0; i+1 < len(headers); i += 2 {
 		req.Header.Set(headers[i], headers[i+1])
 	}

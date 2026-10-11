@@ -29,7 +29,7 @@ func TestServeEndToEnd(t *testing.T) {
 		"HOOKINLET_VERIFIER_SECRET": "e2e-shared-secret",
 		"HOOKINLET_LISTEN_ADDR":     "127.0.0.1:0",
 	}
-	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "e2e-box", "--verifier", "token"); code != 0 {
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "e2e-box", "--ingest-key", "e2e-box", "--verifier", "token"); code != 0 {
 		t.Fatalf("inbox create: code %d, stderr %q", code, errOut)
 	}
 

@@ -100,11 +100,11 @@ docker volume create "$vol" >/dev/null
 run() { docker run --rm -v "$vol:/data" -e HOOKINLET_MASTER_KEY="$key" "$@"; }
 
 run "$image" migrate >/dev/null
-created=$(run -e HOOKINLET_VERIFIER_SECRET="$secret" "$image" inbox create --slug demo --verifier hmac \
+created=$(run -e HOOKINLET_VERIFIER_SECRET="$secret" "$image" inbox create --slug demo --ingest-key demo --verifier hmac \
   --verifier-config '{"header":"X-Signature","prefix":"sha256="}')
 agent_token=$(printf '%s\n' "$created" | sed -n 's/^ *agent token: *//p')
 [ -n "$agent_token" ] || fail "inbox create did not print an agent token"
-other=$(run "$image" inbox create --slug other-inbox)
+other=$(run "$image" inbox create --slug other-inbox --verifier none)
 other_token=$(printf '%s\n' "$other" | sed -n 's/^ *agent token: *//p')
 [ -n "$other_token" ] || fail "inbox create did not print a second agent token"
 
@@ -216,7 +216,7 @@ admin() { # admin METHOD PATH [BODY] -> prints "<status> <body>"
 }
 expect "the admin API refuses an agent token" '403' "$(admin_tok=$agent_token admin GET /admin/inboxes | cut -d' ' -f1)"
 expect "and no token" '401' "$(curl -sS -o /dev/null -w '%{http_code}' "$base/admin/inboxes")"
-created=$(admin POST /admin/inboxes '{"slug":"made-by-api","verifier":"hmac","verifier_config":{"header":"X-Signature","prefix":"sha256="},"verifier_secret":"api-secret"}')
+created=$(admin POST /admin/inboxes '{"slug":"made-by-api","ingest_key":"made-by-api","verifier":"hmac","verifier_config":{"header":"X-Signature","prefix":"sha256="},"verifier_secret":"api-secret"}')
 case $created in
   201*'"has_verifier_secret":true'*) ;;
   *) fail "unexpected create: $created" ;;
@@ -266,16 +266,17 @@ docker volume create "$vol-quick" >/dev/null
 docker run -d --name "$name-quick" -p "$((port + 1)):8080" -v "$vol-quick:/data" \
   -e HOOKINLET_ADMIN_TOKEN="$admin_token" -e HOOKINLET_MASTER_KEY="$key" "$image" >/dev/null
 wait_ready
-quick=$(admin POST /admin/inboxes '{"slug": "demo"}')
-case $quick in 201*'"ingest_path":"/in/demo"'*) ;; *) fail "unexpected quick-start create: $quick" ;; esac
+quick=$(admin POST /admin/inboxes '{"slug": "demo", "verifier": "none"}')
+quick_path=$(printf '%s' "$quick" | sed -n 's/.*"ingest_path":"\([^"]*\)".*/\1/p')
+case $quick_path in /in/?*) [ "$quick_path" != /in/demo ] || fail "the ingest path is the slug: $quick_path" ;; *) fail "unexpected quick-start create: $quick" ;; esac
 case $quick in *'"agent_token":"hki_'*) echo "ok   an empty volume and two variables: an inbox is created through the API" ;; *) fail "unexpected quick-start create: $quick" ;; esac
 quick_token=$(printf '%s' "$quick" | sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p')
-expect "and takes an unsigned delivery" '200 {"seq":1}' "$(send POST /in/demo '{"hello": "world"}')"
+expect "and takes an unsigned delivery" '200 {"seq":1}' "$(send POST "$quick_path" '{"hello": "world"}')"
 case $(read_api /v1/inboxes/demo/messages "$quick_token") in *'"hello":"world"'*) echo "ok   and the agent token reads it back" ;; *) fail "the quick-start message was not readable" ;; esac
 docker restart "$name-quick" >/dev/null
 wait_ready
 case $(read_api /v1/inboxes/demo/messages "$quick_token") in *'"hello":"world"'*) echo "ok   the data survives a restart of that container" ;; *) fail "the quick-start data did not survive a restart" ;; esac
-expect "and the sequence carries on" '200 {"seq":2}' "$(send POST /in/demo '{"again": true}')"
+expect "and the sequence carries on" '200 {"seq":2}' "$(send POST "$quick_path" '{"again": true}')"
 base=$main_base
 
 echo "smoke test passed"

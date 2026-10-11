@@ -95,10 +95,20 @@ func TestOpenAppliesMigrationsOnce(t *testing.T) {
 	dir := t.TempDir()
 	s := openAt(t, dir)
 	t.Cleanup(func() { _ = s.Close() })
-	if got := s.AppliedMigrations(); len(got) != 2 || got[0] != 1 || got[1] != 2 {
-		t.Errorf("fresh database applied %v, want [1 2]", got)
+	files, err := os.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if v, err := s.SchemaVersion(t.Context()); err != nil || v != 2 {
+	got := s.AppliedMigrations()
+	if len(got) != len(files) {
+		t.Fatalf("fresh database applied %v, want 1 to %d", got, len(files))
+	}
+	for i, v := range got {
+		if v != i+1 {
+			t.Errorf("fresh database applied %v, want 1 to %d", got, len(files))
+		}
+	}
+	if v, err := s.SchemaVersion(t.Context()); err != nil || v != len(files) {
 		t.Errorf("SchemaVersion = %d, %v", v, err)
 	}
 }
@@ -129,8 +139,9 @@ func TestRefusesDatabaseFromANewerVersion(t *testing.T) {
 // numbered file and append its hash.
 func TestShippedMigrationsAreUnchanged(t *testing.T) {
 	pinned := map[string]string{
-		"0001_init.sql":           "5e5fd5ab3d11008906bf1f7256d06a5fa733d7f40b3248e76b8ba23bf91dc6c5",
-		"0002_delivery_index.sql": "ae5b3395b0f4df9faada44c0332c2a6aa52f1137a477150ceb0d95c27d406081",
+		"0001_init.sql":                      "5e5fd5ab3d11008906bf1f7256d06a5fa733d7f40b3248e76b8ba23bf91dc6c5",
+		"0002_delivery_index.sql":            "ae5b3395b0f4df9faada44c0332c2a6aa52f1137a477150ceb0d95c27d406081",
+		"0003_ingest_key_and_dedupe_key.sql": "ab08447e727ec057144111db17dd79ae940f8c9f75fa839e82df8d6646118fa1",
 	}
 	entries, err := os.ReadDir("migrations")
 	if err != nil {
