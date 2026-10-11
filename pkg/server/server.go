@@ -102,7 +102,7 @@ type Options struct {
 	// most once).
 	SSERecheckInterval time.Duration
 	// DisableAdmin turns off the admin API altogether: its routes answer 404 and
-	// the admin token is never consulted. Inboxes and tokens are then managed with
+	// its routes are not mounted. (The admin token still reads inboxes through the read API and MCP, as it always does.) Inboxes and tokens are then managed with
 	// the command line, which works in the data directory.
 	DisableAdmin bool
 	// AdminAddr, if set, serves the admin API on its own listener at this address

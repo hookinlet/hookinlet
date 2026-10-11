@@ -265,6 +265,11 @@ func (s *Store) DeleteInbox(ctx context.Context, id inbox.ID) error {
 		if n, _ := res.RowsAffected(); n == 0 {
 			return fmt.Errorf("%w: inbox", inbox.ErrNotFound)
 		}
+		// A token issued while the batches ran was scoped to this inbox, and the
+		// cascade has just taken that away.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tokens WHERE all_inboxes = 0 AND id NOT IN (SELECT token_id FROM token_inboxes)`); err != nil {
+			return fmt.Errorf("sqlite: delete inbox tokens: %w", err)
+		}
 		return nil
 	})
 }

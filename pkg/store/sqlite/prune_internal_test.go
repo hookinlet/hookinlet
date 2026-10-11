@@ -160,3 +160,26 @@ func TestAnInboxIsClosedToAgentsAndIngestBeforeItsMessagesGo(t *testing.T) {
 		t.Error("deleting a deleted inbox succeeded")
 	}
 }
+
+// A token issued while a delete is between its steps (the inbox row is still
+// there) must not outlive the inbox as a token that reads nothing.
+func TestATokenIssuedMidDeleteDoesNotOutliveTheInbox(t *testing.T) {
+	s, in := internalStore(t)
+	// The first step alone, as an interrupted delete leaves things.
+	if err := s.writeTx(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(t.Context(), `UPDATE inboxes SET disabled = 1 WHERE id = ?`, int64(in.ID))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hash := bytes.Repeat([]byte{9}, 32)
+	if err := s.CreateToken(t.Context(), &inbox.Token{Name: "late", Hash: hash, InboxIDs: []inbox.ID{in.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteInbox(t.Context(), in.ID); err != nil {
+		t.Fatal(err)
+	}
+	if tk, err := s.GetTokenByHash(t.Context(), hash); err == nil {
+		t.Errorf("a token with no inbox survived: %+v", tk)
+	}
+}

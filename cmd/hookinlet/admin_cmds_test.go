@@ -117,7 +117,7 @@ func TestDirectModeLifecycle(t *testing.T) {
 		t.Errorf("update with nothing: %d %q", code, errOut)
 	}
 
-	// set-secret, from the environment and from stdin, and rotate-token.
+	// set-secret, from the environment and from stdin, and tokens.
 	if code, _, errOut := runCmd(t, env, "inbox", "update", "alpha-inbox", "--verifier", "github"); code != 0 {
 		t.Fatal(errOut)
 	}
@@ -453,7 +453,7 @@ func TestTheCLIOutputNeverContainsTheVerifierSecret(t *testing.T) {
 		{"inbox", "create", "--slug", "no-leak", "--verifier", "github"},
 		{"inbox", "set-secret", "no-leak"},
 		{"inbox", "show", "no-leak"}, {"inbox", "show", "no-leak", "--json"}, {"inbox", "list"}, {"inbox", "list", "--json"},
-		{"inbox", "update", "no-leak", "--name", "x"}, {"inbox", "rotate-token", "no-leak"},
+		{"inbox", "update", "no-leak", "--name", "x"}, {"token", "create", "--name", "n", "--inbox", "no-leak"}, {"token", "list"}, {"token", "list", "--json"},
 	} {
 		_, out, e := runCmd(t, env, args...)
 		all.WriteString(out + e)

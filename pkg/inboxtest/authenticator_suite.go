@@ -104,6 +104,9 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 			if !p.CanReadInbox(f.InboxA) || !p.CanReadInbox(f.InboxB) {
 				t.Errorf("the %s credential should read every inbox", name)
 			}
+			if name == "all-inboxes" && p.CanAdmin() {
+				t.Error("a token for all inboxes must not be able to administer")
+			}
 			if _, ok := p.(inbox.ScopedPrincipal); ok {
 				t.Errorf("the %s credential must not claim to be limited to some inboxes", name)
 			}

@@ -133,7 +133,7 @@ type Store interface {
 	// steps so that a large inbox does not hold up everyone else's writes: it
 	// must first make the inbox unreachable (ingest answers not found, and the
 	// tokens scoped to it stop reading it: a token left with no inbox is
-	// deleted), and if it is interrupted it leaves the inbox in that state, so that
+	// deleted, including one issued while the delete was running), and if it is interrupted it leaves the inbox in that state, so that
 	// calling DeleteInbox again finishes the job.
 	DeleteInbox(ctx context.Context, id ID) error
 

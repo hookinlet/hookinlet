@@ -29,7 +29,9 @@ off the internet:
 
 - `--admin-listen-addr 127.0.0.1:9090` serves it on its own address and nowhere
   else; the public address answers `404` for `/admin/...`, and the admin address
-  answers `404` for everything that is not admin. Reach it over an SSH tunnel, a
+  answers `404` for everything that is not admin. This moves the *admin API*; the
+  admin token still reads every inbox through the read API and MCP on the public
+  address, so keep it as secret as before and give agents their own tokens. Reach it over an SSH tunnel, a
   private network, or a proxy that you control. (In a container, bind it to an
   address the container publishes only where you mean to.)
 - `--admin-enabled=false` turns it off altogether. Inboxes and tokens are then
@@ -52,7 +54,7 @@ shown exactly once is a new agent token, in the response that creates it.
 | `PATCH /admin/inboxes/{slug}` | Change settings. |
 | `PUT /admin/inboxes/{slug}/secret` | Set or replace the verifier secret. |
 | `POST /admin/inboxes/{slug}/rotate-ingest-key` | A new random ingest key. The old URL stops working at once; give senders the new one. |
-| `DELETE /admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). It is closed to deliveries and agents first, and its messages go in small batches so that other inboxes keep receiving; if it is interrupted, run it again. |
+| `DELETE /admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). It is closed to deliveries and to tokens scoped to it first (the admin token and tokens for all inboxes can still read it until it is gone), and its messages go in small batches so that other inboxes keep receiving; if it is interrupted, run it again. |
 | `POST /admin/tokens` | Issue an agent token for some inboxes (`inboxes`: a list of slugs) or all of them (`all_inboxes`). Returns the token once. |
 | `GET /admin/tokens` | List tokens, never their secrets (`?inbox=slug` for those that can read an inbox; `?limit=`; follow `next`). |
 | `DELETE /admin/tokens/{id}` | Revoke a token (`204`). It stops working at once. |

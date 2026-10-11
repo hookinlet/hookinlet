@@ -3096,7 +3096,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Deleted. The inbox is closed to deliveries and agents first and its messages go in small batches, so an interrupted delete is finished by deleting again.",
+            "description": "Deleted. The inbox is closed to deliveries and to tokens scoped to it first (the admin token and tokens for all inboxes can still read it until it is gone) and its messages go in small batches, so an interrupted delete is finished by deleting again.",
             "headers": {
               "X-Request-Id": {
                 "required": true,
