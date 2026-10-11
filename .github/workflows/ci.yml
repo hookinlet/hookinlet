@@ -32,11 +32,15 @@ jobs:
         run: go vet ./...
       - name: go.mod and go.sum are tidy
         run: go mod tidy -diff
-      - name: The generated API code matches docs/openapi.json
+      - name: The generated API code matches docs/openapi.json, and generating is deterministic
         run: |
           go generate ./internal/api
           git diff --exit-code -- internal/api || { echo "::error::internal/api is out of date; run make generate and commit the result"; exit 1; }
           test -z "$(git status --porcelain -- internal/api)"
+          # A second run must change nothing, byte for byte.
+          sha256sum internal/api/api.gen.go > /tmp/first.sha
+          go generate ./internal/api
+          sha256sum -c /tmp/first.sha
       # The race detector doubles the time and is for main, not for every push to a
       # review.
       - name: Test (everything but pkg/server, which has its own job)

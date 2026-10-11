@@ -41,7 +41,9 @@ they are useful if you are only reading.
 - **Docs move with the code.** A change to a request or response shape updates `docs/api.md`, `docs/openapi.json`
   (a test compares it with the server), and `docs/mcp.md` if a tool is affected. After editing
   the document, run `make generate`: `internal/api` is generated from it, CI fails if it is stale, and the
-  server refuses requests that break it. Examples in the documentation are
+  server refuses requests that break it. To add an operation, add it to the document and run `make generate`;
+  the server will not build until a type of `pkg/server/*_api.go` implements it, and nothing else is needed to
+  make the route exist, require its credential, or check its parameters. Examples in the documentation are
   run by `scripts/test-docs.sh`.
 - **Public Go API.** Everything under `pkg/` is pre-1.0 and may change; every change to it is called out in
   `CHANGELOG.md`. After v1.0.0, semantic versioning applies.

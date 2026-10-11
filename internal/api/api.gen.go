@@ -683,6 +683,66 @@ type JsonRpcRequest = json.RawMessage
 // JsonRpcResponse defines model for JsonRpcResponse.
 type JsonRpcResponse = json.RawMessage
 
+// McpGetMessageInput defines model for McpGetMessageInput.
+type McpGetMessageInput struct {
+	// Inbox slug of the inbox
+	Inbox string `json:"inbox"`
+
+	// Seq the message's seq
+	Seq int `json:"seq"`
+}
+
+// McpListInboxesInput defines model for McpListInboxesInput.
+type McpListInboxesInput = map[string]interface{}
+
+// McpQueryMessagesInput defines model for McpQueryMessagesInput.
+type McpQueryMessagesInput struct {
+	// After read forward, oldest first, from messages with a seq greater than this; 0 starts at the beginning
+	After *int `json:"after,omitempty"`
+
+	// Before read backward, newest first, from messages with a seq less than this
+	Before *int `json:"before,omitempty"`
+
+	// Inbox slug of the inbox
+	Inbox string `json:"inbox"`
+
+	// Limit most messages to return, 1 to 100 (default 20)
+	Limit *int `json:"limit,omitempty"`
+
+	// Since only messages received at or after this RFC 3339 time
+	Since *string `json:"since,omitempty"`
+
+	// Summary leave bodies out
+	Summary *bool `json:"summary,omitempty"`
+
+	// Types only messages whose event_type is one of these
+	Types *[]string `json:"types,omitempty"`
+
+	// Until only messages received before this RFC 3339 time
+	Until *string `json:"until,omitempty"`
+
+	// Verified only messages that did (true) or did not (false) pass verification
+	Verified *bool `json:"verified,omitempty"`
+}
+
+// McpWaitForMessagesInput defines model for McpWaitForMessagesInput.
+type McpWaitForMessagesInput struct {
+	// After return messages with a seq greater than this; use the next_after from your previous call
+	After int `json:"after"`
+
+	// Inbox slug of the inbox
+	Inbox string `json:"inbox"`
+
+	// Limit most messages to return, 1 to 100 (default 20)
+	Limit *int `json:"limit,omitempty"`
+
+	// TimeoutSeconds how long to wait for a message, 0 to 60 (default 30)
+	TimeoutSeconds *int `json:"timeout_seconds,omitempty"`
+
+	// Types only messages whose event_type is one of these
+	Types *[]string `json:"types,omitempty"`
+}
+
 // Message A stored delivery. Exactly one of `body`, `body_text`, and `body_base64` is present, or none with `fields=summary`.
 type Message struct {
 	// Body The body, when it is valid UTF-8, valid JSON, and nested no deeper than 64 levels. It is JSON here, not a string containing JSON.

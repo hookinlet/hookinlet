@@ -771,3 +771,24 @@ func (o *Operation) Pattern() string {
 	}
 	return p
 }
+
+// MCPTool is a tool of the MCP endpoint as the document describes it
+// (`x-mcp-tools`).
+type MCPTool struct {
+	Name, Description string
+	ReadOnly          bool
+	// Input is the JSON Schema of the tool's arguments, references followed.
+	Input map[string]any
+}
+
+// MCPTools lists the tools the document describes, in its order.
+func (d *Document) MCPTools() []MCPTool {
+	var out []MCPTool
+	for _, t := range asList(d.root["x-mcp-tools"]) {
+		tm := t.(map[string]any)
+		in, _ := d.Deref(tm["input"]).(map[string]any)
+		ro, _ := tm["readOnly"].(bool)
+		out = append(out, MCPTool{Name: tm["name"].(string), Description: tm["description"].(string), ReadOnly: ro, Input: in})
+	}
+	return out
+}

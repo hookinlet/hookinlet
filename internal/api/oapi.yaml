@@ -6,6 +6,9 @@ generate:
   std-http-server: true
   strict-server: true
 output-options:
+  # The tool schemas of the MCP endpoint are in the document but no operation
+  # refers to them; the Go types for them are wanted all the same.
+  skip-prune: true
   # Changes to the document for the Go types only (see overlay.yaml).
   overlay:
     path: overlay.yaml

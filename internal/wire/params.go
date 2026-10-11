@@ -12,9 +12,6 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
-// maxParamLen bounds the length of any single string parameter.
-const maxParamLen = 256
-
 // ParamError reports a query parameter the caller got wrong. Its text is safe to
 // show to the caller.
 type ParamError struct {
@@ -99,13 +96,6 @@ func NewPageRequest(p MessagesParams) (PageRequest, error) {
 	return req, nil
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
-
 // parseDigits parses a decimal integer written with digits only, at least min.
 // Signs, spaces, and anything else are rejected, as is a value too large to be
 // a sequence number.
@@ -129,14 +119,6 @@ func parseDigits(param, s string, min int64) (int64, error) {
 func parseSeq(param, s string) (int64, error) { return parseDigits(param, s, 0) }
 
 func formatInt(n int64) string { return strconv.FormatInt(n, 10) }
-
-func parseTime(param, s string) (time.Time, error) {
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
-		return time.Time{}, bad(param, "must be an RFC 3339 timestamp such as 2026-03-01T12:00:00Z")
-	}
-	return t.UTC(), nil
-}
 
 // NextLink returns the relative URL of the page that follows msgs, or "" if there
 // is none.

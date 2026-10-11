@@ -231,6 +231,9 @@ func New(opts Options) (*Server, error) {
 		closing:      closeCtx.Done(),
 	}
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now}
+	if err := s.checkMCPTools(); err != nil {
+		return nil, err
+	}
 	s.mcpSDK = s.newMCP()
 	mux := http.NewServeMux()
 	s.mux = mux
