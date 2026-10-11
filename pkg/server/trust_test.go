@@ -4,9 +4,13 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hookinlet/hookinlet/pkg/verify"
 )
 
 // An inbox is reached at a random key, not at its slug, and the key can be
@@ -135,4 +139,27 @@ func TestSecretsAreCheckedWhenSetAndDoNotSurviveAVerifierChange(t *testing.T) {
 	if !kept.HasVerifierSecret {
 		t.Error("an unrelated change removed the secret")
 	}
+}
+
+// A verifier that says it checked nothing cannot also vouch for an id or a type.
+func TestAnUnauthenticatedResultKeepsNoClaims(t *testing.T) {
+	e := newEnv(t, func(o *Options) {
+		reg := verify.Default()
+		if err := reg.Register("shrugs", func(json.RawMessage) (verify.Verifier, error) { return shrugs{}, nil }); err != nil {
+			t.Fatal(err)
+		}
+		o.Verifiers = reg
+	})
+	in := e.newInbox("shrug-box", "shrugs", "")
+	e.post("/in/shrug-box", `{"x":1}`)
+	m := e.messages(in)
+	if len(m) != 1 || m[0].Verified || m[0].DeliveryID != "" || m[0].EventType != "" {
+		t.Errorf("stored %+v", m)
+	}
+}
+
+type shrugs struct{}
+
+func (shrugs) Verify(*http.Request, []byte, []byte, time.Time) (verify.Result, error) {
+	return verify.Result{Unauthenticated: true, DeliveryID: "claimed-id", EventType: "claimed.type"}, nil
 }

@@ -25,6 +25,18 @@ applies.
   (Standard Webhooks needs `whsec_` and base64). Changing an inbox's verifier
   removes its secret. Calls that change an inbox answer with `warnings`.
 
+#### Upgrading
+- Inboxes that exist keep working at the URL they have, because their slug becomes
+  their ingest key. **That key is guessable**: run `hookinlet inbox rotate-ingest-key
+  SLUG` for each one and give the senders the new URL (`inbox show SLUG` prints it).
+- Messages that a `none` inbox stored before the upgrade are marked not verified.
+- A delivery from GitHub or an HMAC sender that is retried across the upgrade, with
+  an id that was already stored, is stored once more: earlier rows are known by the id
+  alone, new ones by the id and the body.
+- Migration 0003 rewrites every message row that has a delivery id, so it takes time
+  and WAL space in proportion to the size of the database (about 5 seconds for a
+  million messages and 580 MB). Take a backup first, as for any upgrade.
+
 #### Added (`pkg/`)
 - `inbox.Inbox.IngestKey`, `inbox.ValidIngestKey`, and `inbox.NewMessage.DedupeKey`.
   `Store.ResolveIngestKey` resolves by ingest key. A caller that creates inboxes

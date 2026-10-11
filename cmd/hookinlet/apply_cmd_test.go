@@ -639,3 +639,66 @@ func TestApplyDoesNotLeakTheSecretWhenStoringItFails(t *testing.T) {
 	}
 	mustNotLeak(t, []string{err.Error(), out.String(), errOut.String()}, secret)
 }
+
+// What a file asks for is checked as a whole before anything is made: a verifier
+// that is missing, a secret the verifier cannot use, and an ingest key that two
+// inboxes would share each stop the run with nothing created.
+func TestApplyRefusesTheWholeFileForWhatTheServerWouldRefuseLater(t *testing.T) {
+	e := newApplyEnv(t)
+	dir := t.TempDir()
+	tokens := filepath.Join(dir, "t.json")
+	env := e.env(map[string]string{"BAD_SW_SECRET": "not-a-whsec"}) //nolint:gosec // a value made up for a test
+	for name, tc := range map[string]struct{ yaml, want string }{
+		"a new inbox with no verifier":     {"inboxes:\n  - slug: first-ok\n    verifier: none\n  - slug: second-bad\n", "needs a verifier"},
+		"a secret the verifier cannot use": {"inboxes:\n  - slug: first-ok\n    verifier: none\n  - slug: second-bad\n    verifier: standardwebhooks\n    secret_env: BAD_SW_SECRET\n", "cannot be used"},
+		"one ingest key for two inboxes":   {"inboxes:\n  - slug: first-ok\n    verifier: none\n    ingest_key: shared-key\n  - slug: second-bad\n    verifier: none\n    ingest_key: shared-key\n", "ingest_key is already used"},
+	} {
+		f := writeTestFile(t, dir, "bad.yaml", tc.yaml)
+		code, _, errOut := runCmd(t, env, "apply", "-f", f, "--tokens-out", tokens)
+		if code != exitUsage || !strings.Contains(errOut, tc.want) {
+			t.Errorf("%s: code %d err %q, want %q", name, code, errOut, tc.want)
+		}
+		if len(e.views()) != 0 {
+			t.Fatalf("%s: inboxes were created: %v", name, e.views())
+		}
+	}
+	// A key that another inbox already has is found the same way, and the answer
+	// of the server to a conflicting key does not blame the slug.
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "taken-key-owner", "--verifier", "none", "--ingest-key", "owned-key"); code != 0 {
+		t.Fatal(errOut)
+	}
+	f := writeTestFile(t, dir, "k.yaml", "inboxes:\n  - slug: newcomer\n    verifier: none\n    ingest_key: owned-key\n")
+	if code, _, errOut := runCmd(t, env, "apply", "-f", f, "--tokens-out", tokens); code != exitUsage || !strings.Contains(errOut, `"taken-key-owner"`) {
+		t.Errorf("a key that is taken: code %d err %q", code, errOut)
+	}
+	code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "newcomer", "--verifier", "none", "--ingest-key", "owned-key")
+	if code == 0 || !strings.Contains(errOut, "ingest key is already in use") || strings.Contains(errOut, "named") {
+		t.Errorf("the conflict blames the wrong thing: code %d err %q", code, errOut)
+	}
+}
+
+// Changing an inbox's verifier removes its secret, and the commands say so.
+func TestChangingAVerifierSaysThatTheSecretWasRemoved(t *testing.T) {
+	e := newApplyEnv(t)
+	dir := t.TempDir()
+	env := e.env(map[string]string{"HOOKINLET_VERIFIER_SECRET": "a-shared-secret"})
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "was-github", "--verifier", "github"); code != 0 {
+		t.Fatal(errOut)
+	}
+	code, _, errOut := runCmd(t, e.env(nil), "inbox", "update", "was-github", "--verifier", "slack")
+	if code != 0 || !strings.Contains(errOut, "secret was removed") {
+		t.Errorf("inbox update: code %d, stderr %q", code, errOut)
+	}
+	// And apply, which has no secret to give it.
+	if code, _, errOut := runCmd(t, env, "inbox", "update", "was-github", "--verifier", "github"); code != 0 {
+		t.Fatal(errOut)
+	}
+	f := writeTestFile(t, dir, "v.yaml", "inboxes:\n  - slug: was-github\n    verifier: stripe\n")
+	code, out, errOut := runCmd(t, e.env(nil), "apply", "-f", f)
+	if code != 0 || !strings.Contains(out, "updated") {
+		t.Fatalf("apply: %d %s %s", code, out, errOut)
+	}
+	if !strings.Contains(errOut, "was-github") || !strings.Contains(errOut, "secret") {
+		t.Errorf("apply did not warn about the missing secret: %q", errOut)
+	}
+}

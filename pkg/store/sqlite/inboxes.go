@@ -191,6 +191,7 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 		return err
 	}
 	cp := *in
+	keepKey := cp.IngestKey == "" // an update that does not mention the key leaves it alone
 	cp.ApplyDefaults()
 	if err := cp.Validate(); err != nil {
 		return err
@@ -208,6 +209,11 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 		}
 		if stored != cp.Version {
 			return fmt.Errorf("%w: inbox was modified concurrently (have version %d, stored is %d)", inbox.ErrConflict, cp.Version, stored)
+		}
+		if keepKey {
+			if err := tx.QueryRowContext(ctx, `SELECT ingest_key FROM inboxes WHERE id = ?`, int64(cp.ID)).Scan(&cp.IngestKey); err != nil {
+				return fmt.Errorf("sqlite: read ingest key: %w", err)
+			}
 		}
 		var other int64
 		switch err := tx.QueryRowContext(ctx, `SELECT id FROM inboxes WHERE agent_token_hash = ? AND id <> ?`,

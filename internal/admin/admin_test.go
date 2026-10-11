@@ -161,3 +161,39 @@ func TestCheckSettings(t *testing.T) {
 		})
 	}
 }
+
+// The service itself refuses an inbox with no verifier, so the command line's
+// direct mode and any embedder that uses it cannot get one by default.
+func TestCreateRequiresAVerifier(t *testing.T) {
+	svc, _, _ := newService(t, 0)
+	_, err := svc.Create(t.Context(), admin.CreateParams{Slug: "undecided"})
+	if !errors.Is(err, inbox.ErrInvalid) || !strings.Contains(err.Error(), "verifier is required") {
+		t.Fatalf("Create with no verifier: %v", err)
+	}
+	c, err := svc.Create(t.Context(), admin.CreateParams{Slug: "decided", Verifier: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Inbox.IngestKey) < 20 || c.Inbox.IngestKey == "decided" {
+		t.Errorf("the ingest key is not random: %q", c.Inbox.IngestKey)
+	}
+}
+
+// Sending a verifier the inbox already has changes nothing, secret included: a
+// client that re-sends its settings must not lose the secret.
+func TestPatchWithTheSameVerifierKeepsTheSecret(t *testing.T) {
+	svc, _, _ := newService(t, 0)
+	if _, err := svc.Create(t.Context(), admin.CreateParams{Slug: "keeps-secret", Verifier: "github", VerifierSecret: "s3cret"}); err != nil {
+		t.Fatal(err)
+	}
+	same := "github"
+	v, err := svc.Update(t.Context(), "keeps-secret", admin.Patch{Verifier: &same})
+	if err != nil || !v.HasVerifierSecret || len(v.Warnings) != 0 {
+		t.Fatalf("same verifier: %+v, %v", v, err)
+	}
+	other := "stripe"
+	v, err = svc.Update(t.Context(), "keeps-secret", admin.Patch{Verifier: &other})
+	if err != nil || v.HasVerifierSecret || len(v.Warnings) == 0 {
+		t.Fatalf("another verifier: %+v, %v", v, err)
+	}
+}

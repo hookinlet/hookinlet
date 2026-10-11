@@ -780,6 +780,11 @@ func TestDuplicateDeliveriesWithASignedID(t *testing.T) {
 	if again := send(`{"id":"evt_1","type":"a"}`); again != first {
 		t.Errorf("a redelivery got seq %d, want %d", again, first)
 	}
+	// The same event, delivered again with a field that changed (Stripe's
+	// pending_webhooks does): the signature covers the id, so it is the same delivery.
+	if changed := send(`{"id":"evt_1","type":"a","pending_webhooks":1}`); changed != first {
+		t.Errorf("the same signed id with another body got seq %d, want %d", changed, first)
+	}
 	if n := e.count(in); n != 1 {
 		t.Errorf("%d rows", n)
 	}

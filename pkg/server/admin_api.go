@@ -56,6 +56,8 @@ func (s *Server) classifyErr(ctx context.Context, op string, err error) fail {
 		return fail{http.StatusBadRequest, "invalid_parameter", strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "), ""}
 	case errors.Is(err, inbox.ErrNotFound):
 		return fail{http.StatusNotFound, "not_found", "not found", ""}
+	case errors.Is(err, inbox.ErrConflict) && strings.Contains(err.Error(), "ingest key"):
+		return fail{http.StatusConflict, "conflict", "that ingest key is already in use by another inbox", ""}
 	case errors.Is(err, inbox.ErrConflict):
 		return fail{http.StatusConflict, "conflict", "an inbox with that slug already exists, or it was changed at the same time; check and retry", ""}
 	case errors.Is(err, admin.ErrBusy):

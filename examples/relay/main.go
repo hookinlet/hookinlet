@@ -21,7 +21,8 @@
 // that say where a request came from (X-Forwarded-For and the like) and any
 // X-Hookinlet-* the sender made up are not passed on, but every other header is
 // the sender's, so the destination must not take one on trust.
-// Messages that failed verification are not forwarded unless -unverified is set.
+// Messages that were not verified (they failed verification, or arrived at an
+// inbox whose verifier is "none") are not forwarded unless -unverified is set.
 //
 // A message is retried until the destination takes it, whatever it answers, except
 // that 400, 410, 413, 415, and 422 mean it refused this message for good, and it is
@@ -58,7 +59,7 @@ func run(args []string, getenv func(string) string, stderr *os.File) int {
 		to         = fs.String("to", "", "URL to forward each message to (required)")
 		state      = fs.String("state", "", "file that remembers the position, so a restart carries on (required)")
 		start      = fs.String("start", "now", "where to begin when there is no state file: now, or beginning")
-		unverified = fs.Bool("unverified", false, "also forward messages that failed verification")
+		unverified = fs.Bool("unverified", false, "also forward messages that were not verified")
 		poll       = fs.Duration("poll", time.Second, "how often to look for new messages when idle")
 		maxBackoff = fs.Duration("max-backoff", 30*time.Second, "longest wait between attempts to deliver one message")
 		strip      = fs.String("strip", "", "comma-separated headers not to pass on, besides X-Forwarded-*, Forwarded, X-Real-Ip, Via, and X-Hookinlet-*")

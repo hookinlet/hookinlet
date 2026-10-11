@@ -141,7 +141,7 @@ func TestShippedMigrationsAreUnchanged(t *testing.T) {
 	pinned := map[string]string{
 		"0001_init.sql":                      "5e5fd5ab3d11008906bf1f7256d06a5fa733d7f40b3248e76b8ba23bf91dc6c5",
 		"0002_delivery_index.sql":            "ae5b3395b0f4df9faada44c0332c2a6aa52f1137a477150ceb0d95c27d406081",
-		"0003_ingest_key_and_dedupe_key.sql": "c4a7d46f0757c8215e546ecab76dc4525d1bd019d162ad4744d1511b464ce505",
+		"0003_ingest_key_and_dedupe_key.sql": "ab08447e727ec057144111db17dd79ae940f8c9f75fa839e82df8d6646118fa1",
 	}
 	entries, err := os.ReadDir("migrations")
 	if err != nil {

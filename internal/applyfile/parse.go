@@ -408,6 +408,11 @@ func check(s Spec) error {
 }
 
 // errorAt is errorf for a message about the key on another line.
+// ErrorAt is an error about the entry, for a message that points at a line.
+func (s Spec) ErrorAt(line int, format string, args ...any) error {
+	return s.errorAt(line, format, args...)
+}
+
 func (s Spec) errorAt(line int, format string, args ...any) error {
 	return fmt.Errorf("line %d: inbox %q: %s", line, s.Slug, fmt.Sprintf(format, args...))
 }

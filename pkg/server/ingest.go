@@ -112,6 +112,10 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	// What was verified is what a verifier checked. The "none" verifier checks
 	// nothing, and what it accepts is stored as unverified.
 	verified, verifyReason := !res.Unauthenticated, ""
+	if res.Unauthenticated {
+		// Nothing was checked, so nothing the sender claimed is kept.
+		res = verify.Result{Unauthenticated: true}
+	}
 	if verr != nil {
 		reason, isFailure := verify.IsFailure(verr)
 		switch {

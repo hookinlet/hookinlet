@@ -168,6 +168,8 @@ func fail(stderr io.Writer, err error) int {
 		fmt.Fprintf(stderr, "hookinlet: %s\n", strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "))
 	case errors.Is(err, inbox.ErrNotFound):
 		fmt.Fprintln(stderr, "hookinlet: no such inbox")
+	case errors.Is(err, inbox.ErrConflict) && strings.Contains(err.Error(), "ingest key"):
+		fmt.Fprintln(stderr, "hookinlet: that ingest key is already in use by another inbox")
 	case errors.Is(err, inbox.ErrConflict):
 		fmt.Fprintln(stderr, "hookinlet: an inbox with that slug already exists, or it was changed at the same time")
 	case errors.Is(err, admin.ErrBusy):
@@ -306,6 +308,10 @@ func inboxCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 func failCreate(stderr io.Writer, err error, slug string) int {
 	var ae *apiError
 	if errors.Is(err, inbox.ErrConflict) || (errors.As(err, &ae) && ae.Status == 409) {
+		if strings.Contains(err.Error(), "ingest key") || (ae != nil && strings.Contains(ae.Message, "ingest key")) {
+			fmt.Fprintln(stderr, "hookinlet: that ingest key is already in use by another inbox")
+			return exitRuntime
+		}
 		fmt.Fprintf(stderr, "hookinlet: an inbox named %q already exists\n", slug)
 		return exitRuntime
 	}
@@ -553,6 +559,9 @@ func inboxUpdate(args []string, getenv func(string) string, stdout, stderr io.Wr
 		return 0
 	}
 	fmt.Fprintf(stdout, "updated inbox %q (now version %d)\n", v.Slug, v.Version)
+	for _, w := range v.Warnings {
+		fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
 	return 0
 }
 
@@ -604,6 +613,9 @@ func inboxSetSecret(args []string, getenv func(string) string, in io.Reader, std
 		return 0
 	}
 	fmt.Fprintf(stdout, "verifier secret set for inbox %q\n", v.Slug)
+	for _, w := range v.Warnings {
+		fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
 	return 0
 }
 
