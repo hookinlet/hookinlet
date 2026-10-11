@@ -288,6 +288,9 @@ func (o *Operation) Statuses() []string {
 	return out
 }
 
+// TakesBody reports whether the operation has a JSON request body.
+func (o *Operation) TakesBody() bool { return o.body != nil }
+
 // Raw is the operation as written in the document. Callers must not change it.
 func (o *Operation) Raw() map[string]any { return o.raw }
 

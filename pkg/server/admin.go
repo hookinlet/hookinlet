@@ -6,7 +6,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -29,11 +28,12 @@ const maxAdminBody = 64 << 10
 // the admin is.
 func (s *Server) registerAdmin(mux *http.ServeMux) {
 	type routes = map[string]http.HandlerFunc
-	mux.HandleFunc("/admin/inboxes", s.admin(routes{http.MethodPost: s.adminCreate, http.MethodGet: s.adminList}))
-	mux.HandleFunc("/admin/inboxes/{slug}", s.admin(routes{http.MethodGet: s.adminShow, http.MethodPatch: s.adminUpdate, http.MethodDelete: s.adminDelete}))
-	mux.HandleFunc("/admin/inboxes/{slug}/secret", s.admin(routes{http.MethodPut: s.adminSetSecret}))
-	mux.HandleFunc("/admin/inboxes/{slug}/rotate-token", s.admin(routes{http.MethodPost: s.adminRotate}))
-	mux.HandleFunc("/admin/retention/run", s.admin(routes{http.MethodPost: s.adminRetention}))
+	api := s.adminHandlers()
+	mux.HandleFunc("/admin/inboxes", s.admin(routes{http.MethodPost: s.adminBody(api.CreateInbox), http.MethodGet: s.adminBody(api.ListInboxes)}))
+	mux.HandleFunc("/admin/inboxes/{slug}", s.admin(routes{http.MethodGet: s.adminBody(api.ShowInbox), http.MethodPatch: s.adminBody(api.UpdateInbox), http.MethodDelete: s.adminBody(api.DeleteInbox)}))
+	mux.HandleFunc("/admin/inboxes/{slug}/secret", s.admin(routes{http.MethodPut: s.adminBody(api.SetVerifierSecret)}))
+	mux.HandleFunc("/admin/inboxes/{slug}/rotate-token", s.admin(routes{http.MethodPost: s.adminBody(api.RotateAgentToken)}))
+	mux.HandleFunc("/admin/retention/run", s.admin(routes{http.MethodPost: s.adminBody(api.RunRetention)}))
 	mux.HandleFunc("/admin/backup", s.admin(routes{http.MethodGet: s.adminBackup}))
 }
 
@@ -89,49 +89,37 @@ func sortStrings(s []string) {
 	}
 }
 
-// decodeAdmin reads a JSON request body into v. It is strict: one JSON value,
-// no unknown fields, a bounded size. It reports false after answering.
-func (s *Server) decodeAdmin(w http.ResponseWriter, r *http.Request, v any) bool {
-	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "send application/json")
-		return false
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAdminBody))
-	var tooLarge *http.MaxBytesError
-	switch {
-	case errors.As(err, &tooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
-		return false
-	case err != nil:
-		writeError(w, http.StatusBadRequest, "bad_request", "the request body could not be read")
-		return false
-	}
-	// The document says what the body may hold; the decoder below then fills the
-	// struct, which cannot be wrong about the shape any more.
-	if op := s.operation(r); op != nil {
-		if vs := op.CheckBody(body); len(vs) > 0 {
-			writeError(w, http.StatusBadRequest, "invalid_request", "the request body is not valid: "+vs[0].String())
-			return false
+// adminBody reads and checks the JSON body of an admin request before the
+// generated handler decodes it: the type, the size, and then the shape the
+// document gives it. A body that is not what the document says never reaches the
+// handler. Requests without a body pass through.
+func (s *Server) adminBody(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if op := s.operation(r); op != nil && op.TakesBody() {
+			if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+				writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "send application/json")
+				return
+			}
+			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAdminBody))
+			var tooLarge *http.MaxBytesError
+			switch {
+			case errors.As(err, &tooLarge):
+				writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
+				return
+			case err != nil:
+				writeError(w, http.StatusBadRequest, "bad_request", "the request body could not be read")
+				return
+			}
+			if vs := op.CheckBody(body); len(vs) > 0 {
+				writeError(w, http.StatusBadRequest, "invalid_request", "the request body is not valid: "+vs[0].String())
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
 		}
+		// The generated handlers get only a context, and some answers depend on the
+		// request (the address the caller used).
+		next(w, r.WithContext(context.WithValue(r.Context(), requestKey, r)))
 	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		// The decoder's message names the field and what was wrong with it and
-		// repeats no value, so it is safe to show, but not to be trusted for
-		// length.
-		msg := err.Error()
-		if len(msg) > 200 {
-			msg = msg[:200]
-		}
-		writeError(w, http.StatusBadRequest, "invalid_request", "the request body is not valid: "+msg)
-		return false
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "the request body must be a single JSON value")
-		return false
-	}
-	return true
 }
 
 // adminError answers a failed admin operation.
@@ -179,8 +167,20 @@ func (c ctxReader) Read(p []byte) (int, error) {
 
 // audit records an admin action. It names the inbox, never anything secret.
 func (s *Server) audit(r *http.Request, op, slug string, attrs ...slog.Attr) {
+	s.auditCtx(r.Context(), op, slug, attrs...)
+}
+
+func (s *Server) auditCtx(ctx context.Context, op, slug string, attrs ...slog.Attr) {
 	attrs = append([]slog.Attr{slog.String("op", op), slog.String("slug", slug)}, attrs...)
-	s.log.LogAttrs(r.Context(), slog.LevelInfo, "admin", attrs...)
+	s.log.LogAttrs(ctx, slog.LevelInfo, "admin", attrs...)
+}
+
+// baseURLFor is baseURL for code that has only the context of the request.
+func (s *Server) baseURLFor(ctx context.Context) string {
+	if r, ok := ctx.Value(requestKey).(*http.Request); ok {
+		return s.baseURL(r)
+	}
+	return strings.TrimRight(s.opts.PublicBaseURL, "/")
 }
 
 // baseURL is the externally visible address of this server, for the ingest URLs
@@ -204,148 +204,6 @@ func (s *Server) baseURL(r *http.Request) string {
 		return ""
 	}
 	return scheme + "://" + r.Host
-}
-
-func (s *Server) adminCreate(w http.ResponseWriter, r *http.Request) {
-	var p admin.CreateParams
-	if !s.decodeAdmin(w, r, &p) {
-		return
-	}
-	created, err := s.adm.Create(r.Context(), p)
-	if err != nil {
-		s.adminError(w, r, "create inbox", err)
-		return
-	}
-	created.Inbox = created.Inbox.WithBase(s.baseURL(r))
-	s.audit(r, "create inbox", created.Inbox.Slug)
-	w.Header().Set("Location", "/admin/inboxes/"+created.Inbox.Slug)
-	writeWire(w, r, http.StatusCreated, created)
-}
-
-func (s *Server) adminList(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	var after inbox.ID
-	limit := 0
-	for k, vs := range q {
-		switch {
-		case k != "after" && k != "limit":
-			writeError(w, http.StatusBadRequest, "invalid_parameter", "unknown parameter")
-			return
-		case len(vs) > 1:
-			writeError(w, http.StatusBadRequest, "invalid_parameter", `parameter "`+k+`": may be given only once`)
-			return
-		}
-	}
-	if v := q.Get("after"); v != "" {
-		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "invalid_parameter", `parameter "after": must be a whole number`)
-			return
-		}
-		after = inbox.ID(n)
-	}
-	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			writeError(w, http.StatusBadRequest, "invalid_parameter", `parameter "limit": must be a positive whole number`)
-			return
-		}
-		limit = n
-	}
-	views, next, err := s.adm.List(r.Context(), after, limit)
-	if err != nil {
-		s.adminError(w, r, "list inboxes", err)
-		return
-	}
-	base := s.baseURL(r)
-	for i := range views {
-		views[i] = views[i].WithBase(base)
-	}
-	out := struct {
-		Inboxes []admin.View `json:"inboxes"`
-		Next    *string      `json:"next"`
-	}{Inboxes: views}
-	if next != 0 {
-		n := "/admin/inboxes?after=" + strconv.FormatInt(int64(next), 10)
-		if limit > 0 {
-			n += "&limit=" + strconv.Itoa(limit)
-		}
-		out.Next = &n
-	}
-	writeWire(w, r, http.StatusOK, out)
-}
-
-func (s *Server) adminShow(w http.ResponseWriter, r *http.Request) {
-	v, err := s.adm.Get(r.Context(), r.PathValue("slug"))
-	if err != nil {
-		s.adminError(w, r, "show inbox", err)
-		return
-	}
-	writeWire(w, r, http.StatusOK, v.WithBase(s.baseURL(r)))
-}
-
-func (s *Server) adminUpdate(w http.ResponseWriter, r *http.Request) {
-	var p admin.Patch
-	if !s.decodeAdmin(w, r, &p) {
-		return
-	}
-	v, err := s.adm.Update(r.Context(), r.PathValue("slug"), p)
-	if err != nil {
-		s.adminError(w, r, "update inbox", err)
-		return
-	}
-	s.audit(r, "update inbox", v.Slug)
-	writeWire(w, r, http.StatusOK, v.WithBase(s.baseURL(r)))
-}
-
-func (s *Server) adminDelete(w http.ResponseWriter, r *http.Request) {
-	slug := r.PathValue("slug")
-	if err := s.adm.Delete(r.Context(), slug); err != nil {
-		s.adminError(w, r, "delete inbox", err)
-		return
-	}
-	s.audit(r, "delete inbox", slug)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) adminSetSecret(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Secret string `json:"secret"`
-	}
-	if !s.decodeAdmin(w, r, &body) {
-		return
-	}
-	v, err := s.adm.SetSecret(r.Context(), r.PathValue("slug"), body.Secret)
-	if err != nil {
-		s.adminError(w, r, "set secret", err)
-		return
-	}
-	s.audit(r, "set verifier secret", v.Slug)
-	writeWire(w, r, http.StatusOK, v.WithBase(s.baseURL(r)))
-}
-
-func (s *Server) adminRotate(w http.ResponseWriter, r *http.Request) {
-	c, err := s.adm.RotateToken(r.Context(), r.PathValue("slug"))
-	if err != nil {
-		s.adminError(w, r, "rotate token", err)
-		return
-	}
-	c.Inbox = c.Inbox.WithBase(s.baseURL(r))
-	s.audit(r, "rotate agent token", c.Inbox.Slug)
-	writeWire(w, r, http.StatusOK, c)
-}
-
-func (s *Server) adminRetention(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	ctx, cancel := s.closingContext(r.Context())
-	defer cancel()
-	n, err := s.adm.RunRetention(ctx)
-	if err != nil {
-		s.adminError(w, r, "retention", err)
-		return
-	}
-	s.audit(r, "run retention", "", slog.Int64("deleted", n), slog.Duration("took", time.Since(start).Round(time.Millisecond)))
-	writeWire(w, r, http.StatusOK, map[string]int64{"deleted": n})
 }
 
 // adminBackup streams a snapshot of the whole Store: every inbox, message, and

@@ -1,0 +1,7 @@
+# Settings for oapi-codegen. See generate.go for how it is run.
+package: api
+output: api.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
