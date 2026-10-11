@@ -40,7 +40,7 @@ func newFixture(t *testing.T, admin string) *fixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		in := &inbox.Inbox{Slug: slug, Name: slug, Verifier: "none", AgentTokenHash: hash}
+		in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: "none", AgentTokenHash: hash}
 		if err := store.CreateInbox(t.Context(), in); err != nil {
 			t.Fatal(err)
 		}

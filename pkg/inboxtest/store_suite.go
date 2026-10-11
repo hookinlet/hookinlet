@@ -96,6 +96,7 @@ func tokenHash(label string) []byte {
 func mkInbox(slug string, mods ...func(*inbox.Inbox)) *inbox.Inbox {
 	in := &inbox.Inbox{
 		Slug:           slug,
+		IngestKey:      slug,
 		Name:           "Inbox " + slug,
 		Verifier:       "none",
 		AgentTokenHash: tokenHash("token-for-" + slug),
@@ -315,44 +316,35 @@ func testCreateInbox(t *testing.T, s inbox.Store, clk *Clock) {
 	}
 }
 
-// An inbox is reached at its ingest key, which defaults to the slug but is a
-// value of its own.
+// An inbox is reached at its ingest key, a value of its own that the caller must
+// supply: a Store does not make one up, because a key that is not random is a
+// name anyone can guess.
 func testIngestKeys(t *testing.T, s inbox.Store, _ *Clock) {
 	ctx := t.Context()
+	isErr(t, "no ingest key", s.CreateInbox(ctx, mkInbox("keys-none", func(in *inbox.Inbox) { in.IngestKey = "" })), inbox.ErrInvalid)
+
 	plain := createInbox(t, s, "keys-plain")
-	if plain.IngestKey != "keys-plain" {
-		t.Errorf("the default ingest key = %q, want the slug", plain.IngestKey)
-	}
 	custom := createInbox(t, s, "keys-custom", func(in *inbox.Inbox) { in.IngestKey = "Zq_9-Mixed" })
 	got, err := s.ResolveIngestKey(ctx, "Zq_9-Mixed")
 	if err != nil || got.ID != custom.ID {
 		t.Fatalf("ResolveIngestKey(custom) = %v, %v", got, err)
 	}
-	// The slug is not a key when the inbox has another one, and keys are case sensitive.
+	// The slug is not a key unless it was made the key, and keys are case sensitive.
 	isErr(t, "slug of an inbox with its own key", func() error { _, err := s.ResolveIngestKey(ctx, "keys-custom"); return err }(), inbox.ErrNotFound)
 	isErr(t, "key in the wrong case", func() error { _, err := s.ResolveIngestKey(ctx, "zq_9-mixed"); return err }(), inbox.ErrNotFound)
 
-	// An update that does not mention the key leaves it as it was.
-	unmentioned := *plain
-	unmentioned.IngestKey = ""
-	unmentioned.Name = "renamed"
-	if err := s.UpdateInbox(ctx, &unmentioned); err != nil {
-		t.Fatal(err)
-	}
-	if unmentioned.IngestKey != "keys-plain" {
-		t.Errorf("an update with no key set it to %q", unmentioned.IngestKey)
-	}
-	plain.Version, plain.Name = unmentioned.Version, unmentioned.Name
-
 	// A key in use cannot be taken, by create or by update, and a failed attempt changes nothing.
 	isErr(t, "duplicate key", s.CreateInbox(ctx, mkInbox("keys-dup", func(in *inbox.Inbox) { in.IngestKey = "Zq_9-Mixed" })), inbox.ErrConflict)
-	isErr(t, "a slug is a key too", s.CreateInbox(ctx, mkInbox("keys-dup2", func(in *inbox.Inbox) { in.IngestKey = "keys-plain" })), inbox.ErrConflict)
 	taken := *plain
 	taken.IngestKey = "Zq_9-Mixed"
 	isErr(t, "update to a taken key", s.UpdateInbox(ctx, &taken), inbox.ErrConflict)
 	if again, err := s.ResolveIngestKey(ctx, "keys-plain"); err != nil || again.ID != plain.ID {
 		t.Errorf("a refused update changed the key: %v, %v", again, err)
 	}
+	// An update has to carry the key, as GetInbox returned it.
+	blank := *plain
+	blank.IngestKey = ""
+	isErr(t, "update with no key", s.UpdateInbox(ctx, &blank), inbox.ErrInvalid)
 
 	// Rotating the key moves the inbox; the old key stops working.
 	moved := *plain

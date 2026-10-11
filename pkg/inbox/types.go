@@ -95,10 +95,9 @@ type Inbox struct {
 	ID   ID
 	Slug string // immutable after creation; the external name
 	// IngestKey is the key in the inbox's ingest URL (/in/{key}). It is a
-	// capability: whoever has it can post to the inbox. Unique across inboxes.
-	// ApplyDefaults sets it to the slug when it is empty, which is only what
-	// a caller that creates inboxes straight through a Store gets; the admin API
-	// gives new inboxes a random one.
+	// capability: whoever has it can post to the inbox, so it must not be a name
+	// anyone can guess. It is required: a Store does not invent one, and the admin
+	// API gives new inboxes a random one. Unique across inboxes.
 	IngestKey string
 	Name      string
 
@@ -162,9 +161,6 @@ func (in *Inbox) LogValue() slog.Value {
 // ApplyDefaults fills zero-valued optional fields. Every Store calls it before
 // validating on create and update so defaults are identical across backends.
 func (in *Inbox) ApplyDefaults() {
-	if in.IngestKey == "" {
-		in.IngestKey = in.Slug
-	}
 	if in.OnVerifyFail == "" {
 		in.OnVerifyFail = OnVerifyFailReject
 	}

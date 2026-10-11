@@ -45,7 +45,7 @@ func newFixture(t *testing.T) *fixture {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	tok, hash, _ := token.Generate()
-	if err := store.CreateInbox(t.Context(), &inbox.Inbox{Slug: "agent-test", Name: "t", Verifier: "none", AgentTokenHash: hash}); err != nil {
+	if err := store.CreateInbox(t.Context(), &inbox.Inbox{Slug: "agent-test", IngestKey: "agent-test", Name: "t", Verifier: "none", AgentTokenHash: hash}); err != nil {
 		t.Fatal(err)
 	}
 	return &fixture{url: ts.URL, token: tok}

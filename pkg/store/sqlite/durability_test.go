@@ -49,7 +49,7 @@ func BenchmarkAppendSequential(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.Cleanup(func() { _ = s.Close() })
-	in := &inbox.Inbox{Slug: "bench", Name: "b", Verifier: "none", AgentTokenHash: []byte("hash-bench-0123456")}
+	in := &inbox.Inbox{Slug: "bench", IngestKey: "bench", Name: "b", Verifier: "none", AgentTokenHash: []byte("hash-bench-0123456")}
 	if err := s.CreateInbox(b.Context(), in); err != nil {
 		b.Fatal(err)
 	}

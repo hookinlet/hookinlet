@@ -175,7 +175,7 @@ func (e *env) newInbox(slug, verifier, secret string, mods ...func(*inbox.Inbox)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	in := &inbox.Inbox{Slug: slug, Name: slug, Verifier: verifier, AgentTokenHash: hash}
+	in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: verifier, AgentTokenHash: hash}
 	if secret != "" {
 		sealed, err := e.box.Seal([]byte(secret))
 		if err != nil {

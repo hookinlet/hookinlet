@@ -21,7 +21,7 @@ func internalStore(t *testing.T) (*Store, *inbox.Inbox) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	in := &inbox.Inbox{Slug: "batching", Name: "b", Verifier: "none", AgentTokenHash: []byte("hash-batching-0123")}
+	in := &inbox.Inbox{Slug: "batching", IngestKey: "batching", Name: "b", Verifier: "none", AgentTokenHash: []byte("hash-batching-0123")}
 	if err := s.CreateInbox(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}

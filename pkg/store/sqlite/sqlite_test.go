@@ -47,7 +47,7 @@ func openAt(t *testing.T, dir string, opts ...sqlite.Option) *sqlite.Store {
 
 func newInbox(slug string) *inbox.Inbox {
 	sum := sha256.Sum256([]byte(slug))
-	return &inbox.Inbox{Slug: slug, Name: slug, Verifier: "none", AgentTokenHash: sum[:]}
+	return &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: "none", AgentTokenHash: sum[:]}
 }
 
 func TestDataSurvivesReopen(t *testing.T) {
@@ -142,6 +142,7 @@ func TestShippedMigrationsAreUnchanged(t *testing.T) {
 		"0001_init.sql":                      "5e5fd5ab3d11008906bf1f7256d06a5fa733d7f40b3248e76b8ba23bf91dc6c5",
 		"0002_delivery_index.sql":            "ae5b3395b0f4df9faada44c0332c2a6aa52f1137a477150ceb0d95c27d406081",
 		"0003_ingest_key_and_dedupe_key.sql": "ab08447e727ec057144111db17dd79ae940f8c9f75fa839e82df8d6646118fa1",
+		"0004_random_ingest_keys.sql":        "c7a59a986049078495f68dd7ff74f3a855993ab0ca8bf42cb08fdd39a8f9c766",
 	}
 	entries, err := os.ReadDir("migrations")
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 )
 
 // A database written by an earlier version keeps working after the upgrade:
-// every inbox is still reached at the URL it had, what a "none" inbox accepted is
+// every inbox gets a random ingest key, what a "none" inbox accepted is
 // no longer called verified, and what was already deduplicated stays so.
 func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 	dir := t.TempDir()
@@ -54,11 +54,23 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 
-	// Every inbox is still at its slug.
+	// An ingest key is a capability, so inboxes that had their slug for a key now have
+	// a random one, and the slug is no longer a way in.
+	keys := map[string]bool{}
 	for _, slug := range []string{"signed", "open"} {
-		in, err := s.ResolveIngestKey(t.Context(), slug)
-		if err != nil || in.Slug != slug || in.IngestKey != slug {
-			t.Errorf("ResolveIngestKey(%q) = %+v, %v", slug, in, err)
+		in, err := s.GetInboxBySlug(t.Context(), slug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if in.IngestKey == slug || len(in.IngestKey) != 32 || keys[in.IngestKey] {
+			t.Errorf("the key of %q is %q", slug, in.IngestKey)
+		}
+		keys[in.IngestKey] = true
+		if r, err := s.ResolveIngestKey(t.Context(), in.IngestKey); err != nil || r.Slug != slug {
+			t.Errorf("ResolveIngestKey(%q) = %+v, %v", in.IngestKey, r, err)
+		}
+		if _, err := s.ResolveIngestKey(t.Context(), slug); err == nil {
+			t.Errorf("the slug %q is still a way in", slug)
 		}
 	}
 	// What the "none" inbox took is not verified any more; the signed one's is as it was.
