@@ -20,38 +20,59 @@ import (
 // maxEventTypeLen bounds an event type taken from a delivery.
 const maxEventTypeLen = 256
 
-// handleIngest receives a webhook: POST or PUT /in/{key}[/...].
+// ingestResult is how a delivery ended. ingestAPI turns it into one of the
+// responses the document lists for the operation.
+type ingestResult struct {
+	status    int
+	code, msg string
+	seq       int64
+	challenge []byte // set for a handshake answered instead of stored
+}
+
+func refuse(status int, code, msg string) ingestResult {
+	return ingestResult{status: status, code: code, msg: msg}
+}
+
+var errInternal = ingestResult{status: http.StatusInternalServerError, code: "internal", msg: "internal error"}
+
+// internalFailure logs the real cause and tells the client nothing about it. A
+// request whose client has already gone away is not a fault on our side, so it is
+// logged quietly.
+func (s *Server) internalFailure(ctx context.Context, what string, err error, attrs ...slog.Attr) ingestResult {
+	attrs = append([]slog.Attr{slog.String("op", what), slog.String("err", err.Error())}, attrs...)
+	if errors.Is(err, context.Canceled) {
+		s.log.LogAttrs(ctx, slog.LevelDebug, "request abandoned by the client", attrs...)
+	} else {
+		s.log.LogAttrs(ctx, slog.LevelError, "request failed", attrs...)
+	}
+	return errInternal
+}
+
+// ingest receives a webhook: POST or PUT /in/{key}[/...].
 //
 // The order of steps matters. The method is checked before the inbox is looked
 // up, so a wrong method never reveals whether an inbox exists. The body is read
 // only under a size limit. Nothing is answered 2xx until the message is
 // committed to the Store (guardrail 16).
-func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Request) ingestResult {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
-		w.Header().Set("Allow", "POST, PUT")
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "this endpoint accepts POST and PUT")
-		return
+		return refuse(http.StatusMethodNotAllowed, "method_not_allowed", "this endpoint accepts POST and PUT")
 	}
-	ctx := r.Context()
 
 	// 1. Find the inbox. An unknown key and a disabled inbox look the same.
 	in, err := s.opts.Store.ResolveIngestKey(ctx, r.PathValue("key"))
 	switch {
 	case errors.Is(err, inbox.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "not found")
-		return
+		return refuse(http.StatusNotFound, "not_found", "not found")
 	case err != nil:
-		s.internalError(ctx, w, "resolve ingest key", err)
-		return
+		return s.internalFailure(ctx, "resolve ingest key", err)
 	case in.Disabled:
-		writeError(w, http.StatusNotFound, "not_found", "not found")
-		return
+		return refuse(http.StatusNotFound, "not_found", "not found")
 	}
 
 	// 2. Read the body, never more than the inbox allows.
 	if r.ContentLength > in.MaxBodyBytes {
-		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
-		return
+		return refuse(http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
 	}
 	// A sender gets a bounded time to deliver the body, so a trickle cannot hold a
 	// connection and its buffer open indefinitely. Servers that cannot set a
@@ -61,29 +82,24 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	var tooLarge *http.MaxBytesError
 	switch {
 	case errors.As(err, &tooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
-		return
+		return refuse(http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
 	case err != nil:
-		writeError(w, http.StatusBadRequest, "bad_request", "the request body could not be read")
-		return
+		return refuse(http.StatusBadRequest, "bad_request", "the request body could not be read")
 	}
 
 	// 3. Let the embedder reject the delivery (rate limit, quota, policy).
 	if err := s.opts.Hooks.BeforeIngest(ctx, in, int64(len(body))); err != nil {
-		s.rejected(ctx, w, in, err)
-		return
+		return s.rejected(ctx, in, err)
 	}
 
 	// 4. Verify the signature over the exact bytes received.
 	verifier, err := s.opts.Verifiers.New(in.Verifier, in.VerifierConfig)
 	if err != nil {
-		s.internalError(ctx, w, "build verifier", err, slog.String("verifier", in.Verifier))
-		return
+		return s.internalFailure(ctx, "build verifier", err, slog.String("verifier", in.Verifier))
 	}
 	secret, err := s.verifierSecret(in)
 	if err != nil {
-		s.internalError(ctx, w, "open verifier secret", err)
-		return
+		return s.internalFailure(ctx, "open verifier secret", err)
 	}
 	// The decrypted secret is wiped when verification ends, however it ends.
 	res, verr := func() (verify.Result, error) {
@@ -96,8 +112,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		reason, isFailure := verify.IsFailure(verr)
 		switch {
 		case !isFailure:
-			s.internalError(ctx, w, "verify", verr, slog.String("verifier", in.Verifier))
-			return
+			return s.internalFailure(ctx, "verify", verr, slog.String("verifier", in.Verifier))
 		case in.OnVerifyFail == inbox.OnVerifyFailStore:
 			// Keep the delivery, marked unverified. Nothing the sender claimed
 			// is trusted: the failed Result carries no id or type.
@@ -108,18 +123,13 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			// whoever happens to hold the ingest key; it goes to the log.
 			s.log.LogAttrs(ctx, slog.LevelInfo, "delivery rejected",
 				slog.String("slug", in.Slug), slog.String("reason", reason), slog.Int("size", len(body)))
-			writeError(w, http.StatusUnauthorized, "verification_failed", "webhook verification failed")
-			return
+			return refuse(http.StatusUnauthorized, "verification_failed", "webhook verification failed")
 		}
 	}
 
 	// 5. A handshake (Slack's url_verification) is answered, not stored.
 	if res.Challenge != nil {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(res.Challenge)
-		return
+		return ingestResult{status: http.StatusOK, challenge: res.Challenge}
 	}
 
 	// 6. Store it. Only once this returns is the delivery safe to acknowledge.
@@ -150,11 +160,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, inbox.ErrNotFound): // deleted while we were verifying
-		writeError(w, http.StatusNotFound, "not_found", "not found")
-		return
+		return refuse(http.StatusNotFound, "not_found", "not found")
 	case err != nil:
-		s.internalError(ctx, w, "append", err)
-		return
+		return s.internalFailure(ctx, "append", err)
 	}
 
 	// 7. Committed. Tell the world, then acknowledge. Nothing after the commit
@@ -164,24 +172,25 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery",
 		slog.String("slug", in.Slug), slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
 		slog.Bool("verified", verified), slog.Bool("duplicate", !created))
-	writeJSON(w, http.StatusOK, map[string]int64{"seq": msg.Seq})
+	return ingestResult{status: http.StatusOK, seq: msg.Seq}
 }
 
-// rejected answers a delivery that BeforeIngest refused.
-func (s *Server) rejected(ctx context.Context, w http.ResponseWriter, in *inbox.Inbox, err error) {
+// rejected is the answer to a delivery that BeforeIngest refused.
+func (s *Server) rejected(ctx context.Context, in *inbox.Inbox, err error) ingestResult {
+	var res ingestResult
 	switch {
 	case errors.Is(err, inbox.ErrRateLimited):
-		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many requests")
+		res = refuse(http.StatusTooManyRequests, "rate_limited", "too many requests")
 	case errors.Is(err, inbox.ErrQuotaExceeded):
-		writeError(w, http.StatusPaymentRequired, "quota_exceeded", "the quota for this inbox has been reached")
+		res = refuse(http.StatusPaymentRequired, "quota_exceeded", "the quota for this inbox has been reached")
 	case errors.Is(err, inbox.ErrForbidden):
-		writeError(w, http.StatusForbidden, "forbidden", "this delivery is not allowed")
+		res = refuse(http.StatusForbidden, "forbidden", "this delivery is not allowed")
 	default:
-		s.internalError(ctx, w, "before-ingest hook", err, slog.String("slug", in.Slug))
-		return
+		return s.internalFailure(ctx, "before-ingest hook", err, slog.String("slug", in.Slug))
 	}
 	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery refused by hook",
 		slog.String("slug", in.Slug), slog.String("reason", err.Error()))
+	return res
 }
 
 // afterCommit runs the post-commit notifications. A panic in an embedder's

@@ -235,8 +235,13 @@ func New(opts Options) (*Server, error) {
 	mux.HandleFunc("GET /readyz", health.Readyz)
 	// Ingest accepts any method here and answers 405 itself, so that the
 	// response is JSON and carries an Allow header.
-	mux.HandleFunc("/in/{key}", s.handleIngest)
-	mux.HandleFunc("/in/{key}/{rest...}", s.handleIngest)
+	ingest := s.strictServer(&ingestAPI{s: s})
+	mux.HandleFunc("/in/{key}", withRequest(func(w http.ResponseWriter, r *http.Request) {
+		ingest.Ingest(w, r, r.PathValue("key"))
+	}))
+	mux.HandleFunc("/in/{key}/{rest...}", withRequest(func(w http.ResponseWriter, r *http.Request) {
+		ingest.IngestWithPath(w, r, r.PathValue("key"), r.PathValue("rest"))
+	}))
 	if opts.Authenticator != nil {
 		s.registerAgentAPI(mux)
 		s.registerAdmin(mux)

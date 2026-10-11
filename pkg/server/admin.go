@@ -121,8 +121,15 @@ func (s *Server) adminBody(next http.HandlerFunc) http.HandlerFunc {
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 		}
-		// The generated handlers get only a context, and some answers depend on the
-		// request (the address the caller used).
+		withRequest(next)(w, r)
+	}
+}
+
+// withRequest gives a generated handler what it is not passed: the request (some
+// answers depend on the address the caller used, or on its headers) and the writer
+// (a download clears its write deadline, an upload sets a read deadline).
+func withRequest(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), requestKey, r)
 		next(w, r.WithContext(context.WithValue(ctx, writerKey, w)))
 	}
