@@ -63,7 +63,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, ok := s.authorize(w, r)
-	if !ok {
+	if !ok || !s.checkQuery(w, r) {
 		return
 	}
 	values, err := wire.QueryValues(r.URL.RawQuery)

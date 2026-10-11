@@ -43,7 +43,7 @@ func (s *Server) agent(h agentHandler) http.HandlerFunc {
 			return
 		}
 		in, ok := s.authorize(w, r)
-		if !ok {
+		if !ok || !s.checkQuery(w, r) {
 			return
 		}
 		// Only authenticated, authorized requests take a slot, so anonymous

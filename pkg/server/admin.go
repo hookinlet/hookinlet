@@ -74,6 +74,9 @@ func (s *Server) admin(methods map[string]http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "this endpoint accepts "+allowHeader)
 			return
 		}
+		if !s.checkQuery(w, r) {
+			return
+		}
 		h(w, r)
 	}
 }
@@ -88,7 +91,7 @@ func sortStrings(s []string) {
 
 // decodeAdmin reads a JSON request body into v. It is strict: one JSON value,
 // no unknown fields, a bounded size. It reports false after answering.
-func decodeAdmin(w http.ResponseWriter, r *http.Request, v any) bool {
+func (s *Server) decodeAdmin(w http.ResponseWriter, r *http.Request, v any) bool {
 	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "send application/json")
 		return false
@@ -102,6 +105,14 @@ func decodeAdmin(w http.ResponseWriter, r *http.Request, v any) bool {
 	case err != nil:
 		writeError(w, http.StatusBadRequest, "bad_request", "the request body could not be read")
 		return false
+	}
+	// The document says what the body may hold; the decoder below then fills the
+	// struct, which cannot be wrong about the shape any more.
+	if op := s.operation(r); op != nil {
+		if vs := op.CheckBody(body); len(vs) > 0 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "the request body is not valid: "+vs[0].String())
+			return false
+		}
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
@@ -197,7 +208,7 @@ func (s *Server) baseURL(r *http.Request) string {
 
 func (s *Server) adminCreate(w http.ResponseWriter, r *http.Request) {
 	var p admin.CreateParams
-	if !decodeAdmin(w, r, &p) {
+	if !s.decodeAdmin(w, r, &p) {
 		return
 	}
 	created, err := s.adm.Create(r.Context(), p)
@@ -275,7 +286,7 @@ func (s *Server) adminShow(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminUpdate(w http.ResponseWriter, r *http.Request) {
 	var p admin.Patch
-	if !decodeAdmin(w, r, &p) {
+	if !s.decodeAdmin(w, r, &p) {
 		return
 	}
 	v, err := s.adm.Update(r.Context(), r.PathValue("slug"), p)
@@ -301,7 +312,7 @@ func (s *Server) adminSetSecret(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Secret string `json:"secret"`
 	}
-	if !decodeAdmin(w, r, &body) {
+	if !s.decodeAdmin(w, r, &body) {
 		return
 	}
 	v, err := s.adm.SetSecret(r.Context(), r.PathValue("slug"), body.Secret)

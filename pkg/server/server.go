@@ -21,7 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hookinlet/hookinlet/docs"
 	"github.com/hookinlet/hookinlet/internal/admin"
+	"github.com/hookinlet/hookinlet/internal/specvalidate"
 	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
@@ -127,6 +129,7 @@ type Server struct {
 	http    *http.Server
 	reads   chan struct{} // a slot per read request being served
 
+	spec      *specvalidate.Document // docs/openapi.json, which requests are held to
 	adm       *admin.Service
 	backupMu  sync.Mutex     // one backup at a time
 	retention sync.WaitGroup // the scheduled sweep, so Serve can wait for it
@@ -209,9 +212,14 @@ func New(opts Options) (*Server, error) {
 		opts.SSERecheckInterval = 0
 	}
 
+	spec, err := specvalidate.Load(docs.OpenAPI)
+	if err != nil {
+		return nil, err
+	}
 	closeCtx, closeCancel := context.WithCancel(context.Background())
 	s := &Server{
 		opts:         opts,
+		spec:         spec,
 		log:          opts.Logger,
 		reads:        make(chan struct{}, opts.MaxConcurrentReads),
 		streams:      make(chan struct{}, opts.MaxStreams),
