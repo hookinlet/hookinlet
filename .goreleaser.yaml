@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Pat Ramsey
+
+# Builds the release archives, their checksums, and a software bill of materials
+# for each. The container image is built separately (see release.yml), from the
+# Dockerfile, so that what is published is what CI smoke-tests.
+version: 2
+project_name: hookinlet
+
+# A tag with a hyphen is a pre-release. This also makes GoReleaser sort v0.1.0
+# above v0.1.0-rc.1 when both are on one commit, instead of the reverse.
+git:
+  prerelease_suffix: "-"
+
+builds:
+  - id: hookinlet
+    main: ./cmd/hookinlet
+    binary: hookinlet
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: hookinlet
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - CHANGELOG.md
+      - docs/*.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# One SBOM per archive. Needs syft on the PATH.
+sboms:
+  - id: archives
+    artifacts: archive
+
+# The changelog is CHANGELOG.md in the archive; GitHub's generated one is not
+# what the project records.
+changelog:
+  disable: true
+
+release:
+  # A tag with a suffix, such as v0.1.0-rc.1, is published as a pre-release.
+  prerelease: auto
+  draft: false
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"

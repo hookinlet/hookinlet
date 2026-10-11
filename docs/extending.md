@@ -1,0 +1,182 @@
+# Extending hookinlet
+
+The `hookinlet` program is a thin assembly of parts. Each part sits behind an
+interface in `pkg/inbox`, and `server.New` takes them as options, so an
+application can replace any of them, or add behaviour around them, without
+forking. This is also how the hosted product is built on this code: it changes
+nothing here, it supplies its own implementations. The same door is open to you.
+
+The packages are pre-1.0: the interfaces can still change, and every change to
+them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
+
+## The parts
+
+| Interface (`pkg/inbox`) | What it does | Default | Conformance suite (`pkg/inboxtest`) |
+|---|---|---|---|
+| `Store` | Persists inboxes and messages; assigns each message its per-inbox `Seq`. | `pkg/store/sqlite` | `StoreSuite` |
+| `Notifier` | Tells readers an inbox may have new messages. Carries no payload. | `pkg/notify/local` (in process) | `NotifierSuite` |
+| `Authenticator`, `Principal` | Says who a request is and what it may read or administer. | `pkg/auth/token` | `AuthenticatorSuite` |
+| `SecretBox` | Seals and opens verifier secrets. | `pkg/secretbox` | `SecretBoxSuite` |
+| `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
+| `Backupper` (optional) | A consistent snapshot of the Store, for `GET /admin/backup`. | the SQLite store | `BackupperSuite` |
+| `SingleInboxPrincipal` (optional) | A `Principal` that can read exactly one inbox, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
+| `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
+
+The optional ones are found with a type assertion, and the server copes when they
+are absent: no `Backupper` means `GET /admin/backup` answers `501`.
+
+## Putting them together
+
+`server.New` takes an `Options`. Only `Addr` and `Store` are required, but the
+read API, the admin API, SSE and MCP are served only when there is an
+`Authenticator`, since there is no safe default for who may read.
+
+```go
+store, err := sqlite.Open(ctx, "./data")        // or your own inbox.Store
+box, err := secretbox.New(masterKey)            // 32 bytes
+
+srv, err := server.New(server.Options{
+	Addr:          ":8080",
+	Store:         store,
+	SecretBox:     box,
+	Notifier:      local.New(),
+	Authenticator: token.NewAuthenticator(store, adminToken),
+	Hooks:         myHooks,                     // optional
+})
+err = srv.Run(ctx)                              // returns after a clean shutdown
+```
+
+`examples/custom-hooks` is a complete program built exactly this way, with a
+per-inbox rate limit as the hook. It is compiled and tested in CI; copy it as a
+starting point. `Options` has the rest (limits, timeouts, `TrustedProxies`,
+`PublicBaseURL`, a `Verifiers` registry); each field says what it does and what
+its default is.
+
+`srv.Handler()` returns the whole `http.Handler`, if you would rather mount it in
+a server of your own than call `Run`. `Run` and `Serve` do two things the handler
+alone does not: they start the retention schedule, and on shutdown they end open
+streams and MCP waits first. If you serve the handler yourself, call
+`srv.Shutdown(ctx)` to end the streams, and run retention yourself
+(`POST /admin/retention/run`, or `Store.Prune`) on whatever schedule you want.
+
+## Writing hooks
+
+`Hooks` has two methods; embed `inbox.NopHooks` to implement only one.
+
+```go
+type limiter struct{ inbox.NopHooks }
+
+func (limiter) BeforeIngest(ctx context.Context, in *inbox.Inbox, size int64) error {
+	if tooMany(in) {
+		return fmt.Errorf("%w: slow down", inbox.ErrRateLimited) // 429
+	}
+	return nil
+}
+```
+
+`BeforeIngest` runs after the inbox is found and the body is read, before the
+signature is checked, so a refusal is cheap. That has a cost to weigh: it sees
+unverified requests too, so a limit that counts every request lets anyone who knows
+an inbox's URL use up its allowance with unsigned posts, and the real sender,
+which may not retry, is then refused. Limit by something the stranger cannot
+spend (the source address of unverified traffic, say), or meter what was accepted
+in `AfterIngest`, or accept the trade-off knowingly, as the example does for
+brevity. Return an error wrapping
+`ErrRateLimited` (429), `ErrQuotaExceeded` (402), or `ErrForbidden` (403); any
+other error is a 500. It is called concurrently, from every request.
+
+`AfterIngest` runs after the message is committed (or recognized as a duplicate,
+with `created == false`, so a meter does not count it twice). It must not block,
+and its context may be cancelled as soon as the response is sent, so work that
+outlives the call needs `context.WithoutCancel`. A panic in it is logged and
+swallowed: the delivery is already stored, and the sender must not be told it
+failed.
+
+## Writing a Store
+
+The `Store` documentation in `pkg/inbox/interfaces.go` is the contract; the
+suite is what makes it testable. The points that are easy to get wrong:
+
+- **`Seq` is a cursor.** It is per inbox and assigned in commit order, in the
+  same step that makes the message visible, so a reader that has seen `k` and asks
+  for messages after `k` never misses one that commits later. On a database that
+  hands out ids at insert but commits out of order, serialize appends per inbox.
+- **`Query` is exact and a snapshot.** A short page means nothing more matches up
+  to the `LatestSeq` it reports, and that number comes from the same snapshot as
+  the rows. Readers skip ahead on that promise.
+- **Read your writes.** Once `Append` returns, every later read, on any node, sees
+  the message: a wake-up followed by a read must not find it missing.
+- **The Store owns the clock** (UTC, microsecond precision), and `ReceivedAt`
+  never decreases with `Seq` within an inbox.
+- **Deduplication** applies only to verified messages with a delivery id, so a
+  forged delivery cannot suppress the real one.
+- **Secrets stay sealed.** A Store persists `VerifierSecret` verbatim and never
+  sees plaintext, and returns inboxes whose `String` and log forms redact
+  secrets and token hashes.
+- **Large deletes must not block writes.** `DeleteInbox` and `Prune` run in small
+  batches; deleting everything in one transaction stalls every delivery.
+
+Run the suite from an ordinary test:
+
+```go
+func TestMyStore(t *testing.T) {
+	inboxtest.StoreSuite(t, func(t *testing.T, now func() time.Time) inbox.Store {
+		return openMyStore(t, now) // must use now for every timestamp it assigns
+	})
+}
+```
+
+The suite closes each Store itself. If your Store can take backups, add
+`inboxtest.BackupperSuite(t, newStore, restore)`, where `restore` opens a Store
+from a snapshot's bytes.
+
+## Writing a Notifier
+
+A notifier carries no data: it says "look again", and the reader asks the Store.
+Replay, reconnects, and slow readers therefore share one code path, and a missed
+signal costs latency and never data.
+
+```go
+func TestMyNotifier(t *testing.T) {
+	inboxtest.NotifierSuite(t, func(t *testing.T) inbox.Notifier { return newMyNotifier(t) })
+}
+```
+
+An in-process notifier must not drop signals. One that crosses the network may
+(delivery at most once), and must then be run with a positive
+`HOOKINLET_SSE_RECHECK_INTERVAL` (`Options.SSERecheckInterval`), which makes every
+stream and MCP wait re-read the Store on that interval regardless. `Publish` is
+called with a context that may already be cancelled and must still deliver.
+
+## Writing an Authenticator
+
+`Authenticate` runs on every request, before the server knows whether the caller
+may see anything, so it must not reveal why it refused: every failure looks the
+same and wraps `inbox.ErrUnauthenticated`. A different error is taken to mean the
+credential could not be checked and becomes a 500. A `Principal` decides by inbox
+**ID**, never by slug or name, and a credential for one inbox must not reveal
+whether another exists (the server answers 404 for both).
+
+```go
+inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture { … })
+```
+
+## Adding a verifier
+
+```go
+reg := verify.Default()
+err := reg.Register("acme-v2", func(config json.RawMessage) (verify.Verifier, error) { … })
+srv, _ := server.New(server.Options{ /* … */ Verifiers: reg })
+```
+
+See [verifiers](verifiers.md) for what a `Verifier` must do: check the exact bytes
+received, compare in constant time, and say which headers carry its credential so
+they are not stored.
+
+## Rules the server keeps, and expects of you
+
+- Handlers reach storage, notification, authentication, and secrets only through
+  these interfaces. The one exception is the optional capabilities above.
+- Never log message bodies, tokens, secrets, or the headers that carried them.
+- Compare secrets with `crypto/subtle` or `hmac.Equal`.
+- Honor context cancellation everywhere; a cancelled call leaves no partial effect.

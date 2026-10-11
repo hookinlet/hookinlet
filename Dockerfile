@@ -1,14 +1,20 @@
-FROM golang:1.27.2 AS build
+# The build stage always runs on the build machine's own architecture and
+# cross-compiles, so a multi-platform image needs no emulation.
+# Base images are pinned by digest, so the image that is published is the one
+# that was tested; see docs/releasing.md for how to update them.
+FROM --platform=$BUILDPLATFORM golang:1.27.2@sha256:5bc7f572bbaa98885a3a1fd9c0aa76b59e3e14e8628bfc316bbfd0c701e4818c AS build
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/hookinlet ./cmd/hookinlet
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/hookinlet ./cmd/hookinlet
 # Pre-create the data directory so it is owned by the non-root user.
 RUN mkdir /out-data
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/hookinlet /hookinlet
 COPY --from=build --chown=65532:65532 /out-data /data
 ENV HOOKINLET_LISTEN_ADDR=:8080 \
