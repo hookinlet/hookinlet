@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
 	"github.com/hookinlet/hookinlet/pkg/verify"
@@ -94,6 +95,16 @@ type Options struct {
 	// it, to a few seconds, when the Notifier can (a distributed one delivers at
 	// most once).
 	SSERecheckInterval time.Duration
+	// DisableMCP turns off the MCP endpoint (/mcp), which is otherwise served
+	// whenever an Authenticator is set.
+	DisableMCP bool
+	// MCPInlineBodyBytes is the largest message body the MCP tools return
+	// inline. A larger one is left out and marked body_truncated, and the agent
+	// fetches it with get_message. It protects an agent's context window.
+	// Defaults to 16 KiB and is limited to 64 KiB.
+	MCPInlineBodyBytes int
+	// Version is reported to MCP clients as the server's version. Defaults to "dev".
+	Version string
 }
 
 // Server is the hookinlet HTTP server.
@@ -166,6 +177,15 @@ func New(opts Options) (*Server, error) {
 	if opts.SSEHeartbeat <= 0 {
 		opts.SSEHeartbeat = 15 * time.Second
 	}
+	if opts.Version == "" {
+		opts.Version = "dev"
+	}
+	if opts.MCPInlineBodyBytes <= 0 {
+		opts.MCPInlineBodyBytes = 16 << 10
+	}
+	// Never above what a page query loads for REST: a cap this high would let one
+	// call load a hundred times more than a REST page does.
+	opts.MCPInlineBodyBytes = min(opts.MCPInlineBodyBytes, wire.InlineBodyBytes)
 	if opts.SSERecheckInterval < 0 {
 		opts.SSERecheckInterval = 0
 	}
@@ -191,6 +211,9 @@ func New(opts Options) (*Server, error) {
 	if opts.Authenticator != nil {
 		s.registerAgentAPI(mux)
 		mux.HandleFunc("/v1/inboxes/{slug}/stream", s.handleStream)
+		if !opts.DisableMCP {
+			s.registerMCP(mux)
+		}
 	}
 	mux.HandleFunc("/", notFound)
 

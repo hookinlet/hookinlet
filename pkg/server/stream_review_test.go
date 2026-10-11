@@ -163,6 +163,14 @@ type flaky struct {
 	inbox.Store
 	failInboxes atomic.Bool
 	failTokens  atomic.Bool
+	failQuery   atomic.Bool
+}
+
+func (f *flaky) Query(ctx context.Context, id inbox.ID, q inbox.Query) (*inbox.Page, error) {
+	if f.failQuery.Load() {
+		return nil, errFlaky
+	}
+	return f.Store.Query(ctx, id, q)
 }
 
 var errFlaky = errors.New("the database is having a moment")

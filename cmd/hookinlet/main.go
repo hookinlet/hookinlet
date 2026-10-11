@@ -140,6 +140,9 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		MaxStreamsPerInbox: cfg.MaxStreamsPerInbox,
 		SSEHeartbeat:       cfg.SSEHeartbeat,
 		SSERecheckInterval: cfg.SSERecheckInterval,
+		DisableMCP:         !cfg.MCPEnabled,
+		Version:            version,
+		MCPInlineBodyBytes: cfg.MCPInlineBodyBytes,
 		TrustedProxies:     cfg.TrustedProxies,
 	})
 	if err != nil {

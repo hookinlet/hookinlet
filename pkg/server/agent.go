@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -223,22 +224,38 @@ func noParams(w http.ResponseWriter, r *http.Request) bool {
 // acquireRead waits for one of the limited read slots. It reports false after
 // answering, or after giving up silently because the client has gone away.
 func (s *Server) acquireRead(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
+	release, err := s.readSlot(r.Context())
+	switch {
+	case err == nil:
+		return release, true
+	case errors.Is(err, errBusy):
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusServiceUnavailable, "overloaded", "the server is busy; retry shortly")
+	}
+	return nil, false
+}
+
+// errBusy means no read slot came free within ReadWaitTimeout.
+var errBusy = errors.New("server: too many reads in progress")
+
+// readSlot takes one of the limited read slots, waiting up to ReadWaitTimeout.
+// It fails with errBusy if none comes free and with the context's error if the
+// caller goes away first.
+func (s *Server) readSlot(ctx context.Context) (release func(), err error) {
 	select {
 	case s.reads <- struct{}{}:
-		return func() { <-s.reads }, true
+		return func() { <-s.reads }, nil
 	default:
 	}
 	wait := time.NewTimer(s.opts.ReadWaitTimeout)
 	defer wait.Stop()
 	select {
 	case s.reads <- struct{}{}:
-		return func() { <-s.reads }, true
-	case <-r.Context().Done():
-		return nil, false
+		return func() { <-s.reads }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-wait.C:
-		w.Header().Set("Retry-After", "1")
-		writeError(w, http.StatusServiceUnavailable, "overloaded", "the server is busy; retry shortly")
-		return nil, false
+		return nil, errBusy
 	}
 }
 
