@@ -6,6 +6,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -29,6 +30,16 @@ type retentionPolicy struct {
 func (s *Store) Prune(ctx context.Context, now time.Time) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
+	}
+	// A delete that was interrupted is finished first.
+	unfinished, err := s.unfinishedDeletes(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range unfinished {
+		if err := s.finishDelete(ctx, id); err != nil && !errors.Is(err, inbox.ErrNotFound) {
+			return 0, err
+		}
 	}
 	policies, err := s.retentionPolicies(ctx)
 	if err != nil {
@@ -114,6 +125,9 @@ func deleteBatch(ctx context.Context, tx *sql.Tx, id inbox.ID, bound int64) (int
 		return 0, fmt.Errorf("sqlite: delete messages: %w", err)
 	}
 	n, _ := res.RowsAffected()
+	if _, err := tx.ExecContext(ctx, `UPDATE inboxes SET message_count = message_count - ? WHERE id = ?`, n, int64(id)); err != nil {
+		return 0, fmt.Errorf("sqlite: update message count: %w", err)
+	}
 	return n, nil
 }
 

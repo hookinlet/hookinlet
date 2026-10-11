@@ -130,7 +130,7 @@ func serve(args []string, getenv func(string) string, stderr io.Writer) int {
 // assembles the server around it. The returned function closes the store and
 // must be called after the server has stopped.
 func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*server.Server, func(), error) {
-	store, err := sqlite.Open(ctx, cfg.DataDir)
+	store, err := sqlite.Open(ctx, cfg.DataDir, sqlite.WithLogger(log))
 	if err != nil {
 		return nil, nil, err
 	}

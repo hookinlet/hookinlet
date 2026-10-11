@@ -130,6 +130,12 @@ type Inbox struct {
 	// means none.
 	EventTypePointer string
 
+	// Epoch identifies one lifetime of this inbox's sequence numbers. It is set by
+	// the Store, never changes while the inbox exists, and is different for an
+	// inbox created later under the same slug and for a restore from a backup, so
+	// that a cursor from before is not mistaken for one that means the same thing
+	// now. It is opaque: compare it for equality.
+	Epoch string
 	// LastSeq is the sequence number of the newest message ever appended.
 	// Only Append changes it; CreateInbox and UpdateInbox ignore the value
 	// supplied by the caller.
@@ -349,6 +355,10 @@ type Page struct {
 	// LatestSeq is the inbox's newest sequence number as of the same snapshot
 	// as Messages. It is 0 for an inbox that has never received a message.
 	LatestSeq int64
+	// OldestSeq is the lowest sequence number stored as of the same snapshot, or
+	// 0 if none is. A reader whose cursor is below OldestSeq-1 has missed
+	// messages that were removed.
+	OldestSeq int64
 }
 
 // InboxStats summarizes an inbox's stored messages.

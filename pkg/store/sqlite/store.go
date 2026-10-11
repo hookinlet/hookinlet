@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -60,6 +61,9 @@ type Store struct {
 	closed    atomic.Bool
 	closeOnce sync.Once
 	closeErr  error
+
+	log       *slog.Logger
+	clockWarn atomic.Int64 // when a stepped-back clock was last logged, in unix seconds
 }
 
 var _ inbox.Store = (*Store)(nil)
@@ -70,11 +74,16 @@ type Option func(*config)
 type config struct {
 	now     func() time.Time
 	readers int
+	log     *slog.Logger
 }
 
 // WithClock sets the clock used for every timestamp the Store assigns. It
 // exists so tests can control time; the default is time.Now.
 func WithClock(now func() time.Time) Option { return func(c *config) { c.now = now } }
+
+// WithLogger sets where the Store reports things an operator should know, such as
+// a clock that stepped back. The default discards them.
+func WithLogger(l *slog.Logger) Option { return func(c *config) { c.log = l } }
 
 // WithReaders sets the size of the read-connection pool. The default is 4.
 func WithReaders(n int) Option { return func(c *config) { c.readers = n } }
@@ -120,7 +129,10 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
 	wdb.SetConnMaxLifetime(0)
 
 	removeStaleBackups(filepath.Dir(abs), time.Now())
-	s := &Store{path: abs, wdb: wdb, now: cfg.now}
+	if cfg.log == nil {
+		cfg.log = slog.New(slog.DiscardHandler)
+	}
+	s := &Store{path: abs, wdb: wdb, now: cfg.now, log: cfg.log}
 	if err := wdb.PingContext(ctx); err != nil {
 		_ = wdb.Close()
 		return nil, fmt.Errorf("sqlite: open %s: %w", abs, err)
