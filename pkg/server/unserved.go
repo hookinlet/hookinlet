@@ -15,12 +15,45 @@ import (
 // happen: only the operations a type implements are mounted.
 var errNotServed = errors.New("server: this operation is not served through the generated interface")
 
-// unserved fills in the operations that are not yet served through the generated
-// interface, so that a type embedding it satisfies api.StrictServerInterface
-// with only the operations it does serve.
+// unserved has every operation of api.StrictServerInterface answer errNotServed.
+// A type that embeds it and defines the operations it serves satisfies the
+// interface without the rest, which are written by hand (ingest, the stream, the
+// backup download, and MCP carry raw bytes or never end).
 type unserved struct{}
 
 func (unserved) Backup(context.Context, api.BackupRequestObject) (api.BackupResponseObject, error) {
+	return nil, errNotServed
+}
+
+func (unserved) ListInboxes(context.Context, api.ListInboxesRequestObject) (api.ListInboxesResponseObject, error) {
+	return nil, errNotServed
+}
+
+func (unserved) CreateInbox(context.Context, api.CreateInboxRequestObject) (api.CreateInboxResponseObject, error) {
+	return nil, errNotServed
+}
+
+func (unserved) DeleteInbox(context.Context, api.DeleteInboxRequestObject) (api.DeleteInboxResponseObject, error) {
+	return nil, errNotServed
+}
+
+func (unserved) ShowInbox(context.Context, api.ShowInboxRequestObject) (api.ShowInboxResponseObject, error) {
+	return nil, errNotServed
+}
+
+func (unserved) UpdateInbox(context.Context, api.UpdateInboxRequestObject) (api.UpdateInboxResponseObject, error) {
+	return nil, errNotServed
+}
+
+func (unserved) RotateAgentToken(context.Context, api.RotateAgentTokenRequestObject) (api.RotateAgentTokenResponseObject, error) {
+	return nil, errNotServed
+}
+
+func (unserved) SetVerifierSecret(context.Context, api.SetVerifierSecretRequestObject) (api.SetVerifierSecretResponseObject, error) {
+	return nil, errNotServed
+}
+
+func (unserved) RunRetention(context.Context, api.RunRetentionRequestObject) (api.RunRetentionResponseObject, error) {
 	return nil, errNotServed
 }
 

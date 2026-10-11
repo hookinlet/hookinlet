@@ -5,3 +5,11 @@ generate:
   models: true
   std-http-server: true
   strict-server: true
+output-options:
+  # Changes to the document for the Go types only (see overlay.yaml).
+  overlay:
+    path: overlay.yaml
+  # The template that writes JSON responses, changed to use encodeJSON and
+  # setContentLength (encode.go). It is the generator's own, with those two lines.
+  user-templates:
+    strict/strict-interface.tmpl: templates/strict-interface.tmpl
