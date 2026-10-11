@@ -213,10 +213,11 @@ func (s *Server) secure(w http.ResponseWriter, r *http.Request, op *specvalidate
 		return false
 	}
 	rr.principal = principal
-	if _, named := op.PathParam("slug"); sec != specvalidate.Agent || !named {
+	name, named := op.InboxParam()
+	if sec != specvalidate.Agent || !named {
 		return true
 	}
-	in, err := s.opts.Store.GetInboxBySlug(r.Context(), r.PathValue("slug"))
+	in, err := s.opts.Store.GetInboxBySlug(r.Context(), r.PathValue(name))
 	switch {
 	case errors.Is(err, inbox.ErrNotFound), err == nil && !principal.CanReadInbox(in):
 		writeError(w, http.StatusNotFound, "not_found", "not found")
@@ -257,14 +258,18 @@ func (s *Server) checkRequest(w http.ResponseWriter, r *http.Request, op *specva
 		writeError(w, http.StatusNotFound, "not_found", "not found")
 		return false
 	}
-	values, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_parameter", "the query string is malformed")
-		return false
-	}
-	if vs := op.CheckQuery(values); len(vs) > 0 {
-		writeError(w, http.StatusBadRequest, "invalid_parameter", parameterMessage(vs))
-		return false
+	// An operation that keeps the query string as the sender wrote it takes whatever
+	// it is, malformed or not: a delivery is not refused for its URL.
+	if !op.AnyQuery() {
+		values, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_parameter", "the query string is malformed")
+			return false
+		}
+		if vs := op.CheckQuery(values); len(vs) > 0 {
+			writeError(w, http.StatusBadRequest, "invalid_parameter", parameterMessage(vs))
+			return false
+		}
 	}
 	limit := op.MaxBodyBytes()
 	if !op.TakesBody() || limit == 0 {

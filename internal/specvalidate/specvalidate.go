@@ -90,6 +90,9 @@ type Param struct {
 	// MultiSegment marks a path parameter that takes the rest of the path,
 	// slashes included (`x-multi-segment`). OpenAPI path templates cannot say so.
 	MultiSegment bool
+	// Inbox marks the path parameter that names the inbox an agent operation is
+	// about (`x-inbox`): the credential must be allowed to read that inbox.
+	Inbox bool
 }
 
 // Load parses a document and checks that it can be enforced: every reference
@@ -158,6 +161,7 @@ func Load(b []byte) (*Document, error) {
 				prm.Required, _ = pm["required"].(bool)
 				prm.Array = schema["type"] == "array"
 				prm.MultiSegment, _ = pm["x-multi-segment"].(bool)
+				prm.Inbox, _ = pm["x-inbox"].(bool)
 				op.Params = append(op.Params, prm)
 			}
 			if rb, ok := d.Deref(om["requestBody"]).(map[string]any); ok {
@@ -170,6 +174,9 @@ func Load(b []byte) (*Document, error) {
 		}
 	}
 	sort.Slice(d.ops, func(i, j int) bool { return d.ops[i].ID < d.ops[j].ID })
+	if err := d.checkOperations(); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
@@ -528,7 +535,7 @@ func (d *Document) check(schema, v any, at string, opts Options) []Violation {
 				names[i] = article(ty.(string))
 			}
 			reason := "must be " + strings.Join(names, " or ")
-			if custom, ok := sm["x-reason"].(string); ok {
+			if custom, ok := sm["x-reason"].(string); ok && typeIs("array", v) {
 				reason = custom
 			}
 			return append(vs, Violation{Path: at, Reason: reason})
@@ -693,6 +700,17 @@ func (o *Operation) MaxBodyBytes() int64 {
 	return int64(n)
 }
 
+// InboxParam is the name of the path parameter that names the inbox the
+// operation is about, if it has one.
+func (o *Operation) InboxParam() (string, bool) {
+	for _, p := range o.Params {
+		if p.In == "path" && p.Inbox {
+			return p.Name, true
+		}
+	}
+	return "", false
+}
+
 // PathParam returns the named path parameter, if the operation has it.
 func (o *Operation) PathParam(name string) (Param, bool) {
 	for _, p := range o.Params {
@@ -791,4 +809,39 @@ func (d *Document) MCPTools() []MCPTool {
 		out = append(out, MCPTool{Name: tm["name"].(string), Description: tm["description"].(string), ReadOnly: ro, Input: in})
 	}
 	return out
+}
+
+// checkOperations refuses a document whose operations leave something to chance
+// that the server would otherwise decide by default.
+func (d *Document) checkOperations() error {
+	var problems []string
+	security := map[string]Security{}
+	for _, op := range d.ops {
+		where := op.Method + " " + op.Path
+		if s, seen := security[op.Path]; seen && s != op.Security() {
+			problems = append(problems, where+": the operations of one path must ask for the same credential")
+		}
+		security[op.Path] = op.Security()
+		if op.TakesBody() && op.MaxBodyBytes() <= 0 {
+			problems = append(problems, where+": a JSON request body needs an x-max-bytes, the most the server will read")
+		}
+		if op.Security() == Agent {
+			named := false
+			for _, p := range op.Params {
+				if p.In == "path" && p.Inbox {
+					named = true
+				} else if p.In == "path" && p.Name == "slug" {
+					problems = append(problems, where+": the path parameter slug is not marked x-inbox")
+				}
+			}
+			if !named && strings.Contains(op.Path, "{") && !strings.Contains(op.Path, "{seq}") {
+				problems = append(problems, where+": an agent operation with path parameters must mark the one that names the inbox x-inbox")
+			}
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return fmt.Errorf("specvalidate: the document cannot be enforced:\n  %s", strings.Join(problems, "\n  "))
+	}
+	return nil
 }

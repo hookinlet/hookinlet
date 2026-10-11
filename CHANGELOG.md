@@ -17,7 +17,8 @@ applies.
   take `HEAD`. A path that needs a credential checks it before answering 405.
 - Every response carries `Cache-Control: no-store` and
   `X-Content-Type-Options: nosniff`.
-- A query string with invalid UTF-8 is refused (400).
+- A query string with invalid UTF-8 is refused (400), except on ingest and the health checks, which take any query string as they always did.
+- A JSON-RPC body that is not an object (a batch, or `null`) and one whose `id` is not a string or an integer are refused before the MCP SDK sees them.
 - MCP tools take their names, descriptions, and argument schemas from the
   document. The arguments are validated by the SDK against those schemas.
 

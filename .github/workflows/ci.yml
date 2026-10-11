@@ -44,7 +44,9 @@ jobs:
       # The race detector doubles the time and is for main, not for every push to a
       # review.
       - name: Test (everything but pkg/server, which has its own job)
-        run: go test ${{ github.event_name == 'pull_request' && '' || '-race' }} $(go list ./... | grep -v '/pkg/server$')
+        env:
+          RACE: ${{ github.event_name != 'pull_request' }}
+        run: go test $([ "$RACE" = true ] && echo -race) $(go list ./... | grep -v '/pkg/server$')
 
   # pkg/server has several hundred tests that run one after another and takes as
   # long as all the rest together, so it runs alongside them, not after them.
@@ -57,7 +59,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Test pkg/server
-        run: go test ${{ github.event_name == 'pull_request' && '' || '-race' }} ./pkg/server/
+        env:
+          RACE: ${{ github.event_name != 'pull_request' }}
+        run: go test $([ "$RACE" = true ] && echo -race) ./pkg/server/
 
   lint:
     runs-on: ubuntu-latest
