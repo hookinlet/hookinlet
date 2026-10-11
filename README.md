@@ -296,6 +296,8 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
   and while a million-row retention sweep runs a delivery waits 18 ms or less at the 99th percentile
   (longest wait measured: 102 ms, deleting a whole inbox). [Performance](docs/performance.md) says how it was measured.
 - **Ready in milliseconds.** About 10 MiB of memory idle. No outbound network calls, no telemetry.
+- **Inboxes as a file.** `hookinlet apply -f inboxes.yaml` creates the inboxes a file declares and changes the ones that
+  differ. It never deletes anything. See [applying a file](docs/admin.md#applying-a-file).
 - **Backups while it runs.** `hookinlet backup --out file.db` takes a consistent snapshot.
 - **No dashboard, users, or billing.** The admin API and the command line are how you manage it.
 - **Not a delivery service for third parties.** It guarantees what it stored and its order. What an agent or relay
@@ -306,7 +308,7 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
 | | |
 |---|---|
 | [**Deploying**](docs/deploying.md) | What it needs, every setting, health checks, upgrades, resource use |
-| [**Administration**](docs/admin.md) | Inboxes, tokens, secrets, retention, backups, the command line |
+| [**Administration**](docs/admin.md) | Inboxes, tokens, secrets, retention, backups, the command line, and [inboxes declared in a file](docs/admin.md#applying-a-file) |
 | [**API**](docs/api.md) | Ingest, reading, paging, the live stream |
 | [**OpenAPI**](docs/openapi.json) | The same, machine-readable (OpenAPI 3.1), checked against the server by tests |
 | [**MCP**](docs/mcp.md) | The tools, their limits, and how to connect clients |

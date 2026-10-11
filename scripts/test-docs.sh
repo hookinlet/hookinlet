@@ -31,7 +31,7 @@ files=("$@")
 # checkout (they run `go run ./examples/...`). Refuse to start if any of them is
 # already there, so that nothing of yours can be overwritten, and remove only
 # what this script made.
-scratch_files=(created.json relay.state received.log hookinlet-backup.db relay)
+scratch_files=(created.json relay.state received.log hookinlet-backup.db relay inboxes.yaml tokens.json)
 for f in "${scratch_files[@]}"; do
   if [ -e "$root/$f" ]; then
     echo "refusing to run: $root/$f already exists and the examples would overwrite it. Move it away first." >&2
@@ -137,7 +137,14 @@ grep -q '"'"'seq=1 {"hello": "examples"}'"'"' received.log || { echo "CHECK: the
     ;;
   docs/verifiers.md) needles=('{"seq":1}') ;;
   docs/mcp.md) needles=('"structuredContent"') ;;
-  docs/admin.md) needles=('"agent_token"' 'rotated the agent token') ;;
+  docs/admin.md)
+    needles=('"agent_token"' 'rotated the agent token' 'would create' '2 created, 0 updated, 0 unchanged, 1 secrets set' '0 created, 0 updated, 2 unchanged, 1 secrets set')
+    checks='
+# apply must have written the new tokens, privately.
+[ "$(find tokens.json -perm 600 | wc -l)" -eq 1 ] || { echo "CHECK: tokens.json is missing or is not mode 0600" >&2; exit 1; }
+grep -q "hki_" tokens.json || { echo "CHECK: tokens.json holds no token" >&2; exit 1; }
+curl -s localhost:8080/admin/inboxes/stripe-live -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" | grep -q "\"has_verifier_secret\":true" || { echo "CHECK: apply did not set the secret" >&2; exit 1; }'
+    ;;
   esac
   if [ -n "$checks" ]; then
     port2=$(free_port)   # keep the checks' port rewrite in step with the blocks'
