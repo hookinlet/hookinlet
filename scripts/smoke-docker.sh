@@ -24,8 +24,8 @@ stream_pids=()
 cleanup() {
   rm -rf "${restore_dir-}"
   for pid in "${stream_pids[@]}"; do kill "$pid" 2>/dev/null || true; done
-  docker rm -f "$name" >/dev/null 2>&1 || true
-  docker volume rm "$vol" >/dev/null 2>&1 || true
+  docker rm -f "$name" "$name-quick" >/dev/null 2>&1 || true
+  docker volume rm "$vol" "$vol-quick" >/dev/null 2>&1 || true
   rm -f "$tmp" "${stream_files[@]}"
 }
 stream_files=()
@@ -249,5 +249,25 @@ cp "$backup" "$restore_dir/hookinlet.db"
 chmod 666 "$restore_dir/hookinlet.db"
 restored=$(docker run --rm -v "$restore_dir:/data" -e HOOKINLET_MASTER_KEY="$key" "$image" inbox list)
 case $restored in *made-by-api*demo*|*demo*made-by-api*) echo "ok   the backup restores into a fresh data directory with both inboxes" ;; *) fail "the restored volume lists: $restored" ;; esac
+
+# The quick start in docs/deploying.md, on an empty volume with exactly two
+# environment variables and nothing prepared beforehand: no migrate step, no
+# inbox created from the command line.
+main_base=$base
+base=http://127.0.0.1:$((port + 1))
+docker volume create "$vol-quick" >/dev/null
+docker run -d --name "$name-quick" -p "$((port + 1)):8080" -v "$vol-quick:/data" \
+  -e HOOKINLET_ADMIN_TOKEN="$admin_token" -e HOOKINLET_MASTER_KEY="$key" "$image" >/dev/null
+wait_ready
+quick=$(admin POST /admin/inboxes '{"slug": "demo"}')
+case $quick in 201*'"ingest_path":"/in/demo"'*'"agent_token":"hki_'*) echo "ok   an empty volume and two variables: an inbox is created through the API" ;; *) fail "unexpected quick-start create: $quick" ;; esac
+quick_token=$(printf '%s' "$quick" | sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p')
+expect "and takes an unsigned delivery" '200 {"seq":1}' "$(send POST /in/demo '{"hello": "world"}')"
+case $(read_api /v1/inboxes/demo/messages "$quick_token") in *'"hello":"world"'*) echo "ok   and the agent token reads it back" ;; *) fail "the quick-start message was not readable" ;; esac
+docker restart "$name-quick" >/dev/null
+wait_ready
+case $(read_api /v1/inboxes/demo/messages "$quick_token") in *'"hello":"world"'*) echo "ok   the data survives a restart of that container" ;; *) fail "the quick-start data did not survive a restart" ;; esac
+expect "and the sequence carries on" '200 {"seq":2}' "$(send POST /in/demo '{"again": true}')"
+base=$main_base
 
 echo "smoke test passed"
