@@ -1,0 +1,162 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 (or v0.1.0-rc.1, which is published as a
+# pre-release) builds the binaries, their checksums and SBOMs, and a multi-arch
+# container image, and publishes them. Running the workflow by hand, from any
+# branch or tag, does everything except publish, to check that a release would
+# work: every publishing step requires a push of a tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two tags pushed together must not race to move "latest".
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # Publishing happens only for a push of a version tag, never for a manual run,
+  # even a manual run that selected a tag.
+  PUBLISH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tags: ${{ steps.plan.outputs.tags }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the tag and work out the image tags
+        id: plan
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [ "$PUBLISH" != true ]; then
+            echo "version=0.0.0-dryrun" >> "$GITHUB_OUTPUT"
+            echo "tags=$image:0.0.0-dryrun" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Only a plain semantic version is released: no build metadata (an image
+          # tag cannot contain "+"), and nothing like "vnext".
+          if ! printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::$GITHUB_REF_NAME is not a version tag such as v1.2.3 or v1.2.3-rc.1"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          tags="$image:$version"
+          case "$version" in
+            *-*) ;; # a pre-release moves no floating tag
+            *)
+              # "latest" follows the highest final release, and "1.2" the highest
+              # in its line, so tagging a patch to an old line moves neither.
+              finals=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
+              if [ "$(printf '%s\n' "$finals" | tail -n 1)" = "$GITHUB_REF_NAME" ]; then
+                tags="$tags"$'\n'"$image:latest"
+              fi
+              line="${GITHUB_REF_NAME%.*}"
+              if [ "$(printf '%s\n' "$finals" | grep -F "$line." | tail -n 1)" = "$GITHUB_REF_NAME" ]; then
+                tags="$tags"$'\n'"$image:${version%.*}"
+              fi
+              ;;
+          esac
+          {
+            echo "version=$version"
+            echo "tags<<EOF"
+            echo "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  binaries:
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release and attach the archives
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install syft (for the SBOMs)
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - name: Build and publish
+        if: env.PUBLISH == 'true'
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.17.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # With two tags on one commit (v0.1.0-rc.1 and then v0.1.0) GoReleaser
+          # would otherwise pick the one that sorts first, which is the rc.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+      - name: Build only (dry run)
+        if: env.PUBLISH != 'true'
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: v2.17.0
+          args: release --snapshot --clean
+      - name: Keep the dry run's files
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dry-run-dist
+          path: |
+            dist/*.tar.gz
+            dist/*.sbom.json
+            dist/checksums.txt
+          retention-days: 3
+
+  image:
+    # After the binaries, so that a release whose archives fail does not ship an
+    # image.
+    needs: [plan, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image for this machine and smoke-test it
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: hookinlet:release-check
+          build-args: VERSION=${{ needs.plan.outputs.version }}
+      - run: scripts/smoke-docker.sh hookinlet:release-check
+      - name: Log in to the registry
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build for amd64 and arm64, and publish on a tag
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ needs.plan.outputs.tags }}
+          build-args: VERSION=${{ needs.plan.outputs.version }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
