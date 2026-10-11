@@ -6,6 +6,21 @@ applies.
 
 ## Unreleased
 
+### Phase 7: packaging and docs
+
+#### Added
+- Release automation: GoReleaser configuration for static `linux` and `darwin`
+  binaries on `amd64` and `arm64` with checksums and an SBOM per archive, and a
+  workflow that publishes a multi-arch container image to GHCR on a version tag.
+- `docs/deploying.md`, `docs/extending.md`, `docs/releasing.md`, `README.md`, and
+  `examples/custom-hooks`, a program that embeds the server with its own
+  `inbox.Hooks` (a per-inbox rate limit).
+- A test of start-up time (`TestColdStartWithAnExistingDatabaseIsFast`).
+
+#### Changed
+- The Dockerfile cross-compiles for the target platform instead of building under
+  emulation. No change to the image's contents or behaviour.
+
 ### Phase 6: admin API, retention, backup, CLI
 
 #### Added
