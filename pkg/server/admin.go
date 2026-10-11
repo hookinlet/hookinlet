@@ -11,11 +11,8 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
-	"github.com/hookinlet/hookinlet/internal/admin"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
@@ -34,7 +31,7 @@ func (s *Server) registerAdmin(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/inboxes/{slug}/secret", s.admin(routes{http.MethodPut: s.adminBody(api.SetVerifierSecret)}))
 	mux.HandleFunc("/admin/inboxes/{slug}/rotate-token", s.admin(routes{http.MethodPost: s.adminBody(api.RotateAgentToken)}))
 	mux.HandleFunc("/admin/retention/run", s.admin(routes{http.MethodPost: s.adminBody(api.RunRetention)}))
-	mux.HandleFunc("/admin/backup", s.admin(routes{http.MethodGet: s.adminBackup}))
+	mux.HandleFunc("/admin/backup", s.admin(routes{http.MethodGet: s.adminBody(api.Backup)}))
 }
 
 // admin wraps handlers with the checks every admin call shares, in this order:
@@ -126,27 +123,8 @@ func (s *Server) adminBody(next http.HandlerFunc) http.HandlerFunc {
 		}
 		// The generated handlers get only a context, and some answers depend on the
 		// request (the address the caller used).
-		next(w, r.WithContext(context.WithValue(r.Context(), requestKey, r)))
-	}
-}
-
-// adminError answers a failed admin operation.
-func (s *Server) adminError(w http.ResponseWriter, r *http.Request, op string, err error) {
-	switch {
-	case errors.Is(err, inbox.ErrInvalid):
-		writeError(w, http.StatusBadRequest, "invalid_parameter", strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "))
-	case errors.Is(err, inbox.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "not found")
-	case errors.Is(err, inbox.ErrConflict):
-		writeError(w, http.StatusConflict, "conflict", "an inbox with that slug already exists, or it was changed at the same time; check and retry")
-	case errors.Is(err, admin.ErrBusy):
-		writeError(w, http.StatusConflict, "busy", "that is already running")
-	case errors.Is(err, admin.ErrNoSecretBox):
-		writeError(w, http.StatusNotImplemented, "not_implemented", err.Error())
-	case errors.Is(err, admin.ErrNoBackup):
-		writeError(w, http.StatusNotImplemented, "not_implemented", err.Error())
-	default:
-		s.internalError(r.Context(), w, op, err)
+		ctx := context.WithValue(r.Context(), requestKey, r)
+		next(w, r.WithContext(context.WithValue(ctx, writerKey, w)))
 	}
 }
 
@@ -160,24 +138,7 @@ func (s *Server) closingContext(ctx context.Context) (context.Context, context.C
 	return ctx, func() { stop(); cancel() }
 }
 
-// ctxReader fails reads once its context has ended.
-type ctxReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-func (c ctxReader) Read(p []byte) (int, error) {
-	if err := c.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return c.r.Read(p)
-}
-
 // audit records an admin action. It names the inbox, never anything secret.
-func (s *Server) audit(r *http.Request, op, slug string, attrs ...slog.Attr) {
-	s.auditCtx(r.Context(), op, slug, attrs...)
-}
-
 func (s *Server) auditCtx(ctx context.Context, op, slug string, attrs ...slog.Attr) {
 	attrs = append([]slog.Attr{slog.String("op", op), slog.String("slug", slug)}, attrs...)
 	s.log.LogAttrs(ctx, slog.LevelInfo, "admin", attrs...)
@@ -212,42 +173,4 @@ func (s *Server) baseURL(r *http.Request) string {
 		return ""
 	}
 	return scheme + "://" + r.Host
-}
-
-// adminBackup streams a snapshot of the whole Store: every inbox, message, and
-// sealed secret. Only one runs at a time, since each holds a second copy of the
-// database on disk until it has been sent.
-func (s *Server) adminBackup(w http.ResponseWriter, r *http.Request) {
-	if !s.backupMu.TryLock() {
-		writeError(w, http.StatusConflict, "busy", "a backup is already running")
-		return
-	}
-	defer s.backupMu.Unlock()
-
-	start := time.Now()
-	ctx, cancel := s.closingContext(r.Context())
-	defer cancel()
-	snap, size, err := s.adm.Backup(ctx)
-	if err != nil {
-		s.adminError(w, r, "backup", err)
-		return
-	}
-	defer func() { _ = snap.Close() }()
-
-	// A big database can take longer to send than any write deadline.
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
-	h := w.Header()
-	h.Set("Content-Type", "application/vnd.sqlite3")
-	h.Set("Content-Disposition", `attachment; filename="hookinlet-`+s.opts.Now().UTC().Format("20060102-150405")+`.db"`)
-	h.Set("Content-Length", strconv.FormatInt(size, 10))
-	w.WriteHeader(http.StatusOK)
-	n, err := io.Copy(w, ctxReader{ctx, snap})
-	if err != nil {
-		// The status is sent, so all that can be done is to say so and let the
-		// connection break, which tells the client the file is not whole.
-		s.log.LogAttrs(r.Context(), slog.LevelWarn, "backup interrupted",
-			slog.Int64("sent", n), slog.Int64("size", size), slog.String("err", err.Error()))
-		return
-	}
-	s.audit(r, "backup", "", slog.Int64("size", size), slog.Duration("took", time.Since(start).Round(time.Millisecond)))
 }

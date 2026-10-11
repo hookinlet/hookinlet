@@ -13,7 +13,10 @@ import (
 )
 
 // requestKey carries the *http.Request to code that is handed only a context.
-const requestKey ctxKey = 1
+const (
+	requestKey ctxKey = 1
+	writerKey  ctxKey = 3
+)
 
 // adminHandlers is the generated wrapper around adminAPI.
 func (s *Server) adminHandlers() *api.ServerInterfaceWrapper {
@@ -31,10 +34,17 @@ func (s *Server) apiHandlers(impl api.StrictServerInterface) *api.ServerInterfac
 			writeError(w, http.StatusBadRequest, "invalid_request", "the request is not valid")
 		},
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-			if !errors.Is(err, context.Canceled) {
-				s.log.LogAttrs(r.Context(), slog.LevelError, "response failed", slog.String("err", err.Error()))
-				writeError(w, http.StatusInternalServerError, "internal", "internal error")
+			if errors.Is(err, context.Canceled) {
+				return
 			}
+			s.log.LogAttrs(r.Context(), slog.LevelError, "response failed", slog.String("err", err.Error()))
+			// If the status is already sent (a download that broke part way), all that
+			// can be done is to say so and let the connection break, which tells the
+			// client the body is not whole.
+			if sw, ok := w.(interface{ Wrote() bool }); ok && sw.Wrote() {
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		},
 	}
 	return &api.ServerInterfaceWrapper{

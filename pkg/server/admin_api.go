@@ -8,10 +8,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hookinlet/hookinlet/internal/admin"
@@ -336,4 +338,79 @@ func (a *adminAPI) RunRetention(ctx context.Context, _ api.RunRetentionRequestOb
 	}
 	a.s.auditCtx(ctx, "run retention", "", slog.Int64("deleted", n), slog.Duration("took", time.Since(start).Round(time.Millisecond)))
 	return api.RunRetention200JSONResponse{Body: api.Deleted{Deleted: int(n)}, Headers: api.RunRetention200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
+}
+
+// Backup streams a snapshot of the whole Store: every inbox, message, and sealed
+// secret. Only one runs at a time, since each holds a second copy of the database
+// on disk until it has been sent.
+func (a *adminAPI) Backup(ctx context.Context, _ api.BackupRequestObject) (api.BackupResponseObject, error) {
+	s := a.s
+	if !s.backupMu.TryLock() {
+		return api.Backup409JSONResponse{ConflictJSONResponse: conflict(ctx, fail{http.StatusConflict, "busy", "a backup is already running", "backup"})}, nil
+	}
+	start := time.Now()
+	bctx, cancel := s.closingContext(ctx)
+	snap, size, err := s.adm.Backup(bctx)
+	if err != nil {
+		cancel()
+		s.backupMu.Unlock()
+		f := s.classify(ctx, "backup", err)
+		switch f.status {
+		case http.StatusConflict:
+			return api.Backup409JSONResponse{ConflictJSONResponse: conflict(ctx, f)}, nil
+		case http.StatusNotImplemented:
+			return api.Backup501JSONResponse{NotImplementedJSONResponse: notImplemented(ctx, f)}, nil
+		}
+		return api.Backup500JSONResponse{InternalJSONResponse: s.fell(ctx, f)}, nil
+	}
+	// A big database can take longer to send than any write deadline.
+	if w, ok := ctx.Value(writerKey).(http.ResponseWriter); ok {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+	}
+	return api.Backup200ApplicationvndSqlite3Response{
+		Body:          &backupBody{s: s, ctx: bctx, cancel: cancel, snap: snap, size: size, start: start},
+		ContentLength: size,
+		Headers: api.Backup200ResponseHeaders{
+			ContentDisposition: `attachment; filename="hookinlet-` + s.opts.Now().UTC().Format("20060102-150405") + `.db"`,
+			ContentLength:      int(size), XRequestId: requestIDOf(ctx),
+		},
+	}, nil
+}
+
+// backupBody is the snapshot being sent. It releases the backup lock when the
+// response is finished with it, and records how it went.
+type backupBody struct {
+	s      *Server
+	ctx    context.Context
+	cancel context.CancelFunc
+	snap   io.ReadCloser
+	size   int64
+	start  time.Time
+	sent   int64
+	once   sync.Once
+}
+
+func (b *backupBody) Read(p []byte) (int, error) {
+	if err := b.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := b.snap.Read(p)
+	b.sent += int64(n)
+	switch {
+	case errors.Is(err, io.EOF):
+		b.s.auditCtx(b.ctx, "backup", "", slog.Int64("size", b.size), slog.Duration("took", time.Since(b.start).Round(time.Millisecond)))
+	case err != nil:
+		b.s.log.LogAttrs(b.ctx, slog.LevelWarn, "backup interrupted",
+			slog.Int64("sent", b.sent), slog.Int64("size", b.size), slog.String("err", err.Error()))
+	}
+	return n, err
+}
+
+func (b *backupBody) Close() error {
+	b.once.Do(func() {
+		_ = b.snap.Close()
+		b.cancel()
+		b.s.backupMu.Unlock()
+	})
+	return nil
 }
