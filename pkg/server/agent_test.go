@@ -48,7 +48,7 @@ func newAgentEnv(t *testing.T) *agentEnv {
 		if err != nil {
 			t.Fatal(err)
 		}
-		in := &inbox.Inbox{Slug: slug, Name: "Inbox " + slug, Verifier: "none", AgentTokenHash: hash}
+		in := &inbox.Inbox{Slug: slug, Name: "Inbox " + slug, Verifier: "trusted", AgentTokenHash: hash}
 		if err := e.store.CreateInbox(t.Context(), in); err != nil {
 			t.Fatal(err)
 		}
@@ -242,7 +242,7 @@ func TestAnAuthenticatorFailureIsAServerError(t *testing.T) {
 
 func TestReadAPIIsOffWithoutAnAuthenticator(t *testing.T) {
 	e := newEnv(t) // no Authenticator
-	e.newInbox("quiet-box", "none", "")
+	e.newInbox("quiet-box", "trusted", "")
 	for _, path := range []string{"/v1/inboxes/quiet-box", "/v1/inboxes/quiet-box/messages"} {
 		if rec := e.get(path, "anything"); rec.Code != http.StatusNotFound {
 			t.Errorf("%s: status %d, want 404 (not served)", path, rec.Code)
@@ -278,7 +278,7 @@ func TestInboxInfo(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	info := decode[map[string]any](t, rec)
-	want := map[string]any{"slug": "agent-a", "name": "Inbox agent-a", "verifier": "none", "message_count": 3.0, "oldest_seq": 1.0, "latest_seq": 3.0}
+	want := map[string]any{"slug": "agent-a", "name": "Inbox agent-a", "verifier": "trusted", "message_count": 3.0, "oldest_seq": 1.0, "latest_seq": 3.0}
 	if len(info) != len(want) {
 		t.Errorf("info has fields %v, want exactly %v", info, want)
 	}
@@ -308,7 +308,7 @@ func TestMessageResponse(t *testing.T) {
 	}
 	m := decode[apiMessage](t, rec)
 	if m.Seq != 1 || m.Inbox != "agent-a" || m.Method != "PUT" || m.Path != "orders/9" || m.Query != "x=1" || m.ContentType != "application/json" ||
-		m.Verified != true || m.Verifier != "none" || m.Size != int64(len(`{"id":42,"ok":true}`)) || m.SourceIP == nil || *m.SourceIP != "198.51.100.4" {
+		m.Verified != true || m.Verifier != "trusted" || m.Size != int64(len(`{"id":42,"ok":true}`)) || m.SourceIP == nil || *m.SourceIP != "198.51.100.4" {
 		t.Errorf("message = %+v", m)
 	}
 	if string(m.Body) != `{"id":42,"ok":true}` || m.BodyText != nil || m.BodyBase64 != nil {
@@ -442,7 +442,7 @@ func TestRawReturnsTheExactBytesAndContentType(t *testing.T) {
 		hdr := http.Header{"Content-Type": {c.ctype}}
 		in := e.a
 		if c.name == "large" {
-			in = e.newInbox("big-raw", "none", "", func(in *inbox.Inbox) { in.MaxBodyBytes = inbox.MaxBodyBytesCeiling })
+			in = e.newInbox("big-raw", "trusted", "", func(in *inbox.Inbox) { in.MaxBodyBytes = inbox.MaxBodyBytesCeiling })
 		}
 		if rec := e.do(req{path: "/in/" + in.Slug, body: string(c.body), headers: hdr}); rec.Code != http.StatusOK {
 			t.Fatalf("%s: ingest status %d", c.name, rec.Code)

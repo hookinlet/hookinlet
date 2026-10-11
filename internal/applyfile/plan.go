@@ -123,6 +123,9 @@ func Plan(s Spec, cur *admin.View) Item {
 	if cur == nil {
 		it.Action = Create
 		p := admin.CreateParams{Slug: s.Slug, VerifierConfig: json.RawMessage(`{}`)}
+		if s.IngestKey != nil {
+			p.IngestKey = *s.IngestKey
+		}
 		if s.Name != nil {
 			p.Name = *s.Name
 		}
@@ -220,6 +223,12 @@ func sameJSON(a, b json.RawMessage) bool {
 // verifier and leave the configuration, or the reverse.
 func (it Item) Check(cur *admin.View) error {
 	s := it.Spec
+	if cur == nil && s.Verifier == nil {
+		return s.errorf("a new inbox needs a verifier: name how its deliveries are checked, or none to accept anything unchecked")
+	}
+	if cur != nil && s.IngestKey != nil && *s.IngestKey != cur.IngestKey {
+		return s.errorf("ingest_key cannot be changed by apply; remove it from the file, or run: hookinlet inbox rotate-ingest-key %s", s.Slug)
+	}
 	if s.Verifier == nil && s.VerifierConfig == nil {
 		return nil
 	}
@@ -235,6 +244,30 @@ func (it Item) Check(cur *admin.View) error {
 	}
 	if err := admin.CheckSettings(admin.CreateParams{Slug: s.Slug, Verifier: verifier, VerifierConfig: config}); err != nil {
 		return s.errorf("verifier %s with its configuration: %s", verifier, strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "))
+	}
+	return nil
+}
+
+// CheckSecret refuses, before anything is changed, a secret that the verifier the
+// inbox will have cannot use. Standard Webhooks, for one, needs whsec_ followed
+// by base64.
+func (it Item) CheckSecret(cur *admin.View, secret string) error {
+	if secret == "" {
+		return nil
+	}
+	s := it.Spec
+	verifier, config := "none", json.RawMessage(`{}`)
+	if cur != nil {
+		verifier, config = cur.Verifier, cur.VerifierConfig
+	}
+	if s.Verifier != nil {
+		verifier = *s.Verifier
+	}
+	if s.VerifierConfig != nil {
+		config = *s.VerifierConfig
+	}
+	if err := admin.CheckSecret(verifier, config, secret); err != nil {
+		return s.errorAt(s.SecretLine, "the secret cannot be used by the %s verifier: %s", verifier, strings.TrimPrefix(err.Error(), inbox.ErrInvalid.Error()+": "))
 	}
 	return nil
 }

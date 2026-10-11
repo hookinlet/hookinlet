@@ -49,7 +49,7 @@ func TestUnverifiedDeliveriesGetNoEventTypeFromThePointer(t *testing.T) {
 // can hold connections and buffers open indefinitely.
 func TestSlowBodiesAreCutOff(t *testing.T) {
 	e := newEnv(t, func(o *Options) { o.ReadBodyTimeout = 200 * time.Millisecond })
-	in := e.newInbox("slow-box", "none", "")
+	in := e.newInbox("slow-box", "trusted", "")
 	ts := httptest.NewServer(e.server.Handler())
 	defer ts.Close()
 

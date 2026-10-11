@@ -28,6 +28,7 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/secretbox"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
+	"github.com/hookinlet/hookinlet/pkg/verify"
 )
 
 // ---- environment ----
@@ -150,6 +151,14 @@ func newEnv(t *testing.T, mods ...func(*Options)) *env {
 		Hooks:     e.hooks,
 		Now:       func() time.Time { return serverNow },
 	}
+	// Most tests need deliveries that count as verified without a signature
+	// to compute; "trusted" is a verifier that passes everything as such. The
+	// built-in "none" is for the tests about what "none" means.
+	reg := verify.Default()
+	if err := reg.Register("trusted", func(json.RawMessage) (verify.Verifier, error) { return trusted{}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	opts.Verifiers = reg
 	for _, m := range mods {
 		m(&opts)
 	}
@@ -292,7 +301,7 @@ func stripeSig(secret, ts, body string) string {
 
 func TestIngestRejectsOtherMethods(t *testing.T) {
 	e := newEnv(t)
-	in := e.newInbox("methods", "none", "")
+	in := e.newInbox("methods", "trusted", "")
 	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodDelete, http.MethodPatch, http.MethodOptions, "PROPFIND"} {
 		for _, path := range []string{"/in/methods", "/in/methods/sub/path", "/in/does-not-exist"} {
 			rec := e.do(req{method: method, path: path, body: "x"})
@@ -326,8 +335,8 @@ func TestIngestRejectsOtherMethods(t *testing.T) {
 
 func TestIngestNotFound(t *testing.T) {
 	e := newEnv(t)
-	off := e.newInbox("switched-off", "none", "", func(in *inbox.Inbox) { in.Disabled = true })
-	e.newInbox("live-inbox", "none", "")
+	off := e.newInbox("switched-off", "trusted", "", func(in *inbox.Inbox) { in.Disabled = true })
+	e.newInbox("live-inbox", "trusted", "")
 
 	var bodies []string
 	for _, path := range []string{"/in/no-such-inbox", "/in/switched-off", "/in/switched-off/with/suffix", "/in/LIVE-INBOX", "/in/live-inbox%2Fx", "/in/%00"} {
@@ -364,7 +373,7 @@ func TestIngestNotFound(t *testing.T) {
 
 func TestIngestBodyLimit(t *testing.T) {
 	e := newEnv(t)
-	in := e.newInbox("limited", "none", "", func(in *inbox.Inbox) { in.MaxBodyBytes = 100 })
+	in := e.newInbox("limited", "trusted", "", func(in *inbox.Inbox) { in.MaxBodyBytes = 100 })
 	exact, over := strings.Repeat("a", 100), strings.Repeat("a", 101)
 
 	// A body exactly at the limit is stored, byte for byte.
@@ -414,7 +423,7 @@ func TestIngestBodyLimit(t *testing.T) {
 
 func TestIngestTreatsThePathAndQueryAsData(t *testing.T) {
 	e := newEnv(t)
-	in := e.newInbox("paths", "none", "")
+	in := e.newInbox("paths", "trusted", "")
 	for _, path := range []string{"/in/paths", "/in/paths/", "/in/paths/a/b/c", "/in/paths/a%2Fb", "/in/paths/x?y=1&z=%20"} {
 		if rec := e.post(path, "x"); rec.Code != http.StatusOK {
 			t.Fatalf("%s: status %d", path, rec.Code)
@@ -434,7 +443,7 @@ func TestIngestTreatsThePathAndQueryAsData(t *testing.T) {
 
 func TestIngestStoresTheDeliveryExactly(t *testing.T) {
 	e := newEnv(t)
-	in := e.newInbox("exact", "none", "")
+	in := e.newInbox("exact", "trusted", "")
 	body := string([]byte{0xff, 0xfe, 0x00, 'h', 'i', 0x80, '\r', '\n'})
 
 	rec := e.do(req{
@@ -482,7 +491,7 @@ func TestIngestStoresTheDeliveryExactly(t *testing.T) {
 func TestIngestVerifiers(t *testing.T) {
 	t.Run("none accepts anything", func(t *testing.T) {
 		e := newEnv(t)
-		e.newInbox("open", "none", "")
+		e.newInbox("open", "trusted", "")
 		if rec := e.post("/in/open", "x"); rec.Code != http.StatusOK {
 			t.Errorf("status %d", rec.Code)
 		}
@@ -726,30 +735,53 @@ func TestDuplicateDeliveries(t *testing.T) {
 	}
 
 	first := seqOf(t, send(`{"n":1}`, "delivery-A"))
-	again := seqOf(t, send(`{"n":1}`, "delivery-A"))
-	third := seqOf(t, send(`{"n":1,"retry":true}`, "delivery-A")) // GitHub may redeliver with identical id
-	if again != first || third != first {
-		t.Fatalf("a duplicate got seq %d and %d, want the original %d", again, third, first)
+	again := seqOf(t, send(`{"n":1}`, "delivery-A")) // GitHub redelivers the same request
+	if again != first {
+		t.Fatalf("a redelivery got seq %d, want the original %d", again, first)
 	}
-	if n := e.count(in); n != 1 {
-		t.Fatalf("%d rows for one delivery", n)
+	// GitHub's delivery id is a header that the signature does not cover, so the same
+	// id with another body is another delivery, not a duplicate: otherwise whoever
+	// captured one signed request could use up ids ahead of the real deliveries.
+	third := seqOf(t, send(`{"n":1,"retry":true}`, "delivery-A"))
+	if third != first+1 {
+		t.Fatalf("a different body under a used id got seq %d, want a new message %d", third, first+1)
+	}
+	if n := e.count(in); n != 2 {
+		t.Fatalf("%d rows, want 2", n)
 	}
 	other := seqOf(t, send(`{"n":2}`, "delivery-B"))
-	if other != first+1 {
-		t.Errorf("a different delivery got seq %d, want %d", other, first+1)
+	if other != third+1 {
+		t.Errorf("a different delivery got seq %d, want %d", other, third+1)
 	}
-	if m := e.messages(in)[0]; string(m.Body) != `{"n":1}` {
-		t.Errorf("the original was overwritten: %s", m.Body)
+	msgs := e.messages(in)
+	if string(msgs[0].Body) != `{"n":1}` || msgs[0].DeliveryID != "delivery-A" || msgs[1].DeliveryID != "delivery-A" {
+		t.Errorf("the original was overwritten, or the id was not kept: %s %q", msgs[0].Body, msgs[1].DeliveryID)
 	}
 
 	if got := e.hooks.after(); !reflect.DeepEqual(got, []afterCall{
-		{"dups", 1, true}, {"dups", 1, false}, {"dups", 1, false}, {"dups", 2, true},
+		{"dups", 1, true}, {"dups", 1, false}, {"dups", 2, true}, {"dups", 3, true},
 	}) {
 		t.Errorf("AfterIngest calls = %v", got)
 	}
 	// Only newly stored messages are announced.
-	if got := e.notifier.published(); len(got) != 2 || got[0].seq != 1 || got[1].seq != 2 {
+	if got := e.notifier.published(); len(got) != 3 || got[0].seq != 1 || got[1].seq != 2 || got[2].seq != 3 {
 		t.Errorf("Publish calls = %v, want one per new message", got)
+	}
+}
+
+// Where the signature covers the delivery id, the id alone is enough.
+func TestDuplicateDeliveriesWithASignedID(t *testing.T) {
+	e := newEnv(t)
+	in := e.newInbox("signed-ids", "stripe", "whsec_s")
+	send := func(body string) int64 {
+		return seqOf(t, e.post("/in/signed-ids", body, "Stripe-Signature", stripeSig("whsec_s", signedTS, body)))
+	}
+	first := send(`{"id":"evt_1","type":"a"}`)
+	if again := send(`{"id":"evt_1","type":"a"}`); again != first {
+		t.Errorf("a redelivery got seq %d, want %d", again, first)
+	}
+	if n := e.count(in); n != 1 {
+		t.Errorf("%d rows", n)
 	}
 }
 
@@ -844,7 +876,7 @@ func TestHooksCanRejectDeliveries(t *testing.T) {
 
 func TestHooksSeeTheInboxAndBodySize(t *testing.T) {
 	e := newEnv(t)
-	e.newInbox("sized", "none", "")
+	e.newInbox("sized", "trusted", "")
 	e.post("/in/sized", strings.Repeat("z", 1234))
 	e.post("/in/sized", "")
 	if got := e.hooks.beforeCalls(); !reflect.DeepEqual(got, []string{"sized:1234", "sized:0"}) {
@@ -855,7 +887,7 @@ func TestHooksSeeTheInboxAndBodySize(t *testing.T) {
 func TestPostCommitFailuresDoNotUndoAnAcknowledgedDelivery(t *testing.T) {
 	t.Run("AfterIngest panics", func(t *testing.T) {
 		e := newEnv(t)
-		in := e.newInbox("boom-hook", "none", "")
+		in := e.newInbox("boom-hook", "trusted", "")
 		e.hooks.afterBoom = true
 		rec := e.post("/in/boom-hook", "x")
 		if seqOf(t, rec) != 1 || e.count(in) != 1 {
@@ -867,7 +899,7 @@ func TestPostCommitFailuresDoNotUndoAnAcknowledgedDelivery(t *testing.T) {
 	})
 	t.Run("Publish panics", func(t *testing.T) {
 		e := newEnv(t)
-		in := e.newInbox("boom-notify", "none", "")
+		in := e.newInbox("boom-notify", "trusted", "")
 		e.notifier.boom = true
 		rec := e.post("/in/boom-notify", "x")
 		if seqOf(t, rec) != 1 || e.count(in) != 1 {
@@ -878,7 +910,7 @@ func TestPostCommitFailuresDoNotUndoAnAcknowledgedDelivery(t *testing.T) {
 
 func TestNotifierPublishedAfterCommit(t *testing.T) {
 	e := newEnv(t)
-	in := e.newInbox("announce", "none", "")
+	in := e.newInbox("announce", "trusted", "")
 	// By the time Publish runs, the message must already be readable.
 	var seenInStore bool
 	e.server.opts.Notifier = notifierFunc(func(ctx context.Context, id inbox.ID, seq int64) {
@@ -903,7 +935,7 @@ func (f notifierFunc) Subscribe(context.Context, inbox.ID) (<-chan struct{}, fun
 
 func TestEventTypePointer(t *testing.T) {
 	e := newEnv(t)
-	in := e.newInbox("typed", "none", "", func(in *inbox.Inbox) { in.EventTypePointer = "/meta/type" })
+	in := e.newInbox("typed", "trusted", "", func(in *inbox.Inbox) { in.EventTypePointer = "/meta/type" })
 	for _, body := range []string{
 		`{"meta":{"type":"user.created"}}`,                     // found
 		`{"meta":{"kind":"user.created"}}`,                     // missing
@@ -976,7 +1008,7 @@ func TestClientIP(t *testing.T) {
 
 func TestIngestUsesTrustedProxies(t *testing.T) {
 	e := newEnv(t, func(o *Options) { o.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")} })
-	in := e.newInbox("proxied", "none", "")
+	in := e.newInbox("proxied", "trusted", "")
 	e.do(req{path: "/in/proxied", body: "x", remote: "10.0.0.1:1", headers: http.Header{"X-Forwarded-For": {"198.51.100.20"}}})
 	e.do(req{path: "/in/proxied", body: "x", remote: "198.51.100.99:1", headers: http.Header{"X-Forwarded-For": {"1.1.1.1"}}})
 	var ips []string
@@ -1067,7 +1099,7 @@ func TestManyConcurrentDeliveries(t *testing.T) {
 
 func TestRequestBodyReadErrorsAreNotServerErrors(t *testing.T) {
 	e := newEnv(t)
-	in := e.newInbox("aborted", "none", "")
+	in := e.newInbox("aborted", "trusted", "")
 	hr := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/in/aborted", io.NopCloser(errReader{}))
 	rec := httptest.NewRecorder()
 	e.server.Handler().ServeHTTP(rec, hr)
@@ -1082,3 +1114,11 @@ func TestRequestBodyReadErrorsAreNotServerErrors(t *testing.T) {
 type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("connection reset by peer") }
+
+// trusted is a verifier for tests: it accepts every delivery and says it was
+// checked.
+type trusted struct{}
+
+func (trusted) Verify(*http.Request, []byte, []byte, time.Time) (verify.Result, error) {
+	return verify.Result{}, nil
+}

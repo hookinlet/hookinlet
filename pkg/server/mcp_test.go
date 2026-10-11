@@ -1188,7 +1188,7 @@ func TestListInboxesForAnAgentTokenDoesNotSearchOrRevealOthers(t *testing.T) {
 	lc := &listCounter{}
 	ae, base, _ := mcpEnv(t, func(o *Options) { lc.Store = o.Store; o.Store = lc })
 	for i := range 120 {
-		ae.newInbox(fmt.Sprintf("other-%03d", i), "none", "")
+		ae.newInbox(fmt.Sprintf("other-%03d", i), "trusted", "")
 	}
 	ae.post("/in/agent-a", "x")
 	cs := connectMCP(t, base, ae.tokenA)
@@ -1291,7 +1291,7 @@ func TestListInboxesDoesNotRevealHowManyInboxesExist(t *testing.T) {
 	t.Cleanup(func() { mcpListScan = old })
 	ae, base, _ := mcpEnv(t, func(o *Options) { o.Authenticator = multiAuth{o.Authenticator} })
 	for i := 1; i <= 10; i++ {
-		ae.newInbox(fmt.Sprintf("inbox-%02d", i), "none", "")
+		ae.newInbox(fmt.Sprintf("inbox-%02d", i), "trusted", "")
 	}
 	cs := connectMCP(t, base, "multi")
 	var l listInboxesOutput

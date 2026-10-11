@@ -165,7 +165,7 @@ func TestTheProgramAnswers429WhenTheLimitIsReached(t *testing.T) {
 		_, _ = b.ReadFrom(resp.Body)
 		return resp.StatusCode, b.String()
 	}
-	if status, body := call("POST", "/admin/inboxes", `{"slug":"limited-inbox"}`, true); status != http.StatusCreated {
+	if status, body := call("POST", "/admin/inboxes", `{"slug":"limited-inbox","ingest_key":"limited-inbox","verifier":"none"}`, true); status != http.StatusCreated {
 		t.Fatalf("create: %d %s", status, body)
 	}
 	var got []int

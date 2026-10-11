@@ -124,6 +124,8 @@ func applyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 	for _, it := range items {
 		if err := it.Check(current[it.Spec.Slug]); err != nil {
 			planErrs = append(planErrs, err)
+		} else if err := it.CheckSecret(current[it.Spec.Slug], secrets[it.Spec.Slug]); err != nil {
+			planErrs = append(planErrs, err)
 		}
 	}
 	if len(planErrs) > 0 {

@@ -95,7 +95,7 @@ func newAgentEnv2(t *testing.T, mods ...func(*Options)) *agentEnv {
 	t.Helper()
 	e := newEnv(t, append([]func(*Options){withAuth}, mods...)...)
 	ae := &agentEnv{env: e}
-	a := e.newInbox("agent-a", "none", "")
+	a := e.newInbox("agent-a", "trusted", "")
 	ae.a = a
 	return ae
 }
@@ -154,7 +154,7 @@ func TestConcurrentReadsAreLimited(t *testing.T) {
 		withAuth,
 		func(o *Options) { o.MaxConcurrentReads = 1; o.ReadWaitTimeout = 100 * time.Millisecond },
 	)
-	in := e.newInbox("limited-reads", "none", "")
+	in := e.newInbox("limited-reads", "trusted", "")
 	_ = in
 
 	first := make(chan *httptest.ResponseRecorder, 1)
@@ -199,7 +199,7 @@ func TestAbandonedReadsGiveUpTheirPlaceInTheQueue(t *testing.T) {
 		withAuth,
 		func(o *Options) { o.MaxConcurrentReads = 1; o.ReadWaitTimeout = 30 * time.Second },
 	)
-	e.newInbox("queue-box", "none", "")
+	e.newInbox("queue-box", "trusted", "")
 	first := make(chan *httptest.ResponseRecorder, 1)
 	go func() { first <- e.get("/v1/inboxes/queue-box/messages", testAdminToken) }()
 	<-bs.entered

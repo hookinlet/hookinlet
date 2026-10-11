@@ -62,7 +62,8 @@ curl -sf localhost:8080/readyz      # {"status":"ready"}; if this fails, somethi
 
 Create an inbox that accepts only GitHub's signature, for a secret you choose. (This one is made up; a real one
 belongs in a file or a password manager, never in a command line.) The response carries the **agent token** that
-reads this inbox. It is shown once:
+reads this inbox. It is shown once, and so is the **ingest path**, the URL senders post to. Its last part is a random key, not the
+slug: whoever has it can post to the inbox, so it is not a name anyone can guess.
 
 <!-- exercise -->
 ```sh
@@ -72,6 +73,7 @@ curl -s -X POST localhost:8080/admin/inboxes \
 EOF
 
 export HOOKINLET_AGENT_TOKEN=$(sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p' created.json)
+export INGEST=$(sed -n 's/.*"ingest_path":"\([^"]*\)".*/\1/p' created.json)    # /in/<random key>
 ```
 
 Send an event signed the way GitHub signs them, HMAC-SHA256 of the body in `X-Hub-Signature-256`:
@@ -81,7 +83,7 @@ Send an event signed the way GitHub signs them, HMAC-SHA256 of the body in `X-Hu
 body='{"action":"opened","number":42,"pull_request":{"title":"Add retries"}}'
 sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac 'my-webhook-secret' -hex | sed 's/^.* //')
 
-curl -s -X POST localhost:8080/in/github-demo \
+curl -s -X POST localhost:8080$INGEST \
   -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: pull_request' \
   -H 'X-GitHub-Delivery: demo-1' -H 'Content-Type: application/json' -d "$body"
 ```
@@ -94,7 +96,7 @@ Change one character of the body and send the same signature. It is refused, and
 
 <!-- exercise -->
 ```sh
-curl -s -X POST localhost:8080/in/github-demo \
+curl -s -X POST localhost:8080$INGEST \
   -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: pull_request' \
   -H 'Content-Type: application/json' -d '{"action":"opened","number":43}'
 ```
@@ -130,15 +132,17 @@ Stripe's CLI forwards test events with a real signature. This is the same loop a
 account, so it is shown, not run by the tests):
 
 ```sh
-# forward test events; the CLI prints a signing secret, whsec_…
-stripe listen --forward-to localhost:8080/in/stripe
+# the signing secret Stripe will use, whsec_…
+secret=$(stripe listen --print-secret)
 
-# in another shell: create the inbox with that secret
+# create the inbox with that secret
 curl -s -X POST localhost:8080/admin/inboxes \
-  -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- <<'EOF'
-{"slug": "stripe", "verifier": "stripe", "verifier_secret": "whsec_…"}
+  -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- > created.json <<EOF
+{"slug": "stripe", "verifier": "stripe", "verifier_secret": "$secret"}
 EOF
-# the response carries the agent token; keep it in HOOKINLET_AGENT_TOKEN
+# keep the agent token in HOOKINLET_AGENT_TOKEN, as above, and forward Stripe's test events to the inbox
+INGEST=$(sed -n 's/.*"ingest_path":"\([^"]*\)".*/\1/p' created.json)
+stripe listen --forward-to localhost:8080$INGEST &
 
 # send some events, then read the inbox
 stripe trigger invoice.paid
@@ -152,7 +156,7 @@ curl -s 'localhost:8080/v1/inboxes/stripe/messages?after=0&fields=summary' \
 {"seq":5,"event_type":"invoice.paid","verified":true}
 ```
 
-For GitHub, Slack, or your own service, give the sender `https://<your-host>/in/<slug>` and the same secret. The
+For GitHub, Slack, or your own service, give the sender the inbox's `ingest_url` (the admin API shows it; `HOOKINLET_PUBLIC_BASE_URL` sets the host part) and the same secret. The
 server must be reachable from the internet for that: put it behind TLS, or use a tunnel to try it from a laptop.
 [Deploying](docs/deploying.md) covers what it needs.
 
@@ -220,9 +224,9 @@ REST, SSE, and MCP use the same cursor.
 > [!WARNING]
 > Everything in a message was written by whoever sent the webhook, including `verified` ones. `verified` means
 > the message passed its inbox's verifier: for a signing scheme, that the sender held the secret, which does not
-> make what it wrote true or safe. (An inbox whose verifier is `none`, the default, marks everything verified, so
-> use a real verifier for anything that matters.) An agent should treat message content as data to analyze and
-> never as instructions to follow.
+> make what it wrote true or safe. (An inbox whose verifier is `none`, which has to be asked for by name, stores
+> everything as **not** verified. Use a real verifier for anything that matters.) An agent should treat message
+> content as data to analyze and never as instructions to follow.
 
 ### Write a client
 
@@ -284,7 +288,7 @@ hookinlet inbox create --slug github --verifier github --retention-max-count 500
 | `standardwebhooks` | `webhook-id`, `webhook-timestamp`, `webhook-signature` (Svix and others) |
 | `hmac` | any header you name; sha1, sha256, sha384, or sha512; hex or base64 |
 | `token` | a shared token in a header you name |
-| `none` | nothing: it accepts everything and marks it verified |
+| `none` | nothing: it accepts everything and stores it as **not** verified |
 
 Checks run on the exact bytes that were sent, with constant-time comparisons, before anything is parsed. Details,
 and what each scheme does and does not prove, are in [verifiers](docs/verifiers.md).

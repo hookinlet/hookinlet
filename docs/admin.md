@@ -33,6 +33,7 @@ rotates it.
 | `GET /admin/inboxes/{slug}` | Show one, with its message count. |
 | `PATCH /admin/inboxes/{slug}` | Change settings. |
 | `PUT /admin/inboxes/{slug}/secret` | Set or replace the verifier secret. |
+| `POST /admin/inboxes/{slug}/rotate-ingest-key` | A new random ingest key. The old URL stops working at once; give senders the new one. |
 | `POST /admin/inboxes/{slug}/rotate-token` | New agent token, returned once. The old one stops working at once. |
 | `DELETE /admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). It is closed to deliveries and agents first, and its messages go in small batches so that other inboxes keep receiving; if it is interrupted, run it again. |
 | `POST /admin/retention/run` | Apply retention now. Returns `{"deleted": N}`. |
@@ -65,24 +66,33 @@ curl -s -X POST "$BASE/admin/inboxes" \
     "on_verify_fail": "reject", "max_body_bytes": 1048576,
     "retention_days": 30, "retention_max_count": 0, "event_type_pointer": "/type",
     "disabled": false, "last_seq": 0,
-    "ingest_path": "/in/stripe-api",
-    "ingest_url": "https://hooks.example.com/in/stripe-api",
+    "ingest_key": "q3V9xR1hT0kYz2mP8uWb6A",
+    "ingest_path": "/in/q3V9xR1hT0kYz2mP8uWb6A",
+    "ingest_url": "https://hooks.example.com/in/q3V9xR1hT0kYz2mP8uWb6A",
     "created_at": "…", "updated_at": "…"
   },
   "agent_token": "hki_…"
 }
 ```
 
-Only `slug` is required (3 to 64 characters from `a-z`, `0-9`, and `-`; it never
-changes). The other fields are `name`, `verifier` (default `none`),
-`verifier_config`, `verifier_secret`, `on_verify_fail` (`reject` or `store`),
+`slug` (3 to 64 characters from `a-z`, `0-9`, and `-`; it never changes) and
+`verifier` are required. There is no default verifier: say how deliveries are
+checked, or `none` to accept anything unchecked (stored as **not** verified). The
+other fields are `ingest_key`, `name`, `verifier_config`, `verifier_secret`, `on_verify_fail` (`reject` or `store`),
 `max_body_bytes` (default 1 MiB, at most 10 MiB), `retention_days`,
 `retention_max_count`, and `event_type_pointer`. The verifier and its
 configuration are checked when you save them, so a typo is an error now and not
 a failed delivery later. See [verifiers](verifiers.md).
 
 A verifier that needs a secret, created without one, comes with a `warnings`
-entry: deliveries fail until you set it.
+entry: deliveries fail until you set it. The same warning comes back from any
+change that leaves an inbox in that state.
+
+**The ingest key** is the `{key}` in the inbox's ingest URL, and it is a
+capability: whoever has it can post to the inbox. So it is random by default
+(128 bits), and not the slug. You may choose one (`ingest_key`, 3 to 64 characters
+from letters, digits, `_` and `-`) when a readable URL matters more than it being
+unguessable. `rotate-ingest-key` replaces it; messages stay where they are.
 
 `ingest_url` is built from `HOOKINLET_PUBLIC_BASE_URL` if set, and otherwise from
 the request's `Host` (using `X-Forwarded-Proto` only when the request came from
@@ -115,12 +125,13 @@ about 30 seconds.
 ```sh
 # against a running server (HOOKINLET_ADMIN_TOKEN holds the admin token)
 export HOOKINLET_URL=https://hooks.example.com
-hookinlet inbox create --slug stripe-prod --verifier stripe     # secret: HOOKINLET_VERIFIER_SECRET
+hookinlet inbox create --slug stripe-prod --verifier stripe     # secret: HOOKINLET_VERIFIER_SECRET (the verifier is required)
 hookinlet inbox list
 hookinlet inbox show stripe-prod
 hookinlet inbox update stripe-prod --retention-days 30 --disabled=false
 echo whsec_example | hookinlet inbox set-secret stripe-prod --secret-stdin
 hookinlet inbox rotate-token stripe-prod
+hookinlet inbox rotate-ingest-key stripe-prod
 hookinlet inbox delete stripe-prod --yes
 hookinlet retention run
 hookinlet backup --out hookinlet-backup.db
@@ -131,7 +142,7 @@ your shell, unset it first: giving both a server address and a data directory is
 
 ```sh
 unset HOOKINLET_URL
-hookinlet inbox create --slug stripe-prod --data-dir ./data
+hookinlet inbox create --slug stripe-prod --verifier stripe --data-dir ./data
 ```
 
 - **Which mode.** `--url` (or `HOOKINLET_URL`) selects the API and requires the
@@ -165,6 +176,7 @@ and rules.
 ```sh
 export HOOKINLET_URL=https://hooks.example.com          # and HOOKINLET_ADMIN_TOKEN, as above
 export STRIPE_WEBHOOK_SECRET=whsec_example              # the secret stays out of the file
+export DEPLOY_EVENTS_TOKEN=made-up-shared-token
 
 cat > inboxes.yaml <<'EOF'
 inboxes:
@@ -176,6 +188,8 @@ inboxes:
     retention_days: 30
     event_type_pointer: /type
   - slug: deploy-events
+    verifier: token
+    secret_env: DEPLOY_EVENTS_TOKEN
     retention_max_count: 50000
 EOF
 
@@ -190,20 +204,24 @@ The second command prints:
 created           stripe-live
 secret set        stripe-live
 created           deploy-events
+secret set        deploy-events
 
-2 created, 0 updated, 0 unchanged, 1 secrets set, 0 not managed
+2 created, 0 updated, 0 unchanged, 2 secrets set, 0 not managed
 agent tokens of the new inboxes were written to tokens.json
 ```
 
-The third prints `unchanged` for both inboxes, `secret set` for the first, and no
+The third prints `unchanged` for both inboxes, `secret set` for both, and no
 `created` lines.
 
 **The file.** One key, `inboxes`, a list. An entry is identified by its `slug`
-(3 to 64 characters from `a-z`, `0-9`, and `-`; it is the only required key, and
-it never changes). The other keys are the admin API's fields, with the same names
+(3 to 64 characters from `a-z`, `0-9`, and `-`; it never changes). A new inbox
+also needs a `verifier` (`none` is a choice, and a delivery it accepts is stored as
+not verified); an inbox that exists keeps its own if the file says nothing. The other keys are the admin API's fields, with the same names
 and the same rules, because the same code checks them: `name`, `verifier`,
 `verifier_config`, `on_verify_fail`, `max_body_bytes`, `retention_days`,
-`retention_max_count`, `event_type_pointer`, and `disabled`. `max_body_bytes`
+`retention_max_count`, `event_type_pointer`, and `disabled`. `ingest_key` may be
+declared for a new inbox (leave it out to get a random one, which is what an inbox
+should have); `apply` does not change the key of an inbox that exists. `max_body_bytes`
 cannot be `0` here: leave it out to get the default.
 
 **Secrets are never in the file.** A literal secret (`secret:` or

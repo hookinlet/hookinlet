@@ -591,10 +591,10 @@ func TestStandardWebhooksSecretIsCheckedWhenSet(t *testing.T) {
 	}
 	for secret, good := range map[string]bool{
 		"whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw": true,
-		"not-a-whsec":                           false,
-		"whsec_":                                false,
-		"whsec_!!!not base64!!!":                false,
-		"":                                      false,
+		"not-a-whsec":                            false,
+		"whsec_":                                 false,
+		"whsec_!!!not base64!!!":                 false,
+		"":                                       false,
 	} {
 		err := checker.CheckSecret([]byte(secret))
 		if (err == nil) != good {

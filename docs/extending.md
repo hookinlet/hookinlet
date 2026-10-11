@@ -108,8 +108,10 @@ suite is what makes it testable. The points that are easy to get wrong:
   the message: a wake-up followed by a read must not find it missing.
 - **The Store owns the clock** (UTC, microsecond precision), and `ReceivedAt`
   never decreases with `Seq` within an inbox.
-- **Deduplication** applies only to verified messages with a delivery id, so a
-  forged delivery cannot suppress the real one.
+- **Deduplication** applies only to verified messages, by `DedupeKey` (the
+  `DeliveryID` when it is empty), so a forged delivery cannot suppress the real
+  one. The server makes the key the id and a hash of the body when the id is not
+  covered by a signature.
 - **Secrets stay sealed.** A Store persists `VerifierSecret` verbatim and never
   sees plaintext, and returns inboxes whose `String` and log forms redact
   secrets and token hashes.

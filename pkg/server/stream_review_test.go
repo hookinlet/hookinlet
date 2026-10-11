@@ -155,7 +155,7 @@ func TestADeletedInboxEndsItsStreamWithoutAnySignal(t *testing.T) {
 		t.Error("the stream stayed open (and kept its slot) after its inbox was deleted")
 	}
 	// The slug is free again; a new inbox must not inherit the dead stream.
-	ae.newInbox("agent-b", "none", "")
+	ae.newInbox("agent-b", "trusted", "")
 }
 
 // flaky is a Store whose lookups fail on demand.
@@ -202,7 +202,7 @@ func TestATransientErrorWhileRecheckingDoesNotEndStreams(t *testing.T) {
 				withAuth,
 				func(o *Options) { o.StreamRevalidateInterval = 50 * time.Millisecond },
 			)
-			in := e.newInbox("agent-a", "none", "")
+			in := e.newInbox("agent-a", "trusted", "")
 			ae := &agentEnv{env: e, a: in}
 			ae.tokenA = ae.tokenFor(in)
 			base := serveOn(t, e)
@@ -346,7 +346,7 @@ func (n *ctxNotifier) Publish(ctx context.Context, _ inbox.ID, _ int64) {
 func TestPublishIsNotGivenTheRequestsContext(t *testing.T) {
 	n := &ctxNotifier{}
 	e := newEnv(t, func(o *Options) { o.Notifier = n })
-	e.newInbox("announce-ctx", "none", "")
+	e.newInbox("announce-ctx", "trusted", "")
 	e.post("/in/announce-ctx", "x")
 	if n.calls.Load() != 1 {
 		t.Fatalf("Publish was called %d times", n.calls.Load())

@@ -113,7 +113,9 @@ func TestOpenAPIRequestBodiesAreHeldToTheirSchemas(t *testing.T) {
 		okStatus     int
 	}
 	targets := []target{
-		{"createInbox", "POST", func(int) string { return "/admin/inboxes" }, func(n int) map[string]any { return map[string]any{"slug": fmt.Sprintf("neg-%03d", n)} }, 201},
+		{"createInbox", "POST", func(int) string { return "/admin/inboxes" }, func(n int) map[string]any {
+			return map[string]any{"slug": fmt.Sprintf("neg-%03d", n), "verifier": "none"}
+		}, 201},
 		{"updateInbox", "PATCH", func(int) string { return "/admin/inboxes/agent-a" }, func(int) map[string]any { return map[string]any{"name": "ok"} }, 200},
 		{"setVerifierSecret", "PUT", func(int) string { return "/admin/inboxes/agent-a/secret" }, func(int) map[string]any { return map[string]any{"secret": "ok"} }, 200},
 	}

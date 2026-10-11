@@ -115,7 +115,7 @@ func (e *applyEnv) views() map[string]admin.View {
 // deliver posts to an inbox with the token verifier's header.
 func (e *applyEnv) deliver(slug, tokenHeader string) int {
 	e.t.Helper()
-	req, _ := http.NewRequestWithContext(e.t.Context(), http.MethodPost, e.url+"/in/"+slug, strings.NewReader(`{"n":1}`))
+	req, _ := http.NewRequestWithContext(e.t.Context(), http.MethodPost, e.url+"/in/"+e.views()[slug].IngestKey, strings.NewReader(`{"n":1}`))
 	req.Header.Set("X-Inbox-Token", tokenHeader)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -289,7 +289,7 @@ func TestApplyCreatesThenIsIdempotentThenUpdates(t *testing.T) {
 func TestApplyWithoutTokensOutRefusesToCreate(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: new-one\n  - slug: new-two\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: new-one\n    verifier: none\n  - slug: new-two\n    verifier: none\n")
 	for _, args := range [][]string{{"apply", "-f", f}, {"apply", "-f", f, "--dry-run"}} {
 		code, out, errOut := runCmd(t, e.env(nil), args...)
 		if code != exitUsage || !strings.Contains(errOut, "--tokens-out") {
@@ -312,7 +312,7 @@ func TestApplyWithoutTokensOutRefusesToCreate(t *testing.T) {
 func TestApplyTokensOutIsCheckedBeforeAnyChange(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: new-one\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: new-one\n    verifier: none\n")
 	existing := writeTestFile(t, dir, "taken.json", "precious")
 	link := filepath.Join(dir, "link.json")
 	if err := os.Symlink(existing, link); err != nil {
@@ -395,15 +395,15 @@ func TestApplyChecksTheWholeFileBeforeTouchingTheServer(t *testing.T) {
 		yaml, wantErr string
 		env           map[string]string
 	}{
-		"unknown key in the second inbox":  {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    retenton_days: 3\n", "line 4", nil},
+		"unknown key in the second inbox":  {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: bad-one\n    verifier: none\n    retenton_days: 3\n", "line 6", nil},
 		"literal secret":                   {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret: abc\n", "secret_env", nil},
 		"missing environment variable":     {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret_env: NOT_SET_ANYWHERE\n", "line 5", nil},
 		"missing secret file":              {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: token\n    secret_file: " + filepath.Join(dir, "absent") + "\n", "line 5", nil},
-		"configuration without a verifier": {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier_config: {tolerance_seconds: 300}\n", "bad-one", nil},
-		"a blank value":                    {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    retention_days:\n", "leave the key out", nil},
-		"an empty on_verify_fail":          {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    on_verify_fail: ''\n", "on_verify_fail must be one of", nil},
+		"configuration without a verifier": {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: bad-one\n    verifier: none\n    verifier_config: {tolerance_seconds: 300}\n", "bad-one", nil},
+		"a blank value":                    {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: bad-one\n    verifier: none\n    retention_days:\n", "leave the key out", nil},
+		"an empty on_verify_fail":          {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: bad-one\n    verifier: none\n    on_verify_fail: ''\n", "on_verify_fail must be one of", nil},
 		"bad verifier configuration":       {"inboxes:\n  - slug: good-one\n  - slug: bad-one\n    verifier: stripe\n    verifier_config: {tolerance_seconds: soon}\n", "tolerance", nil},
-		"bad slug":                         {"inboxes:\n  - slug: good-one\n  - slug: Bad_One\n", "slug must be", nil},
+		"bad slug":                         {"inboxes:\n  - slug: good-one\n    verifier: none\n  - slug: Bad_One\n    verifier: none\n", "slug must be", nil},
 	} {
 		f := writeTestFile(t, dir, "bad.yaml", tc.yaml)
 		code, out, errOut := runCmd(t, e.env(tc.env), "apply", "-f", f, "--tokens-out", tokens)
@@ -429,13 +429,13 @@ func TestApplyNeverDeletesAndListsWhatItDoesNotManage(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
 	env := e.env(nil)
-	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "legacy-inbox"); code != 0 {
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "legacy-inbox", "--verifier", "none"); code != 0 {
 		t.Fatal(errOut)
 	}
-	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "other-legacy"); code != 0 {
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "other-legacy", "--verifier", "none"); code != 0 {
 		t.Fatal(errOut)
 	}
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: managed-one\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: managed-one\n    verifier: none\n")
 	code, out, errOut := runCmd(t, env, "apply", "-f", f, "--tokens-out", filepath.Join(dir, "t.json"))
 	if code != 0 {
 		t.Fatal(errOut)
@@ -457,7 +457,7 @@ func TestApplyStopsAtAServerRefusalAndKeepsTheTokensAlreadyIssued(t *testing.T) 
 	dir := t.TempDir()
 	// A verifier this binary does not know passes the file check (a server
 	// may have registered it) and is refused by the server.
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-one\n  - slug: second-one\n    verifier: custom-thing\n  - slug: third-one\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-one\n    verifier: none\n  - slug: second-one\n    verifier: custom-thing\n  - slug: third-one\n    verifier: none\n")
 	tokens := filepath.Join(dir, "t.json")
 	code, out, errOut := runCmd(t, e.env(nil), "apply", "-f", f, "--tokens-out", tokens)
 	if code != exitRuntime || !strings.Contains(errOut, "second-one") || !strings.Contains(errOut, "unknown verifier") {
@@ -479,7 +479,7 @@ func TestApplyStopsAtAServerRefusalAndKeepsTheTokensAlreadyIssued(t *testing.T) 
 func TestApplyFromStandardInputAndJSON(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
-	stdin = strings.NewReader("inboxes:\n  - slug: piped-one\n    retention_days: 2\n")
+	stdin = strings.NewReader("inboxes:\n  - slug: piped-one\n    verifier: none\n    retention_days: 2\n")
 	t.Cleanup(func() { stdin = os.Stdin })
 	tokens := filepath.Join(dir, "t.json")
 	code, out, errOut := runCmd(t, e.env(nil), "apply", "-f", "-", "--json", "--tokens-out", tokens)
@@ -571,11 +571,11 @@ func TestApplyDoesNotTreatABlankValueAsASetting(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
 	tokens := filepath.Join(dir, "t.json")
-	first := writeTestFile(t, dir, "a.yaml", "inboxes:\n  - slug: kept-one\n    retention_days: 30\n    disabled: true\n")
+	first := writeTestFile(t, dir, "a.yaml", "inboxes:\n  - slug: kept-one\n    verifier: none\n    retention_days: 30\n    disabled: true\n")
 	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", first, "--tokens-out", tokens); code != 0 {
 		t.Fatal(errOut)
 	}
-	blank := writeTestFile(t, dir, "b.yaml", "inboxes:\n  - slug: kept-one\n    retention_days:\n    disabled:\n")
+	blank := writeTestFile(t, dir, "b.yaml", "inboxes:\n  - slug: kept-one\n    verifier: none\n    retention_days:\n    disabled:\n")
 	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", blank); code != exitUsage || !strings.Contains(errOut, "leave the key out") {
 		t.Errorf("a blank value was accepted: %d %q", code, errOut)
 	}
@@ -590,7 +590,7 @@ func TestApplyLeavesNoEmptyTokensFileAndNothingHalfDone(t *testing.T) {
 	e := newApplyEnv(t)
 	dir := t.TempDir()
 	tokens := filepath.Join(dir, "t.json")
-	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-ok\n  - slug: second-bad\n    verifier_config: {tolerance_seconds: 300}\n")
+	f := writeTestFile(t, dir, "i.yaml", "inboxes:\n  - slug: first-ok\n    verifier: none\n  - slug: second-bad\n    verifier: none\n    verifier_config: {tolerance_seconds: 300}\n")
 	if code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", f, "--tokens-out", tokens); code != exitUsage {
 		t.Fatalf("%d %s", code, errOut)
 	}
@@ -607,7 +607,7 @@ func TestApplyLeavesNoEmptyTokensFileAndNothingHalfDone(t *testing.T) {
 	}
 	// After a partial failure the file holds what was issued, and the message says
 	// to give the next run a new file.
-	h := writeTestFile(t, dir, "k.yaml", "inboxes:\n  - slug: made-one\n  - slug: refused-one\n    verifier: custom-thing\n")
+	h := writeTestFile(t, dir, "k.yaml", "inboxes:\n  - slug: made-one\n    verifier: none\n  - slug: refused-one\n    verifier: custom-thing\n")
 	code, _, errOut := runCmd(t, e.env(nil), "apply", "-f", h, "--tokens-out", tokens)
 	if code != exitRuntime || !strings.Contains(errOut, "new file") {
 		t.Errorf("code %d err %q", code, errOut)

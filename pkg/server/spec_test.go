@@ -125,7 +125,7 @@ func TestTheGuardsRunAfterAuthentication(t *testing.T) {
 
 func TestAdminBodiesAreHeldToTheDocument(t *testing.T) {
 	a := newAdminEnv(t)
-	body := map[string]any{"slug": "tighter", "name": "abcd"}
+	body := map[string]any{"slug": "tighter", "verifier": "none", "name": "abcd"}
 	if st, data := a.admin(http.MethodPost, "/admin/inboxes", body); st != http.StatusCreated {
 		t.Fatalf("before the document changes: %d %s", st, data)
 	}
@@ -138,11 +138,11 @@ func TestAdminBodiesAreHeldToTheDocument(t *testing.T) {
 		t.Errorf("a name past the new maximum: %d %s", st, data)
 	}
 	for _, tc := range []struct{ body, want string }{
-		{`{"slug":"bad-types","retention_days":"7"}`, "retention_days: must be an integer"},
-		{`{"slug":"bad-types","retention_days":-1}`, "retention_days: must be at least 0"},
-		{`{"slug":"bad-types","retention_days":99999999999999999999}`, "retention_days: must be at most 36500"},
-		{`{"slug":"bad-types","nope":1}`, "nope: is not a known field"},
-		{`{"slug":"X"}`, "slug: is not in the required form"},
+		{`{"slug":"bad-types","verifier":"none","retention_days":"7"}`, "retention_days: must be an integer"},
+		{`{"slug":"bad-types","verifier":"none","retention_days":-1}`, "retention_days: must be at least 0"},
+		{`{"slug":"bad-types","verifier":"none","retention_days":99999999999999999999}`, "retention_days: must be at most 36500"},
+		{`{"slug":"bad-types","verifier":"none","nope":1}`, "nope: is not a known field"},
+		{`{"slug":"X","verifier":"none"}`, "slug: is not in the required form"},
 		{`{}`, "slug: is required"},
 		{`[]`, "must be an object"},
 	} {
@@ -162,7 +162,7 @@ func TestTheAdminQueryGuardRunsAfterAuthentication(t *testing.T) {
 	if st, _, _ := a.call(http.MethodGet, "/admin/inboxes?bogus=1", nil, a.tokenA); st != http.StatusForbidden {
 		t.Errorf("an agent token with a bad query: %d", st)
 	}
-	if st, _, _ := a.call(http.MethodPost, "/admin/inboxes?bogus=1", `{"slug":"abc"}`, ""); st != http.StatusUnauthorized {
+	if st, _, _ := a.call(http.MethodPost, "/admin/inboxes?bogus=1", `{"slug":"abc","verifier":"none"}`, ""); st != http.StatusUnauthorized {
 		t.Errorf("anonymous POST with a bad query: %d", st)
 	}
 }
@@ -194,7 +194,7 @@ func TestAnAdminListAcceptsAnyCursorAnInt64Can(t *testing.T) {
 
 func TestARefusedBodyDoesNotRepeatALongFieldName(t *testing.T) {
 	a := newAdminEnv(t)
-	body := `{"slug":"clipped","` + strings.Repeat("k", 50000) + `":1}`
+	body := `{"slug":"clipped","verifier":"none","` + strings.Repeat("k", 50000) + `":1}`
 	st, data := a.admin(http.MethodPost, "/admin/inboxes", body)
 	if st != http.StatusBadRequest {
 		t.Fatalf("status %d", st)
@@ -209,7 +209,7 @@ func TestAnAdminRouteMissingFromTheDocumentIsRefusedNotServedUnchecked(t *testin
 	holdTo(t, a.server, func(doc map[string]any) {
 		delete(at(doc, "paths", "/admin/inboxes"), "post")
 	})
-	st, data := a.admin(http.MethodPost, "/admin/inboxes", map[string]any{"slug": "unchecked"})
+	st, data := a.admin(http.MethodPost, "/admin/inboxes", map[string]any{"slug": "unchecked", "verifier": "none"})
 	if st != http.StatusInternalServerError {
 		t.Errorf("a route the document lacks: %d %s", st, data)
 	}
@@ -231,7 +231,7 @@ func TestVerifierConfigNumbersSurviveTheResponse(t *testing.T) {
 // learned by someone who may not use the operation.
 func TestAMalformedParameterNeverBeatsTheCredentialCheck(t *testing.T) {
 	a := newAdminEnv(t)
-	a.tokenB = a.tokenFor(a.newInbox("agent-b", "none", ""))
+	a.tokenB = a.tokenFor(a.newInbox("agent-b", "trusted", ""))
 	for _, tc := range []struct {
 		name, method, path, tok string
 		want                    int

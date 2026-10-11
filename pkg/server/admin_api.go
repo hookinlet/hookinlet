@@ -126,7 +126,7 @@ func view(v admin.View, base string) api.Admin {
 		_ = dec.Decode(&cfg)
 	}
 	out := api.Admin{
-		CreatedAt: v.CreatedAt, Disabled: v.Disabled, EventTypePointer: v.EventTypePointer,
+		CreatedAt: v.CreatedAt, Disabled: v.Disabled, EventTypePointer: v.EventTypePointer, IngestKey: v.IngestKey,
 		HasVerifierSecret: v.HasVerifierSecret, Id: int(v.ID), IngestPath: v.IngestPath,
 		LastSeq: int(v.LastSeq), MaxBodyBytes: int(v.MaxBodyBytes), Name: v.Name,
 		OnVerifyFail: api.AdminOnVerifyFail(v.OnVerifyFail), RetentionDays: v.RetentionDays,
@@ -135,6 +135,10 @@ func view(v admin.View, base string) api.Admin {
 	}
 	if v.IngestURL != "" {
 		out.IngestUrl = &v.IngestURL
+	}
+	if len(v.Warnings) > 0 {
+		w := v.Warnings
+		out.Warnings = &w
 	}
 	if v.MessageCount != nil {
 		n := int(*v.MessageCount)
@@ -170,7 +174,7 @@ func orZero[T any](p *T) T {
 func (a *adminAPI) CreateInbox(ctx context.Context, req api.CreateInboxRequestObject) (api.CreateInboxResponseObject, error) {
 	b := req.Body
 	p := admin.CreateParams{
-		Slug: b.Slug, Name: orZero(b.Name), Verifier: orZero(b.Verifier), VerifierConfig: rawConfig(b.VerifierConfig),
+		Slug: b.Slug, IngestKey: orZero(b.IngestKey), Name: orZero(b.Name), Verifier: b.Verifier, VerifierConfig: rawConfig(b.VerifierConfig),
 		VerifierSecret: orZero(b.VerifierSecret), MaxBodyBytes: int64(orZero(b.MaxBodyBytes)),
 		RetentionDays: orZero(b.RetentionDays), RetentionMaxCount: int64(orZero(b.RetentionMaxCount)),
 		EventTypePointer: orZero(b.EventTypePointer),
@@ -412,4 +416,20 @@ func (b *backupBody) Close() error {
 		b.s.backupMu.Unlock()
 	})
 	return nil
+}
+
+func (a *adminAPI) RotateIngestKey(ctx context.Context, req api.RotateIngestKeyRequestObject) (api.RotateIngestKeyResponseObject, error) {
+	v, err := a.s.adm.RotateIngestKey(ctx, req.Slug)
+	if err != nil {
+		f := a.s.classify(ctx, "rotate ingest key", err)
+		switch f.status {
+		case http.StatusNotFound:
+			return api.RotateIngestKey404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, f)}, nil
+		case http.StatusConflict:
+			return api.RotateIngestKey409JSONResponse{ConflictJSONResponse: conflict(ctx, f)}, nil
+		}
+		return api.RotateIngestKey500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
+	}
+	a.s.auditCtx(ctx, "rotate ingest key", v.Slug)
+	return api.RotateIngestKey200JSONResponse{Body: view(v, a.s.baseURLFor(ctx)), Headers: api.RotateIngestKey200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
 }

@@ -3521,6 +3521,92 @@
           }
         ]
       }
+    },
+    "/admin/inboxes/{slug}/rotate-ingest-key": {
+      "post": {
+        "operationId": "rotateIngestKey",
+        "summary": "Issue a new ingest key",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "The inbox, with its new ingest key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Admin"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "description": "Gives the inbox a new random ingest key. The old key stops working at once, so the sender has to be given the new URL (`ingest_url` in the answer)."
+      }
     }
   },
   "components": {
@@ -4059,7 +4145,7 @@
           },
           "verified": {
             "type": "boolean",
-            "description": "Whether the delivery passed the inbox's verifier. Treat unverified content as untrusted input."
+            "description": "`true` only if the inbox's verifier checked something (a signature or a shared token) and it passed. A delivery to an inbox whose verifier is `none` is stored with `false`: nothing vouches for who sent it. Whatever the value, the content was written by the sender."
           },
           "verifier": {
             "type": "string"
@@ -4193,23 +4279,24 @@
       "Admin": {
         "type": "object",
         "required": [
-          "id",
-          "slug",
-          "name",
-          "version",
-          "verifier",
-          "verifier_config",
+          "created_at",
+          "disabled",
+          "event_type_pointer",
           "has_verifier_secret",
-          "on_verify_fail",
+          "id",
+          "ingest_key",
+          "ingest_path",
+          "last_seq",
           "max_body_bytes",
+          "name",
+          "on_verify_fail",
           "retention_days",
           "retention_max_count",
-          "event_type_pointer",
-          "disabled",
-          "last_seq",
-          "ingest_path",
-          "created_at",
-          "updated_at"
+          "slug",
+          "updated_at",
+          "verifier",
+          "verifier_config",
+          "version"
         ],
         "description": "An inbox as the admin API shows it. It never carries a verifier secret, its sealed form, or a token hash.",
         "properties": {
@@ -4276,6 +4363,17 @@
           },
           "updated_at": {
             "type": "string"
+          },
+          "ingest_key": {
+            "type": "string",
+            "description": "The key in the inbox's ingest URL. Anyone who has it can post to the inbox."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Settings that will make deliveries fail. Present only in the answer to a call that can cause them, and only when there is something to say."
           }
         }
       },
@@ -4283,7 +4381,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "slug"
+          "slug",
+          "verifier"
         ],
         "properties": {
           "slug": {
@@ -4298,7 +4397,7 @@
           "verifier": {
             "type": "string",
             "pattern": "^[a-z0-9-]{1,32}$",
-            "description": "`none`, `token`, `hmac`, `stripe`, `github`, `slack`, `standardwebhooks`, or one an embedder registered. It must exist."
+            "description": "How deliveries are checked: `stripe`, `github`, `slack`, `standardwebhooks`, `hmac`, `token`, or `none`, which accepts anything and stores it as **not** verified. Required: there is no default. A verifier an embedder registered also works. It must exist."
           },
           "verifier_config": {
             "type": "object",
@@ -4335,6 +4434,11 @@
             "type": "string",
             "pattern": "^(/([^~/]|~[01])*)*$",
             "description": "An RFC 6901 JSON pointer such as `/type`, or empty for none."
+          },
+          "ingest_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{3,64}$",
+            "description": "The key in the inbox's ingest URL (`/in/{key}`). Leave it out to get a random one, which is what an inbox should have: whoever has the key can post to the inbox, and a readable key is a guessable one."
           }
         }
       },

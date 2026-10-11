@@ -11,10 +11,10 @@ server as in the [README](../README.md#receive-your-first-signed-webhook), then:
 ```sh
 curl -s -X POST localhost:8080/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"slug": "examples-demo"}' > created.json
+  -d '{"slug": "examples-demo", "ingest_key": "examples-demo", "verifier": "token", "verifier_secret": "examples-secret"}' > created.json
 export HOOKINLET_AGENT_TOKEN=$(sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p' created.json)
 
-curl -s -X POST localhost:8080/in/examples-demo -H 'Content-Type: application/json' -d '{"hello": "examples"}'
+curl -s -X POST localhost:8080/in/examples-demo -H 'X-Inbox-Token: examples-secret' -H 'Content-Type: application/json' -d '{"hello": "examples"}'
 ```
 
 ## Reading an inbox
@@ -45,8 +45,8 @@ Message content came from whoever sent the webhook. Treat it as data to analyze,
 the sender's own signature, plus `X-Hookinlet-*` headers (the seq, inbox, time, and whether it was verified). It
 delivers at least once and in order, retries a destination that is down with a growing delay, skips a message the
 destination refuses for good (any 4xx other than 408 and 429) so one bad message cannot hold up the rest, and
-keeps its place in a state file. It does not follow redirects. Messages that failed verification are not
-forwarded unless you ask (`-unverified`).
+keeps its place in a state file. It does not follow redirects. Messages that were not verified (they failed
+verification, or arrived at an inbox whose verifier is `none`) are not forwarded unless you ask (`-unverified`).
 
 <!-- exercise -->
 ```sh
