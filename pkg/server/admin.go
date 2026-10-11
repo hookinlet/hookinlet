@@ -22,7 +22,13 @@ func (s *Server) closingContext(ctx context.Context) (context.Context, context.C
 
 // audit records an admin action. It names the inbox, never anything secret.
 func (s *Server) auditCtx(ctx context.Context, op, slug string, attrs ...slog.Attr) {
-	attrs = append([]slog.Attr{slog.String("op", op), slog.String("slug", slug)}, attrs...)
+	attrs = append([]slog.Attr{slog.String("op", op)}, attrs...)
+	if slug != "" {
+		attrs = append(attrs, slog.String("slug", slug))
+	}
+	if r, ok := ctx.Value(requestKey).(*http.Request); ok {
+		attrs = append(attrs, slog.String("client_ip", clientIP(r, s.opts.TrustedProxies)))
+	}
 	s.log.LogAttrs(ctx, slog.LevelInfo, "admin", attrs...)
 }
 

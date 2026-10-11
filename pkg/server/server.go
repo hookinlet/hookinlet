@@ -101,6 +101,15 @@ type Options struct {
 	// it, to a few seconds, when the Notifier can (a distributed one delivers at
 	// most once).
 	SSERecheckInterval time.Duration
+	// DisableAdmin turns off the admin API altogether: its routes answer 404 and
+	// the admin token is never consulted. Inboxes and tokens are then managed with
+	// the command line, which works in the data directory.
+	DisableAdmin bool
+	// AdminAddr, if set, serves the admin API on its own listener at this address
+	// and not on Addr. That lets the admin surface sit on a loopback or private
+	// interface while ingest and the read API are public. Empty serves everything
+	// on Addr. Serve listens on it itself; ServeAdmin takes a listener instead.
+	AdminAddr string
 	// DisableMCP turns off the MCP endpoint (/mcp), which is otherwise served
 	// whenever an Authenticator is set.
 	DisableMCP bool
@@ -127,7 +136,10 @@ type Server struct {
 	log     *slog.Logger
 	handler http.Handler
 	http    *http.Server
-	reads   chan struct{} // a slot per read request being served
+
+	adminHandler http.Handler // set when AdminAddr is
+	adminHTTP    *http.Server
+	reads        chan struct{} // a slot per read request being served
 
 	spec      *specvalidate.Document // docs/openapi.json, which requests are held to
 	mux       *http.ServeMux
@@ -155,6 +167,12 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.Store == nil {
 		return nil, errors.New("server: Options.Store is required")
+	}
+	if opts.AdminAddr != "" && opts.DisableAdmin {
+		return nil, errors.New("server: Options.AdminAddr and Options.DisableAdmin contradict each other")
+	}
+	if opts.AdminAddr != "" && opts.AdminAddr == opts.Addr {
+		return nil, errors.New("server: Options.AdminAddr is the same as Options.Addr; leave it empty to serve both there")
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -235,31 +253,52 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 	s.mcpSDK = s.newMCP()
-	mux := http.NewServeMux()
-	s.mux = mux
-	s.registerRoutes(mux)
-	mux.HandleFunc("/", notFound)
-
-	// Outermost first. accessLog must see the same *http.Request the mux
-	// annotates with r.Pattern, so nothing between it and the mux may clone
-	// the request.
-	h := requestID(accessLog(opts.Logger, recoverer(opts.Logger, protective(mux))))
-
-	s.handler = h
-	s.http = &http.Server{
-		Handler: h,
-		// No WriteTimeout: SSE streams are long-lived. Handlers that need a
-		// deadline set one per request with http.ResponseController.
-		ReadHeaderTimeout: 10 * time.Second,
-		MaxHeaderBytes:    opts.MaxHeaderBytes,
-		IdleTimeout:       120 * time.Second,
-		ErrorLog:          slog.NewLogLogger(opts.Logger.Handler(), slog.LevelWarn),
+	surface := surfaceAll
+	if opts.AdminAddr != "" {
+		surface = surfacePublic
+	}
+	s.handler = s.build(surface)
+	s.http = s.newHTTP(s.handler)
+	if opts.AdminAddr != "" {
+		s.adminHandler = s.build(surfaceAdmin)
+		s.adminHTTP = s.newHTTP(s.adminHandler)
 	}
 	return s, nil
 }
 
-// Handler returns the fully wrapped http.Handler, for embedding or testing.
+// build mounts the routes of a surface and wraps them in the middleware.
+func (s *Server) build(surface surface) http.Handler {
+	mux := http.NewServeMux()
+	if surface != surfaceAdmin {
+		s.mux = mux
+	}
+	s.registerRoutes(mux, surface)
+	mux.HandleFunc("/", notFound)
+	// Outermost first. accessLog must see the same *http.Request the mux
+	// annotates with r.Pattern, so nothing between it and the mux may clone
+	// the request.
+	return requestID(accessLog(s.log, recoverer(s.log, protective(mux))))
+}
+
+func (s *Server) newHTTP(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler: h,
+		// No WriteTimeout: SSE streams are long-lived. Handlers that need a
+		// deadline set one per request with http.ResponseController.
+		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    s.opts.MaxHeaderBytes,
+		IdleTimeout:       120 * time.Second,
+		ErrorLog:          slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
+	}
+}
+
+// Handler returns the fully wrapped http.Handler, for embedding or testing. When
+// Options.AdminAddr is set it does not serve the admin API; AdminHandler does.
 func (s *Server) Handler() http.Handler { return s.handler }
+
+// AdminHandler returns the handler for the admin API when it has its own
+// listener (Options.AdminAddr), and nil otherwise.
+func (s *Server) AdminHandler() http.Handler { return s.adminHandler }
 
 // Run listens on Options.Addr and serves until ctx is cancelled, then shuts
 // down gracefully. It returns nil after a clean shutdown.
@@ -269,14 +308,43 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", s.opts.Addr, err)
 	}
-	return s.Serve(ctx, ln)
+	if s.opts.AdminAddr == "" {
+		return s.Serve(ctx, ln)
+	}
+	adminLn, err := lc.Listen(ctx, "tcp", s.opts.AdminAddr)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("listen %s: %w", s.opts.AdminAddr, err)
+	}
+	return s.ServeAdmin(ctx, ln, adminLn)
 }
 
-// Serve is like Run but accepts an existing listener.
+// Serve is like Run but accepts an existing listener. With Options.AdminAddr
+// set it serves only the public surface; ServeAdmin takes the second listener.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
-	errCh := make(chan error, 1)
+	return s.serve(ctx, ln, nil)
+}
+
+// ServeAdmin is Serve for a server with Options.AdminAddr set, given a listener
+// for each address. The admin API is served on adminLn and nothing else is.
+func (s *Server) ServeAdmin(ctx context.Context, ln, adminLn net.Listener) error {
+	if s.adminHTTP == nil {
+		_ = adminLn.Close()
+		return errors.New("server: ServeAdmin needs Options.AdminAddr")
+	}
+	return s.serve(ctx, ln, adminLn)
+}
+
+func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
+	errCh := make(chan error, 2)
 	go func() { errCh <- s.http.Serve(ln) }()
 	s.log.Info("listening", "addr", ln.Addr().String())
+	servers := 1
+	if adminLn != nil {
+		go func() { errCh <- s.adminHTTP.Serve(adminLn) }()
+		s.log.Info("listening for the admin API", "addr", adminLn.Addr().String())
+		servers++
+	}
 
 	// Retention starts once the listener is up and never delays it (guardrail 27).
 	// Serve does not return until the sweep has stopped, so the caller may close
@@ -292,6 +360,11 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+		// One listener failing takes the other down with it.
+		_ = s.http.Close()
+		if s.adminHTTP != nil {
+			_ = s.adminHTTP.Close()
+		}
 		return err
 	case <-ctx.Done():
 	}
@@ -305,9 +378,14 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	defer cancel()
 	if err := s.Shutdown(sctx); err != nil {
 		_ = s.http.Close()
+		if s.adminHTTP != nil {
+			_ = s.adminHTTP.Close()
+		}
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	<-errCh // Serve returns http.ErrServerClosed once Shutdown completes
+	for range servers {
+		<-errCh // each returns http.ErrServerClosed once Shutdown completes
+	}
 	return nil
 }
 
@@ -315,7 +393,11 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 // in-flight requests until ctx expires.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.closeStreams()
-	return s.http.Shutdown(ctx)
+	err := s.http.Shutdown(ctx)
+	if s.adminHTTP != nil {
+		err = errors.Join(err, s.adminHTTP.Shutdown(ctx))
+	}
+	return err
 }
 
 // closeStreams tells every open stream to finish. It is safe to call repeatedly.

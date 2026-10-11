@@ -63,8 +63,8 @@ func (s *Server) newAPI() *apiServer {
 
 // registerRoutes mounts every operation of the document the server is configured
 // to serve.
-func (s *Server) registerRoutes(mux *http.ServeMux) {
-	rt := &docRouter{s: s, mux: mux, served: map[string][]string{}}
+func (s *Server) registerRoutes(mux *http.ServeMux, surface surface) {
+	rt := &docRouter{s: s, mux: mux, surface: surface, served: map[string][]string{}}
 	api.HandlerWithOptions(s.strictServer(s.newAPI()), api.StdHTTPServerOptions{
 		BaseRouter:       rt,
 		Middlewares:      []api.MiddlewareFunc{s.enforce},
@@ -76,21 +76,36 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 // serves reports whether this server is set up to serve an operation: those that
 // need a credential exist only when there is an Authenticator to say who may call
 // (there is no safe default for who may read), and MCP can be turned off.
-func (s *Server) serves(op *specvalidate.Operation) bool {
+func (s *Server) serves(op *specvalidate.Operation, surface surface) bool {
+	admin := op.HasTag("Admin")
 	switch {
 	case op.Security() != specvalidate.Open && s.opts.Authenticator == nil:
 		return false
 	case op.HasTag("MCP") && s.opts.DisableMCP:
 		return false
+	case admin && s.opts.DisableAdmin:
+		return false
+	case admin && surface == surfacePublic, !admin && surface == surfaceAdmin:
+		return false
 	}
 	return true
 }
 
+// surface is which operations a listener serves.
+type surface int
+
+const (
+	surfaceAll    surface = iota // everything: one listener
+	surfacePublic                // all but the admin API
+	surfaceAdmin                 // the admin API only
+)
+
 // docRouter is the router the generated code registers its routes on.
 type docRouter struct {
-	s      *Server
-	mux    *http.ServeMux
-	served map[string][]string // path template -> methods registered
+	s       *Server
+	mux     *http.ServeMux
+	surface surface
+	served  map[string][]string // path template -> methods registered
 }
 
 func (d *docRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) { d.mux.ServeHTTP(w, r) }
@@ -98,7 +113,7 @@ func (d *docRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) { d.mux.Se
 func (d *docRouter) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
 	method, path, _ := strings.Cut(pattern, " ")
 	op := d.s.spec.Lookup(method, path)
-	if op == nil || !d.s.serves(op) {
+	if op == nil || !d.s.serves(op, d.surface) {
 		return
 	}
 	d.mux.HandleFunc(method+" "+op.Pattern(), h)
