@@ -220,6 +220,21 @@ type Principal interface {
 	CanAdmin() bool
 }
 
+// SingleInboxPrincipal is an optional capability of a Principal that can read
+// exactly one inbox and no other (an agent token). Anything that needs to list
+// the inboxes a caller can read uses it to go straight to that one, instead of
+// walking every inbox and asking CanReadInbox, which would cost time in
+// proportion to the number of inboxes and could not tell a caller that its list
+// was complete without telling it how many others exist.
+//
+// InboxID must be the ID of the one inbox CanReadInbox accepts, and a Principal
+// that can read more than one inbox, or that can use the admin API, must not
+// implement it.
+type SingleInboxPrincipal interface {
+	Principal
+	InboxID() ID
+}
+
 // Hooks lets an embedder observe and gate ingest. The open-source default does
 // nothing.
 type Hooks interface {

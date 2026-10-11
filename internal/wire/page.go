@@ -52,6 +52,9 @@ type Page struct {
 func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageRequest) (*Page, error) {
 	q := req.Query
 	limit := int64(InlineBodyBytes)
+	if req.BodyCap > 0 {
+		limit = req.BodyCap
+	}
 	if req.Summary {
 		limit = 0
 	}
@@ -75,7 +78,12 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 	}
 	for _, m := range res.Messages {
 		examined = m.Seq
-		if !req.Summary && m.Body == nil {
+		truncated := false
+		if !req.Summary && m.Body == nil && req.BodyCap > 0 && m.Size > 0 {
+			// Over the cap: leave the body out and say so. The caller fetches
+			// that one message whole if it wants it.
+			truncated = true
+		} else if !req.Summary && m.Body == nil {
 			full, err := st.Get(ctx, in.ID, m.Seq)
 			if errors.Is(err, inbox.ErrNotFound) {
 				continue // pruned since the query ran
@@ -86,6 +94,7 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 			m = full
 		}
 		enc := FromStored(m, in.Slug, in.Verifier, !req.Summary)
+		enc.BodyTruncated = truncated
 		cost := enc.encodedSize()
 		if len(page.Messages) > 0 && used+cost > budget {
 			cut = true

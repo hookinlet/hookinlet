@@ -44,6 +44,10 @@ type Message struct {
 	EventType   *string     `json:"event_type"`
 	SourceIP    *string     `json:"source_ip"`
 
+	// BodyTruncated is set, only when a size cap applies, on a message whose body
+	// was left out for being larger than the cap. Size gives its true length.
+	BodyTruncated bool `json:"body_truncated,omitempty"`
+
 	Body       json.RawMessage `json:"body,omitempty"`
 	BodyText   *string         `json:"body_text,omitempty"`
 	BodyBase64 *string         `json:"body_base64,omitempty"`

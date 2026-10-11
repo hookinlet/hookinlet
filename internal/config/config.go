@@ -118,7 +118,7 @@ var specs = []spec{
 	{name: "sse-heartbeat", def: "15s", usage: "interval between SSE heartbeat comments"},
 	{name: "sse-recheck-interval", def: "0", usage: "re-read the store on this interval even without a notifier signal; 0 disables"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
-	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools"},
+	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},
 	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps"},
 	{name: "shutdown-timeout", def: "10s", usage: "time allowed for in-flight requests to finish on shutdown"},
 }
@@ -335,8 +335,8 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 	if c.MaxStreamsPerInbox, err = strconv.Atoi(vals["max-streams-per-inbox"]); err != nil || c.MaxStreamsPerInbox < 0 {
 		collect(fieldErr("max-streams-per-inbox", "must be zero or a positive integer"))
 	}
-	if c.MCPInlineBodyBytes, err = strconv.Atoi(vals["mcp-inline-body-bytes"]); err != nil || c.MCPInlineBodyBytes <= 0 {
-		collect(fieldErr("mcp-inline-body-bytes", "must be a positive integer"))
+	if c.MCPInlineBodyBytes, err = strconv.Atoi(vals["mcp-inline-body-bytes"]); err != nil || c.MCPInlineBodyBytes <= 0 || c.MCPInlineBodyBytes > 64<<10 {
+		collect(fieldErr("mcp-inline-body-bytes", "must be between 1 and 65536"))
 	}
 
 	if len(errs) > 0 {

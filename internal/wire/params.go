@@ -45,6 +45,10 @@ type PageRequest struct {
 	// stream uses a smaller one, so replaying a large backlog never builds a
 	// huge page in memory.
 	Budget int64
+	// BodyCap, when positive, leaves out the body of any message larger than
+	// this many bytes and marks it body_truncated, instead of loading it. The
+	// REST API leaves it zero. MCP tools set it to protect an agent's context.
+	BodyCap int64
 }
 
 var knownParams = map[string]bool{

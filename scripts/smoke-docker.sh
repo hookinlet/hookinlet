@@ -134,6 +134,40 @@ esac
 case $page in *'"body":{"hello":"world"}'*) echo "ok   a JSON body is embedded as JSON" ;; *) fail "the JSON body was not embedded: $page" ;; esac
 expect "the raw endpoint returns the exact bytes"  "200 $body1" "$(read_api /v1/inboxes/demo/messages/1/raw "$agent_token")"
 
+# The MCP endpoint: the same reads as tools, with the same tokens.
+# mcp TOKEN TOOL ARGS_JSON  ->  prints "<status> <body>" of one JSON-RPC tools/call
+mcp() {
+  local tok=$1 tool=$2 args=$3
+  local curl_args=(-sS -o "$tmp" -w '%{http_code}' -X POST "$base/mcp"
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream'
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}")
+  [ -n "$tok" ] && curl_args+=(-H "Authorization: Bearer $tok")
+  local code
+  code=$(curl "${curl_args[@]}")
+  echo "$code $(cat "$tmp")"
+}
+expect "MCP without a token is 401"            '401' "$(mcp "" list_inboxes '{}' | cut -d' ' -f1)"
+expect "MCP with a wrong token is 401"         '401' "$(mcp hki_wrong list_inboxes '{}' | cut -d' ' -f1)"
+mcp_list=$(mcp "$agent_token" list_inboxes '{}')
+case $mcp_list in *'"slug\":\"demo\"'*) echo "ok   MCP list_inboxes shows the token's inbox" ;; *) fail "unexpected list_inboxes: $mcp_list" ;; esac
+case $mcp_list in *other-inbox*) fail "list_inboxes shows another inbox: $mcp_list" ;; *) echo "ok   and not anyone else's" ;; esac
+mcp_query=$(mcp "$agent_token" query_messages '{"inbox":"demo","after":0}')
+case $mcp_query in
+  *'\"seq\":1'*'\"seq\":2'*'\"next_after\":2'*) echo "ok   MCP query_messages returns both messages and next_after" ;;
+  *) fail "unexpected query_messages: $mcp_query" ;;
+esac
+case $(mcp "$agent_token" get_message '{"inbox":"demo","seq":1}') in *'\"hello\":\"world\"'*) echo "ok   MCP get_message returns the body" ;; *) fail "get_message did not return the body" ;; esac
+foreign=$(mcp "$other_token" query_messages '{"inbox":"demo"}')
+case $foreign in *'not found'*) echo "ok   MCP: another inbox's token is told not found" ;; *) fail "unexpected answer for a foreign inbox: $foreign" ;; esac
+expect "MCP: that is the same as an inbox that is not there" \
+  "$(mcp "$other_token" query_messages '{"inbox":"not-there"}')" "$foreign"
+expect "MCP: batches are refused" '400' "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base/mcp" \
+  -H "Authorization: Bearer $agent_token" -H 'Content-Type: application/json' -d '[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]')"
+case $(mcp "$agent_token" wait_for_messages '{"inbox":"demo","after":1,"timeout_seconds":5}') in
+  *'\"seq\":2'*) echo "ok   MCP wait_for_messages returns at once when messages are waiting" ;; *) fail "wait_for_messages did not return message 2" ;; esac
+case $(mcp "$agent_token" wait_for_messages '{"inbox":"demo","after":2,"timeout_seconds":1}') in
+  *'\"messages\":[]'*'\"next_after\":2'*) echo "ok   and returns an empty list at its timeout" ;; *) fail "wait_for_messages did not time out cleanly" ;; esac
+
 # The live stream: an event arrives as a delivery is stored.
 follow "/v1/inboxes/demo/stream"
 body3='{"live":true}'

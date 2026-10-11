@@ -102,6 +102,7 @@ func TestInvalidValues(t *testing.T) {
 		{"bad log level", map[string]string{"HOOKINLET_LOG_LEVEL": "loud"}, "--log-level"},
 		{"bad bool", map[string]string{"HOOKINLET_MCP_ENABLED": "maybe"}, "--mcp-enabled"},
 		{"bad body bytes", map[string]string{"HOOKINLET_MCP_INLINE_BODY_BYTES": "0"}, "--mcp-inline-body-bytes"},
+		{"body bytes above the REST inline size", map[string]string{"HOOKINLET_MCP_INLINE_BODY_BYTES": "65537"}, "--mcp-inline-body-bytes"},
 		{"bad cidr", map[string]string{"HOOKINLET_TRUSTED_PROXIES": "10.0.0.0/8, nonsense"}, `"nonsense" is not a CIDR`},
 		{"relative base url", map[string]string{"HOOKINLET_PUBLIC_BASE_URL": "example.com"}, "--public-base-url"},
 		{"non-http base url", map[string]string{"HOOKINLET_PUBLIC_BASE_URL": "ftp://example.com"}, "--public-base-url"},
