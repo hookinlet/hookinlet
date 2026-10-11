@@ -31,7 +31,6 @@ import (
 // adminBody, and are covered by the contract tests, which force each of those
 // responses and check it against the document.
 type adminAPI struct {
-	unserved
 	s *Server
 }
 

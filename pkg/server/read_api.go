@@ -25,29 +25,7 @@ import (
 // second parse. The message bodies are carried as raw JSON (see
 // internal/api/overlay.yaml), so what reaches the reader is what the sender sent.
 type readAPI struct {
-	unserved
 	s *Server
-}
-
-// readRequest is what an operation needs besides what the generated interface
-// passes it: the request, the response writer (HEAD sets the headers a GET would),
-// and the inbox the caller has been allowed to read.
-type readRequest struct {
-	w  http.ResponseWriter
-	r  *http.Request
-	in *inbox.Inbox
-}
-
-const readKey ctxKey = 2
-
-func readFrom(ctx context.Context) *readRequest { return ctx.Value(readKey).(*readRequest) }
-
-// readHandler adapts a generated handler to the agent() wrapper.
-func readHandler(h http.HandlerFunc) agentHandler {
-	return func(w http.ResponseWriter, r *http.Request, in *inbox.Inbox) {
-		ctx := context.WithValue(r.Context(), readKey, &readRequest{w, r, in})
-		h(w, r.WithContext(ctx))
-	}
 }
 
 // readFail is a failed read, classified.
@@ -134,6 +112,16 @@ func (a *readAPI) info(ctx context.Context) (api.InboxInfo, *readFail) {
 }
 
 func (a *readAPI) GetInbox(ctx context.Context, _ api.GetInboxRequestObject) (api.GetInboxResponseObject, error) {
+	// Only authenticated, authorized requests take a slot, so anonymous traffic
+	// cannot starve real readers.
+	release, busy, err := a.slot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if busy != nil {
+		return api.GetInbox503JSONResponse{OverloadedJSONResponse: *busy}, nil
+	}
+	defer release()
 	info, f := a.info(ctx)
 	if f != nil {
 		switch f.status {
@@ -148,6 +136,16 @@ func (a *readAPI) GetInbox(ctx context.Context, _ api.GetInboxRequestObject) (ap
 }
 
 func (a *readAPI) HeadGetInbox(ctx context.Context, _ api.HeadGetInboxRequestObject) (api.HeadGetInboxResponseObject, error) {
+	// Only authenticated, authorized requests take a slot, so anonymous traffic
+	// cannot starve real readers.
+	release, busy, err := a.slot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if busy != nil {
+		return api.HeadGetInbox503Response{Headers: api.HeadGetInbox503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
+	}
+	defer release()
 	info, f := a.info(ctx)
 	id := requestIDOf(ctx)
 	if f != nil {
@@ -184,6 +182,16 @@ func (a *readAPI) messages(ctx context.Context) (api.MessagePage, *readFail) {
 }
 
 func (a *readAPI) ListMessages(ctx context.Context, _ api.ListMessagesRequestObject) (api.ListMessagesResponseObject, error) {
+	// Only authenticated, authorized requests take a slot, so anonymous traffic
+	// cannot starve real readers.
+	release, busy, err := a.slot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if busy != nil {
+		return api.ListMessages503JSONResponse{OverloadedJSONResponse: *busy}, nil
+	}
+	defer release()
 	p, f := a.messages(ctx)
 	if f != nil {
 		switch f.status {
@@ -198,6 +206,16 @@ func (a *readAPI) ListMessages(ctx context.Context, _ api.ListMessagesRequestObj
 }
 
 func (a *readAPI) HeadListMessages(ctx context.Context, _ api.HeadListMessagesRequestObject) (api.HeadListMessagesResponseObject, error) {
+	// Only authenticated, authorized requests take a slot, so anonymous traffic
+	// cannot starve real readers.
+	release, busy, err := a.slot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if busy != nil {
+		return api.HeadListMessages503Response{Headers: api.HeadListMessages503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
+	}
+	defer release()
 	p, f := a.messages(ctx)
 	id := requestIDOf(ctx)
 	if f != nil {
@@ -238,6 +256,16 @@ func (a *readAPI) load(ctx context.Context) (*inbox.Message, *readFail) {
 }
 
 func (a *readAPI) GetMessage(ctx context.Context, _ api.GetMessageRequestObject) (api.GetMessageResponseObject, error) {
+	// Only authenticated, authorized requests take a slot, so anonymous traffic
+	// cannot starve real readers.
+	release, busy, err := a.slot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if busy != nil {
+		return api.GetMessage503JSONResponse{OverloadedJSONResponse: *busy}, nil
+	}
+	defer release()
 	m, f := a.load(ctx)
 	if f != nil {
 		switch f.status {
@@ -256,6 +284,16 @@ func (a *readAPI) GetMessage(ctx context.Context, _ api.GetMessageRequestObject)
 }
 
 func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageRequestObject) (api.HeadGetMessageResponseObject, error) {
+	// Only authenticated, authorized requests take a slot, so anonymous traffic
+	// cannot starve real readers.
+	release, busy, err := a.slot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if busy != nil {
+		return api.HeadGetMessage503Response{Headers: api.HeadGetMessage503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
+	}
+	defer release()
 	m, f := a.load(ctx)
 	id := requestIDOf(ctx)
 	if f != nil {
@@ -283,6 +321,16 @@ func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageReques
 // in HTML or SVG that does get rendered, and attachment tells it to save the file
 // instead. None of this changes the body or the Content-Type.
 func (a *readAPI) GetMessageRaw(ctx context.Context, _ api.GetMessageRawRequestObject) (api.GetMessageRawResponseObject, error) {
+	// Only authenticated, authorized requests take a slot, so anonymous traffic
+	// cannot starve real readers.
+	release, busy, err := a.slot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if busy != nil {
+		return api.GetMessageRaw503JSONResponse{OverloadedJSONResponse: *busy}, nil
+	}
+	defer release()
 	m, f := a.load(ctx)
 	if f != nil {
 		switch f.status {
@@ -305,6 +353,16 @@ func (a *readAPI) GetMessageRaw(ctx context.Context, _ api.GetMessageRawRequestO
 }
 
 func (a *readAPI) HeadGetMessageRaw(ctx context.Context, _ api.HeadGetMessageRawRequestObject) (api.HeadGetMessageRawResponseObject, error) {
+	// Only authenticated, authorized requests take a slot, so anonymous traffic
+	// cannot starve real readers.
+	release, busy, err := a.slot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if busy != nil {
+		return api.HeadGetMessageRaw503Response{Headers: api.HeadGetMessageRaw503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
+	}
+	defer release()
 	m, f := a.load(ctx)
 	id := requestIDOf(ctx)
 	if f != nil {
@@ -331,4 +389,25 @@ func rawContentType(m *inbox.Message) string {
 		return m.ContentType
 	}
 	return "application/octet-stream"
+}
+
+// slot takes one of the limited read slots, waiting up to ReadWaitTimeout. busy is
+// the answer when none came free; err is set when the caller went away first, and
+// then there is nobody to answer.
+func (a *readAPI) slot(ctx context.Context) (release func(), busy *api.OverloadedJSONResponse, err error) {
+	release, err = a.s.readSlot(ctx)
+	switch {
+	case err == nil:
+		return release, nil, nil
+	case errors.Is(err, errBusy):
+		b := overloaded(ctx, "1", "the server is busy; retry shortly")
+		return nil, &b, nil
+	}
+	return nil, nil, err
+}
+
+func overloaded(ctx context.Context, retryAfter, msg string) api.OverloadedJSONResponse {
+	var b api.ErrorOverloaded
+	b.Error.Code, b.Error.Message = api.ErrorOverloadedErrorCodeOverloaded, msg
+	return api.OverloadedJSONResponse{Body: b, Headers: api.OverloadedResponseHeaders{RetryAfter: retryAfter, XRequestId: requestIDOf(ctx)}}
 }

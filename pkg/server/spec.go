@@ -5,7 +5,6 @@ package server
 
 import (
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/hookinlet/hookinlet/internal/specvalidate"
@@ -42,24 +41,4 @@ func truncateName(s string) string {
 		return strings.ToValidUTF8(s[:64], "") + "…"
 	}
 	return s
-}
-
-// checkQuery refuses a request whose query string breaks the document: a
-// parameter it does not list, a repeated one, or a value of the wrong type or
-// outside its range. It reports false after answering.
-func (s *Server) checkQuery(w http.ResponseWriter, r *http.Request) bool {
-	op := s.operation(r)
-	if op == nil {
-		return true
-	}
-	values, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_parameter", "the query string is malformed")
-		return false
-	}
-	if vs := op.CheckQuery(values); len(vs) > 0 {
-		writeError(w, http.StatusBadRequest, "invalid_parameter", parameterMessage(vs))
-		return false
-	}
-	return true
 }

@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -213,50 +214,43 @@ func TestOpenAPIIsInternallyConsistent(t *testing.T) {
 	}
 }
 
-// The document and the server list the same routes.
-func TestOpenAPIListsExactlyTheRoutesTheServerRegisters(t *testing.T) {
+// The document is what creates the routes: every operation in it is registered
+// under the pattern the document gives, and no route is registered by hand
+// except the one that answers 404.
+func TestEveryOperationIsRegisteredAndNothingIsRegisteredByHand(t *testing.T) {
+	e := newAgentEnv(t)
 	sp := loadSpec(t)
-	documented := map[string]bool{}
-	for p := range sp.root["paths"].(map[string]any) {
-		documented[p] = true
+	for _, op := range sp.doc.Operations() {
+		path := op.Path
+		for _, p := range op.Params {
+			if p.In == "path" {
+				path = strings.Replace(path, "{"+p.Name+"}", "x", 1)
+			}
+		}
+		r := httptest.NewRequestWithContext(t.Context(), op.Method, path, nil)
+		_, pattern := e.server.mux.Handler(r)
+		if want := op.Method + " " + op.Pattern(); pattern != want {
+			t.Errorf("%s: the server routes it to %q, want %q", op.ID, pattern, want)
+		}
 	}
-	// Routes are registered with literal patterns in the server's source, so read
-	// them from there. {name...} is how net/http spells a path with slashes in it.
-	re := regexp.MustCompile(`HandleFunc\("(?:[A-Z]+ )?(/[^"]*)"`)
-	registered := map[string]bool{}
+
+	// A route registered anywhere else would be served without the document's
+	// credential, parameter, and body checks. Registration happens in two files, and
+	// only the catch-all is written out.
+	re := regexp.MustCompile(`\.(HandleFunc|Handle)\(`)
+	allowed := map[string]int{"routes.go": 3, "server.go": 1} // docRouter's three; the catch-all 404
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}
 		b, _ := os.ReadFile(f) //nolint:gosec // a source file in this package's directory
-		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
-			if p := strings.ReplaceAll(m[1], "...}", "}"); p != "/" { // "/" is the catch-all that answers 404
-				registered[p] = true
-			}
+		if n := len(re.FindAllIndex(b, -1)); n != allowed[f] {
+			t.Errorf("%s registers %d routes by hand, want %d", f, n, allowed[f])
 		}
 	}
-	var missing, extra []string
-	for p := range registered {
-		if !documented[p] {
-			missing = append(missing, p)
-		}
-	}
-	for p := range documented {
-		if !registered[p] {
-			extra = append(extra, p)
-		}
-	}
-	sort.Strings(missing)
-	sort.Strings(extra)
-	if len(missing) > 0 {
-		t.Errorf("the server serves these but docs/openapi.json does not describe them: %v", missing)
-	}
-	if len(extra) > 0 {
-		t.Errorf("docs/openapi.json describes these but the server does not register them: %v", extra)
-	}
-	if len(registered) < 10 {
-		t.Errorf("found only %d routes in the source; the pattern in this test no longer matches how they are registered", len(registered))
+	if b, _ := os.ReadFile("server.go"); !strings.Contains(string(b), `mux.HandleFunc("/", notFound)`) {
+		t.Error("server.go no longer registers the catch-all by that name")
 	}
 }
 
@@ -264,7 +258,7 @@ func TestOpenAPIListsExactlyTheRoutesTheServerRegisters(t *testing.T) {
 // admin token and nothing else; the rest accept an agent token or the admin token.
 func TestOpenAPISecurityMatchesTheServer(t *testing.T) {
 	sp := loadSpec(t)
-	open := map[string]bool{"healthz": true, "readyz": true, "ingest": true, "ingestWithPath": true}
+	open := map[string]bool{"healthz": true, "readyz": true, "ingest": true, "ingestWithPath": true, "ingestPut": true, "ingestPutWithPath": true}
 	for _, o := range sp.operations() {
 		sec, _ := o.obj["security"].([]any)
 		var schemes []string
@@ -274,7 +268,10 @@ func TestOpenAPISecurityMatchesTheServer(t *testing.T) {
 			}
 		}
 		sort.Strings(schemes)
-		id := strings.TrimPrefix(o.id, "head")
+		id := o.id
+		if rest, ok := strings.CutPrefix(o.id, "head"); ok {
+			id = strings.ToLower(rest[:1]) + rest[1:]
+		}
 		var want []string
 		switch {
 		case open[id]:
@@ -447,13 +444,18 @@ func (cl *client) do(opID, method, path string, body any, tok string, viaDefault
 // client will not do, and returns the response.
 func rawBrokenBody(t *testing.T, addr, path, auth string, declared int, body string) (int, http.Header, []byte) {
 	t.Helper()
+	return rawBrokenBodyAs(t, addr, "POST", path, auth, declared, body)
+}
+
+func rawBrokenBodyAs(t *testing.T, addr, method, path, auth string, declared int, body string) (int, http.Header, []byte) {
+	t.Helper()
 	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(t.Context(), "tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-	fmt.Fprintf(conn, "POST %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: %d\r\n", path, addr, declared)
+	fmt.Fprintf(conn, "%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: %d\r\n", method, path, addr, declared)
 	if auth != "" {
 		fmt.Fprintf(conn, "Authorization: Bearer %s\r\n", auth)
 	}

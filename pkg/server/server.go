@@ -23,7 +23,6 @@ import (
 
 	"github.com/hookinlet/hookinlet/docs"
 	"github.com/hookinlet/hookinlet/internal/admin"
-	"github.com/hookinlet/hookinlet/internal/api"
 	"github.com/hookinlet/hookinlet/internal/specvalidate"
 	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -131,8 +130,8 @@ type Server struct {
 	reads   chan struct{} // a slot per read request being served
 
 	spec      *specvalidate.Document // docs/openapi.json, which requests are held to
-	streamAPI api.ServerInterface    // the stream, through the generated interface
-	mcpStrict api.ServerInterface    // MCP, through the generated interface
+	mux       *http.ServeMux
+	mcpSDK    http.Handler // the MCP SDK's handler, which the mcp operation hands calls to
 	adm       *admin.Service
 	backupMu  sync.Mutex     // one backup at a time
 	retention sync.WaitGroup // the scheduled sweep, so Serve can wait for it
@@ -231,36 +230,17 @@ func New(opts Options) (*Server, error) {
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),
 	}
-	s.streamAPI = s.strictServer(&streamAPI{s: s})
-	s.mcpStrict = s.strictServer(&mcpAPI{s: s})
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now}
+	s.mcpSDK = s.newMCP()
 	mux := http.NewServeMux()
-	health := s.apiHandlers(&healthAPI{s: s})
-	mux.HandleFunc("GET /healthz", health.Healthz)
-	mux.HandleFunc("GET /readyz", health.Readyz)
-	// Ingest accepts any method here and answers 405 itself, so that the
-	// response is JSON and carries an Allow header.
-	ingest := s.strictServer(&ingestAPI{s: s})
-	mux.HandleFunc("/in/{key}", withRequest(func(w http.ResponseWriter, r *http.Request) {
-		ingest.Ingest(w, r, r.PathValue("key"))
-	}))
-	mux.HandleFunc("/in/{key}/{rest...}", withRequest(func(w http.ResponseWriter, r *http.Request) {
-		ingest.IngestWithPath(w, r, r.PathValue("key"), r.PathValue("rest"))
-	}))
-	if opts.Authenticator != nil {
-		s.registerAgentAPI(mux)
-		s.registerAdmin(mux)
-		mux.HandleFunc("/v1/inboxes/{slug}/stream", s.handleStream)
-		if !opts.DisableMCP {
-			s.registerMCP(mux)
-		}
-	}
+	s.mux = mux
+	s.registerRoutes(mux)
 	mux.HandleFunc("/", notFound)
 
 	// Outermost first. accessLog must see the same *http.Request the mux
 	// annotates with r.Pattern, so nothing between it and the mux may clone
 	// the request.
-	h := requestID(accessLog(opts.Logger, recoverer(opts.Logger, mux)))
+	h := requestID(accessLog(opts.Logger, recoverer(opts.Logger, protective(mux))))
 
 	s.handler = h
 	s.http = &http.Server{

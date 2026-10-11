@@ -21,24 +21,13 @@ import (
 // that the document does not list is not passed on; it is logged and answered 500.
 //
 // Who may call, the method, the content type, the size, and the JSON-RPC methods
-// allowed are checked before this (see registerMCP and screenMCP), in the order
-// the document's errors imply.
+// allowed are checked before this, from the document (see routes.go).
 type mcpAPI struct {
-	unserved
 	s *Server
 }
 
-// mcpCall is what the operation needs besides the generated request: the SDK's
-// handler, and the request as it should be given to it.
-type mcpCall struct {
-	sdk http.Handler
-	r   *http.Request
-}
-
-const mcpCallKey ctxKey = 4
-
 func (a *mcpAPI) Mcp(ctx context.Context, req api.McpRequestObject) (api.McpResponseObject, error) {
-	call := ctx.Value(mcpCallKey).(*mcpCall)
+	rr := readFrom(ctx)
 	id := requestIDOf(ctx)
 
 	// The generated code has read the body as raw JSON; the SDK reads it again.
@@ -46,12 +35,16 @@ func (a *mcpAPI) Mcp(ctx context.Context, req api.McpRequestObject) (api.McpResp
 	if req.Body != nil {
 		raw = *req.Body
 	}
-	r := call.r.WithContext(ctx)
+	// The tools need who is calling, and the request, to check that credential again
+	// during a long wait.
+	caller := &mcpCaller{principal: rr.principal}
+	r := rr.r.WithContext(context.WithValue(ctx, mcpCtxKey{}, caller))
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	r.ContentLength = int64(len(raw))
+	caller.req = r
 
 	rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
-	call.sdk.ServeHTTP(rec, r)
+	a.s.mcpSDK.ServeHTTP(rec, r)
 
 	switch rec.status {
 	case http.StatusOK:

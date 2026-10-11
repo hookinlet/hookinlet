@@ -4,15 +4,12 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math/rand/v2"
-	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -42,9 +39,6 @@ const (
 	// mcpMaxMessageResult is the most get_message will return. Larger messages
 	// are fetched over the REST API's raw endpoint, which streams bytes.
 	mcpMaxMessageResult = 4 << 20
-	// mcpMaxRequestBytes bounds a request to /mcp, which is only ever a small
-	// JSON-RPC call.
-	mcpMaxRequestBytes = 1 << 20
 	// mcpMaxSlugLen is longer than any slug the Store accepts.
 	mcpMaxSlugLen = 256
 
@@ -79,14 +73,15 @@ type mcpCaller struct {
 	srv  *mcp.Server
 }
 
-// registerMCP mounts the MCP endpoint: Streamable HTTP, stateless, JSON replies.
+// newMCP builds the MCP SDK's handler: Streamable HTTP, stateless, JSON replies.
+// The mcp operation of the document hands each call to it (see mcp_api.go).
 //
 // Stateless means no session survives between requests: every call carries its
 // own bearer token and is authorized afresh, so revoking a token takes effect
 // on the next call, and any instance can answer any call.
-func (s *Server) registerMCP(mux *http.ServeMux) {
+func (s *Server) newMCP() http.Handler {
 	cache := mcp.NewSchemaCache()
-	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+	return mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		caller, _ := r.Context().Value(mcpCtxKey{}).(*mcpCaller)
 		caller.once.Do(func() { caller.srv = s.mcpServer(caller, cache) })
 		return caller.srv
@@ -100,122 +95,7 @@ func (s *Server) registerMCP(mux *http.ServeMux) {
 		// legitimately forwards the public Host to a loopback listener.
 		DisableLocalhostProtection: true,
 	})
-	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		w = &noStoreWriter{ResponseWriter: w}
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		principal, err := s.opts.Authenticator.Authenticate(r)
-		switch {
-		case errors.Is(err, inbox.ErrUnauthenticated):
-			w.Header().Set("WWW-Authenticate", `Bearer realm="hookinlet"`)
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
-			return
-		case err != nil:
-			s.internalError(r.Context(), w, "authenticate", err)
-			return
-		}
-		if !s.screenMCP(w, r) {
-			return
-		}
-		caller := &mcpCaller{principal: principal}
-		r = r.WithContext(context.WithValue(r.Context(), mcpCtxKey{}, caller))
-		caller.req = r
-		// The operation answers with what the SDK's handler writes, as a response
-		// the document lists.
-		ctx := context.WithValue(r.Context(), mcpCallKey, &mcpCall{sdk: handler, r: r})
-		s.mcpStrict.Mcp(w, withRequestValues(r.WithContext(ctx), w))
-	})
 }
-
-// mcpMethods are the only JSON-RPC methods the endpoint passes to the SDK. It is
-// a list of what a stateless, tools-only server needs, not of what the SDK
-// knows: newer protocol versions add methods that hold a request open for as
-// long as the client stays (subscriptions/listen), which would outlive a
-// graceful shutdown and need none of the limits the tools have.
-var mcpMethods = map[string]bool{
-	"initialize":                true,
-	"notifications/initialized": true,
-	"notifications/cancelled":   true,
-	"ping":                      true,
-	"tools/list":                true,
-	"tools/call":                true,
-}
-
-// screenMCP checks what the SDK would otherwise decide for us, and answers in
-// the API's usual JSON errors. It reports false after answering.
-//
-// The body is read here, under a size limit, so that two things can be refused
-// before the SDK sees them. A JSON-RPC batch (an array) is run by the SDK as
-// many concurrent calls whose results are all held in memory before anything is
-// written, so one small request could start thousands of waits or build a
-// response of gigabytes. And a method outside mcpMethods is not served.
-func (s *Server) screenMCP(w http.ResponseWriter, r *http.Request) bool {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "this endpoint accepts POST")
-		return false
-	}
-	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "send application/json")
-		return false
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, mcpMaxRequestBytes))
-	var tooLarge *http.MaxBytesError
-	switch {
-	case errors.As(err, &tooLarge):
-		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
-		return false
-	case err != nil:
-		writeError(w, http.StatusBadRequest, "bad_request", "the request body could not be read")
-		return false
-	}
-	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
-		writeError(w, http.StatusBadRequest, "invalid_request", "JSON-RPC batches are not supported; send one request at a time")
-		return false
-	}
-	var head struct {
-		Method string `json:"method"`
-	}
-	if err := json.Unmarshal(body, &head); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "the request is not a JSON object")
-		return false
-	}
-	if !mcpMethods[head.Method] {
-		writeError(w, http.StatusBadRequest, "invalid_request", "unsupported method")
-		return false
-	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	r.ContentLength = int64(len(body))
-	return true
-}
-
-// noStoreWriter makes every response uncacheable. The SDK sets its own
-// Cache-Control after we have, and these responses carry message content.
-type noStoreWriter struct {
-	http.ResponseWriter
-	wrote bool
-}
-
-func (w *noStoreWriter) WriteHeader(code int) {
-	w.wrote = true
-	w.Header().Set("Cache-Control", "no-store")
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *noStoreWriter) Write(b []byte) (int, error) {
-	if !w.wrote {
-		w.WriteHeader(http.StatusOK)
-	}
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *noStoreWriter) Flush() {
-	if !w.wrote {
-		w.WriteHeader(http.StatusOK)
-	}
-	_ = http.NewResponseController(w.ResponseWriter).Flush()
-}
-
-func (w *noStoreWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // mcpServer builds the tools for one caller. It is cheap: schemas are cached.
 func (s *Server) mcpServer(caller *mcpCaller, cache *mcp.SchemaCache) *mcp.Server {

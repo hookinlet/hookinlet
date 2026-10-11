@@ -24,12 +24,7 @@ import (
 // those are typed responses like any other. Once it starts the answer is 200 and
 // the body never ends; that is the sseBody below.
 type streamAPI struct {
-	unserved
 	s *Server
-}
-
-func (s *Server) streamHandler(w http.ResponseWriter, r *http.Request) {
-	s.streamAPI.StreamMessages(w, r, r.PathValue("slug"), api.StreamMessagesParams{})
 }
 
 // StreamMessages starts a stream. It follows Last-Event-ID (a reconnect), else the

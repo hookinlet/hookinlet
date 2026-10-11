@@ -69,6 +69,58 @@
               }
             }
           },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "head": {
+        "operationId": "headHealthz",
+        "summary": "Headers only: Liveness",
+        "tags": [
+          "Operations"
+        ],
+        "responses": {
+          "200": {
+            "description": "The process is up.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
             "content": {
@@ -151,6 +203,70 @@
                 "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
               }
             }
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "security": []
+      },
+      "head": {
+        "operationId": "headReadyz",
+        "summary": "Headers only: Readiness",
+        "tags": [
+          "Operations"
+        ],
+        "responses": {
+          "200": {
+            "description": "The database is reachable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "503": {
+            "description": "The database is not reachable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
           },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
@@ -400,7 +516,230 @@
               }
             }
           }
-        }
+        },
+        "x-additional-query": true
+      },
+      "put": {
+        "operationId": "ingestPut",
+        "summary": "Receive a webhook (PUT)",
+        "tags": [
+          "Ingest"
+        ],
+        "responses": {
+          "400": {
+            "description": "The request body could not be read (the connection broke, or the sender took too long to send it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                },
+                "example": {
+                  "error": {
+                    "code": "bad_request",
+                    "message": "the request body could not be read"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "200": {
+            "description": "Stored (or recognized as a duplicate of an earlier verified delivery, which answers with the earlier seq). A Slack `url_verification` handshake is answered with its challenge as `text/plain` instead, and is not stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "Slack's `url_verification` challenge, echoed after the signature has been checked."
+                },
+                "example": "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "description": "Verification failed and the inbox rejects such deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorVerificationFailed"
+                },
+                "example": {
+                  "error": {
+                    "code": "verification_failed",
+                    "message": "webhook verification failed"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "402": {
+            "description": "Refused by an embedder's hook (quota).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorQuotaExceeded"
+                },
+                "example": {
+                  "error": {
+                    "code": "quota_exceeded",
+                    "message": "the quota for this inbox has been reached"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "403": {
+            "description": "Refused by an embedder's hook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorForbidden"
+                },
+                "example": {
+                  "error": {
+                    "code": "forbidden",
+                    "message": "this delivery is not allowed"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "429": {
+            "description": "Refused by an embedder's hook (rate limit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorRateLimited"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limited",
+                    "message": "too many requests"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "Webhook senders post here. The credential is the inbox's signature scheme (see docs/verifiers.md), not a bearer token. An unknown key and a disabled inbox are indistinguishable (404). Both `POST` and `PUT` are accepted; this document lists `POST`. The path after the key may contain slashes, which OpenAPI path templates cannot express.",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The inbox's ingest key, which is its slug."
+          }
+        ],
+        "security": [],
+        "requestBody": {
+          "required": false,
+          "description": "Any bytes. They are stored exactly as sent and checked against the inbox's verifier.",
+          "content": {
+            "*/*": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "x-additional-query": true
       }
     },
     "/in/{key}/{rest}": {
@@ -616,7 +955,8 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stored as the message's `path`. May contain further slashes."
+            "description": "Stored as the message's `path`. May contain further slashes.",
+            "x-multi-segment": true
           }
         ],
         "security": [],
@@ -631,7 +971,239 @@
               }
             }
           }
-        }
+        },
+        "x-additional-query": true
+      },
+      "put": {
+        "operationId": "ingestPutWithPath",
+        "summary": "Receive a webhook at a sub-path (PUT)",
+        "tags": [
+          "Ingest"
+        ],
+        "responses": {
+          "400": {
+            "description": "The request body could not be read (the connection broke, or the sender took too long to send it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                },
+                "example": {
+                  "error": {
+                    "code": "bad_request",
+                    "message": "the request body could not be read"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "200": {
+            "description": "Stored (or recognized as a duplicate of an earlier verified delivery, which answers with the earlier seq). A Slack `url_verification` handshake is answered with its challenge as `text/plain` instead, and is not stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "Slack's `url_verification` challenge, echoed after the signature has been checked."
+                },
+                "example": "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "description": "Verification failed and the inbox rejects such deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorVerificationFailed"
+                },
+                "example": {
+                  "error": {
+                    "code": "verification_failed",
+                    "message": "webhook verification failed"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "402": {
+            "description": "Refused by an embedder's hook (quota).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorQuotaExceeded"
+                },
+                "example": {
+                  "error": {
+                    "code": "quota_exceeded",
+                    "message": "the quota for this inbox has been reached"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "403": {
+            "description": "Refused by an embedder's hook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorForbidden"
+                },
+                "example": {
+                  "error": {
+                    "code": "forbidden",
+                    "message": "this delivery is not allowed"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "429": {
+            "description": "Refused by an embedder's hook (rate limit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorRateLimited"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limited",
+                    "message": "too many requests"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "Webhook senders post here. The credential is the inbox's signature scheme (see docs/verifiers.md), not a bearer token. An unknown key and a disabled inbox are indistinguishable (404). Both `POST` and `PUT` are accepted; this document lists `POST`. The path after the key may contain slashes, which OpenAPI path templates cannot express.",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stored as the message's `path`. May contain further slashes.",
+            "x-multi-segment": true
+          }
+        ],
+        "security": [],
+        "requestBody": {
+          "required": false,
+          "description": "Any bytes. They are stored exactly as sent and checked against the inbox's verifier.",
+          "content": {
+            "*/*": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "x-additional-query": true
       }
     },
     "/v1/inboxes/{slug}": {
@@ -2107,7 +2679,8 @@
                 "$ref": "#/components/schemas/JsonRpcRequest"
               }
             }
-          }
+          },
+          "x-max-bytes": 1048576
         }
       }
     },
@@ -2210,7 +2783,8 @@
                 "$ref": "#/components/schemas/CreateInbox"
               }
             }
-          }
+          },
+          "x-max-bytes": 65536
         }
       },
       "get": {
@@ -2486,7 +3060,8 @@
                 "$ref": "#/components/schemas/PatchInbox"
               }
             }
-          }
+          },
+          "x-max-bytes": 65536
         }
       },
       "delete": {
@@ -2663,7 +3238,8 @@
                 "$ref": "#/components/schemas/SetSecret"
               }
             }
-          }
+          },
+          "x-max-bytes": 65536
         }
       }
     },
@@ -3895,7 +4471,8 @@
             "type": "object"
           }
         },
-        "additionalProperties": true
+        "additionalProperties": true,
+        "x-reason": "JSON-RPC batches are not supported; send one request at a time"
       },
       "JsonRpcResponse": {
         "type": "object",

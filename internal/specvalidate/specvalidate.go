@@ -35,6 +35,8 @@ var Keywords = map[string]bool{
 	"enum": true, "const": true, "pattern": true, "minimum": true, "maximum": true, "minLength": true,
 	"maxLength": true, "minItems": true, "maxItems": true, "minProperties": true, "oneOf": true,
 	"format": true, "$ref": true,
+	// x-reason replaces the sentence for a value of the wrong type in this schema.
+	"x-reason":    true,
 	"description": true, "example": true, "default": true, "title": true,
 }
 
@@ -84,6 +86,9 @@ type Param struct {
 	Required bool
 	Schema   map[string]any
 	Array    bool // the schema is an array: the parameter may be repeated
+	// MultiSegment marks a path parameter that takes the rest of the path,
+	// slashes included (`x-multi-segment`). OpenAPI path templates cannot say so.
+	MultiSegment bool
 }
 
 // Load parses a document and checks that it can be enforced: every reference
@@ -151,6 +156,7 @@ func Load(b []byte) (*Document, error) {
 				prm := Param{Name: pm["name"].(string), In: pm["in"].(string), Schema: schema}
 				prm.Required, _ = pm["required"].(bool)
 				prm.Array = schema["type"] == "array"
+				prm.MultiSegment, _ = pm["x-multi-segment"].(bool)
 				op.Params = append(op.Params, prm)
 			}
 			if rb, ok := d.Deref(om["requestBody"]).(map[string]any); ok {
@@ -311,6 +317,23 @@ func (o *Operation) Statuses() []string {
 // TakesBody reports whether the operation has a JSON request body.
 func (o *Operation) TakesBody() bool { return o.body != nil }
 
+// AnyQuery reports whether the operation takes any query string at all
+// (`x-additional-query`): an ingest URL's query is the sender's data.
+func (o *Operation) AnyQuery() bool {
+	v, _ := o.raw["x-additional-query"].(bool)
+	return v
+}
+
+// HasTag reports whether the operation carries the tag.
+func (o *Operation) HasTag(tag string) bool {
+	for _, t := range asList(o.raw["tags"]) {
+		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
 // Raw is the operation as written in the document. Callers must not change it.
 func (o *Operation) Raw() map[string]any { return o.raw }
 
@@ -331,6 +354,8 @@ func (o *Operation) CheckQuery(q url.Values) []Violation {
 	for name, values := range q {
 		p, ok := known[name]
 		switch {
+		case !ok && o.AnyQuery():
+			// The operation stores the query string as the sender wrote it.
 		case !ok:
 			vs = append(vs, Violation{Path: name, Reason: "unknown parameter"})
 		case !p.Array && len(values) > 1:
@@ -501,7 +526,11 @@ func (d *Document) check(schema, v any, at string, opts Options) []Violation {
 			for i, ty := range types {
 				names[i] = article(ty.(string))
 			}
-			return append(vs, Violation{Path: at, Reason: "must be " + strings.Join(names, " or ")})
+			reason := "must be " + strings.Join(names, " or ")
+			if custom, ok := sm["x-reason"].(string); ok {
+				reason = custom
+			}
+			return append(vs, Violation{Path: at, Reason: reason})
 		}
 	}
 	switch x := v.(type) {
@@ -618,4 +647,123 @@ func jsonEqual(a, b any) bool {
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)
 	return bytes.Equal(x, y)
+}
+
+// ---- what the document says about who may call and how ----
+
+// Security is who may call an operation.
+type Security int
+
+const (
+	// Open needs no credential.
+	Open Security = iota
+	// Agent needs a credential that may read the inbox the path names (or, where it
+	// names none, any credential the server knows). The admin credential is
+	// accepted wherever an agent's is.
+	Agent
+	// Admin needs the admin credential.
+	Admin
+)
+
+// Security reads the operation's `security`: none (an empty list) is Open; a list
+// that offers the agent token is Agent; one that offers only the admin token is
+// Admin.
+func (o *Operation) Security() Security {
+	reqs := asList(o.raw["security"])
+	if len(reqs) == 0 {
+		return Open
+	}
+	for _, r := range reqs {
+		if _, ok := r.(map[string]any)["agentToken"]; ok {
+			return Agent
+		}
+	}
+	return Admin
+}
+
+// MaxBodyBytes is the largest JSON request body the operation takes
+// (`x-max-bytes` on its requestBody), or 0 if it takes none.
+func (o *Operation) MaxBodyBytes() int64 {
+	rb, _ := o.doc.Deref(o.raw["requestBody"]).(map[string]any)
+	n, _ := rb["x-max-bytes"].(float64)
+	return int64(n)
+}
+
+// PathParam returns the named path parameter, if the operation has it.
+func (o *Operation) PathParam(name string) (Param, bool) {
+	for _, p := range o.Params {
+		if p.In == "path" && p.Name == name {
+			return p, true
+		}
+	}
+	return Param{}, false
+}
+
+// CheckPath checks the values of the operation's path parameters (as net/http
+// parsed them, already unescaped) against their schemas. A path parameter that
+// fails describes a resource that cannot exist.
+func (o *Operation) CheckPath(value func(name string) string) []Violation {
+	var vs []Violation
+	for _, p := range o.Params {
+		if p.In != "path" {
+			continue
+		}
+		raw := value(p.Name)
+		if raw == "" && !p.MultiSegment {
+			vs = append(vs, Violation{Path: p.Name, Reason: "is empty"})
+			continue
+		}
+		got := o.queryValue(p.Name, p.Schema, raw)
+		if len(got) == 0 && p.Schema["type"] == "integer" {
+			// One resource has one address: /messages/01 is not /messages/1.
+			if n, err := strconv.ParseInt(raw, 10, 64); err != nil || strconv.FormatInt(n, 10) != raw {
+				got = []Violation{{Path: p.Name, Reason: "must be written without leading zeros or a plus sign"}}
+			}
+		}
+		vs = append(vs, got...)
+	}
+	sortViolations(vs)
+	return vs
+}
+
+// Route is a path of the document with every method it takes.
+type Route struct {
+	// Path is the OpenAPI template; Pattern is the same path as net/http spells it
+	// (`{rest...}` for a parameter that takes the rest of the path).
+	Path, Pattern string
+	// Methods are the methods the document gives this path, sorted.
+	Methods []string
+	// Security is that of the path's operations (all of a path's operations agree).
+	Security Security
+}
+
+// Routes lists the document's paths, ordered by path.
+func (d *Document) Routes() []Route {
+	byPath := map[string]*Route{}
+	for _, op := range d.ops {
+		r := byPath[op.Path]
+		if r == nil {
+			r = &Route{Path: op.Path, Pattern: op.Pattern(), Security: op.Security()}
+			byPath[op.Path] = r
+		}
+		r.Methods = append(r.Methods, op.Method)
+	}
+	out := make([]Route, 0, len(byPath))
+	for _, r := range byPath {
+		sort.Strings(r.Methods)
+		out = append(out, *r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+// Pattern is the operation's path as net/http spells it.
+func (o *Operation) Pattern() string {
+	p := o.Path
+	for _, prm := range o.Params {
+		if prm.In == "path" && prm.MultiSegment {
+			p = strings.Replace(p, "{"+prm.Name+"}", "{"+prm.Name+"...}", 1)
+		}
+	}
+	return p
 }

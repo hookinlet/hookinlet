@@ -18,3 +18,14 @@ actions:
   - target: $.components.schemas.JsonRpcResponse
     update:
       x-go-type: json.RawMessage
+  # The rest of an ingest path may be empty (`/in/key/`), which the document cannot
+  # say of a path parameter; the generated code is told, so it does not refuse it.
+  - target: $.paths["/in/{key}/{rest}"].*.parameters[?(@.name=="rest")]
+    update:
+      required: false
+  # A reconnecting browser may send an empty Last-Event-ID, which means "none yet".
+  # The server reads the header itself; the generated code is told it is text so
+  # that it does not refuse the empty one.
+  - target: $.paths["/v1/inboxes/{slug}/stream"].get.parameters[?(@.name=="Last-Event-ID")].schema
+    update:
+      type: string

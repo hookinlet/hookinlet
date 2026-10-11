@@ -107,7 +107,7 @@ func TestUnknownRoutesReturnJSONErrors(t *testing.T) {
 	s, _ := newTestServer(t)
 	for _, tt := range []struct{ method, path string }{
 		{http.MethodGet, "/nope"},
-		{http.MethodPost, "/healthz"},
+		{http.MethodGet, "/healthz/extra"},
 	} {
 		rec := do(t, s.Handler(), tt.method, tt.path, nil)
 		if rec.Code != http.StatusNotFound {
@@ -118,6 +118,26 @@ func TestUnknownRoutesReturnJSONErrors(t *testing.T) {
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error.Code != "not_found" {
 			t.Errorf("%s %s: body %q, err %v", tt.method, tt.path, rec.Body.String(), err)
+		}
+	}
+}
+
+// A method a path does not take is a 405 with the methods the document gives it.
+func TestAWrongMethodIsAJSON405WithAnAllowHeader(t *testing.T) {
+	s, _ := newTestServer(t)
+	for _, tt := range []struct{ method, path, allow string }{
+		{http.MethodPost, "/healthz", "GET, HEAD"},
+		{http.MethodDelete, "/readyz", "GET, HEAD"},
+		{http.MethodGet, "/in/some-inbox", "POST, PUT"},
+		{http.MethodHead, "/in/some-inbox/sub", "POST, PUT"},
+	} {
+		rec := do(t, s.Handler(), tt.method, tt.path, nil)
+		var body struct {
+			Error struct{ Code string } `json:"error"`
+		}
+		if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != tt.allow ||
+			(tt.method != http.MethodHead && (json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Error.Code != "method_not_allowed")) {
+			t.Errorf("%s %s: %d, Allow %q, body %q", tt.method, tt.path, rec.Code, rec.Header().Get("Allow"), rec.Body.String())
 		}
 	}
 }
