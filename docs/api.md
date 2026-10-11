@@ -363,7 +363,11 @@ delivery returns the `seq` of the message that is already stored.
 
 ### Guarantees
 
-- A `200` is sent **only after the message is committed** to the store.
+- A `200` is sent **only after the message is committed** to the store and
+  synced to disk (SQLite `synchronous=FULL`), so an acknowledged message
+  survives a power loss as well as a crash of the process. This relies on the
+  storage device honoring flushes; a drive that acknowledges a flush while the
+  data is still in a volatile write cache can lose it.
 - The body is stored byte for byte. Signatures are verified over those exact
   bytes before anything is parsed.
 - `Authorization`, `Cookie`, `Proxy-Authorization`, and the inbox's shared-token

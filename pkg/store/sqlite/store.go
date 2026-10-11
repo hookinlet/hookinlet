@@ -152,7 +152,10 @@ func openDB(path string, _ int, readOnly bool) (*sql.DB, error) {
 		fmt.Sprintf("busy_timeout(%d)", busyTimeout),
 		"journal_mode(WAL)",
 		"foreign_keys(1)",
-		"synchronous(NORMAL)",
+		// FULL syncs the WAL on every commit, so a message acknowledged with a 2xx
+		// survives power loss and not only a crash of this process. NORMAL would
+		// leave the latest commits unsynced.
+		"synchronous(FULL)",
 	} {
 		q.Add("_pragma", p)
 	}
