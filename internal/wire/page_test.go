@@ -500,3 +500,49 @@ func TestDescendingReadsHaveNoCursor(t *testing.T) {
 		t.Errorf("complete=%v cursor=%d; a newest-first read has neither", p.Complete, p.Cursor)
 	}
 }
+
+func TestBodyCapLeavesOutBigBodiesAndSaysSo(t *testing.T) {
+	s, in := newStore(t)
+	add(t, s, in, 3, func(i int, m *inbox.NewMessage) {
+		switch i {
+		case 1:
+			m.Body = []byte(`{"small":true}`)
+		case 2:
+			m.Body = bytes.Repeat([]byte("x"), 5000)
+		case 3:
+			m.Body = nil // an empty body is not a truncated one
+		}
+	})
+	asc := int64(0)
+	page, err := FetchPage(t.Context(), s, in, PageRequest{
+		Query: inbox.Query{After: &asc, Limit: 10}, Limit: 10, BodyCap: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Messages) != 3 {
+		t.Fatalf("got %d messages", len(page.Messages))
+	}
+	small, big, empty := page.Messages[0], page.Messages[1], page.Messages[2]
+	if small.BodyTruncated || string(small.Body) != `{"small":true}` {
+		t.Errorf("a small body must come through whole: %+v", small)
+	}
+	if !big.BodyTruncated || big.Body != nil || big.BodyText != nil || big.BodyBase64 != nil {
+		t.Errorf("a big body must be left out and marked: %+v", big)
+	}
+	if big.Size != 5000 {
+		t.Errorf("size must still be the true length, got %d", big.Size)
+	}
+	if empty.BodyTruncated {
+		t.Errorf("an empty body is not truncated: %+v", empty)
+	}
+
+	// Without a cap nothing is ever marked, and the big body is loaded.
+	page, err = FetchPage(t.Context(), s, in, PageRequest{Query: inbox.Query{After: &asc, Limit: 10}, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Messages[1].BodyTruncated || page.Messages[1].BodyText == nil {
+		t.Errorf("without a cap the body must be loaded: %+v", page.Messages[1])
+	}
+}
