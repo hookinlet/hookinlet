@@ -6,3 +6,6 @@ rules:
   operation-4xx-response: off
   # hookinlet is run by whoever downloads it: localhost is the honest example address.
   no-server-example.com: off
+  # The tools of the MCP endpoint are listed under `x-mcp-tools`, which refers to
+  # their argument schemas; the linter does not follow extensions.
+  no-unused-components: off

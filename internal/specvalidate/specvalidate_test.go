@@ -34,7 +34,7 @@ const doc = `{
   "/things": {
    "post": {
     "operationId": "makeThing",
-    "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}}},
+    "requestBody": {"x-max-bytes": 1000, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}}},
     "responses": {"201": {"$ref": "#/components/responses/Made"}, "400": {"description": "bad"}}
    },
    "get": {"operationId": "listThings", "responses": {"200": {"description": "ok"}}}
@@ -369,5 +369,60 @@ func TestIntegerQueryValuesUpToInt64AreAccepted(t *testing.T) {
 		if !strings.Contains(reasons(vs), tc.want) {
 			t.Errorf("limit=%s: %q, want %q", tc.v, reasons(vs), tc.want)
 		}
+	}
+}
+
+func TestLoadRefusesOperationsThatLeaveWhatTheServerWouldDecideByDefault(t *testing.T) {
+	for name, tc := range map[string]struct{ from, to, want string }{
+		"a JSON body with no limit":      {`"x-max-bytes": 1000, `, ``, "x-max-bytes"},
+		"a path with two credentials":    {`"operationId": "listThings",`, `"operationId": "listThings", "security": [{"adminToken": []}],`, "same credential"},
+		"an agent route that names none": {`"operationId": "getThing",`, `"operationId": "getThing", "security": [{"agentToken": []}],`, "x-inbox"},
+	} {
+		s := strings.Replace(doc, tc.from, tc.to, 1)
+		if _, err := Load([]byte(s)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: Load = %v, want an error containing %q", name, err, tc.want)
+		}
+	}
+}
+
+func TestSecurityPathsAndRoutes(t *testing.T) {
+	s := strings.Replace(doc, `"operationId": "getThing",`, `"operationId": "getThing", "security": [{"agentToken": []}, {"adminToken": []}],`, 1)
+	s = strings.Replace(s, `{"name": "id", "in": "path", "required": true,`, `{"name": "id", "in": "path", "required": true, "x-inbox": true,`, 1)
+	d := load(t, s)
+	op := d.Operation("getThing")
+	if op.Security() != Agent {
+		t.Errorf("security = %v", op.Security())
+	}
+	if name, ok := op.InboxParam(); !ok || name != "id" {
+		t.Errorf("inbox param = %q, %v", name, ok)
+	}
+	if d.Operation("makeThing").Security() != Open {
+		t.Error("an operation with no security needs none")
+	}
+	var found bool
+	for _, r := range d.Routes() {
+		if r.Path == "/things" {
+			found = true
+			if len(r.Methods) != 2 || r.Methods[0] != "GET" || r.Methods[1] != "POST" {
+				t.Errorf("methods = %v", r.Methods)
+			}
+		}
+	}
+	if !found {
+		t.Error("no route for /things")
+	}
+	if vs := op.CheckPath(func(string) string { return "01" }); len(vs) != 0 {
+		t.Errorf("a string path parameter refused: %v", vs)
+	}
+}
+
+func TestTheReasonForAWrongTypeOnlyReplacesTheTypeMessageOfAnArray(t *testing.T) {
+	d := load(t, `{"openapi":"3.1.0","paths":{}}`)
+	sc := map[string]any{"type": "object", "x-reason": "no batches"}
+	if vs := d.Check(sc, []any{}, Options{}); len(vs) != 1 || vs[0].Reason != "no batches" {
+		t.Errorf("an array: %v", vs)
+	}
+	if vs := d.Check(sc, 5.0, Options{}); len(vs) != 1 || vs[0].Reason != "must be an object" {
+		t.Errorf("a number was given the batch message: %v", vs)
 	}
 }

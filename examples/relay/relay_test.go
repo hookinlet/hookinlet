@@ -291,8 +291,17 @@ func TestARestartCarriesOnWithoutRepeatingOrLosingAnything(t *testing.T) {
 	d := newDestination(t, nil)
 	runUntil(t, relayFor(t, h, d, state), func() bool { return len(d.bodies()) == 2 })
 
-	if b, _ := os.ReadFile(state); strings.TrimSpace(string(b)) != "2" { //nolint:gosec // a temp path
-		t.Fatalf("state file = %q, want 2", b)
+	// The position is saved just after the delivery that moved it, so the file may
+	// be a moment behind the last body the destination saw.
+	var saved string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		b, _ := os.ReadFile(state) //nolint:gosec // a temp path
+		if saved = strings.TrimSpace(string(b)); saved == "2" {
+			break
+		}
+	}
+	if saved != "2" {
+		t.Fatalf("state file = %q, want 2", saved)
 	}
 	h.send(t, "three", "text/plain")
 	// A new relay, as after a restart: it starts "beginning" but the state wins.

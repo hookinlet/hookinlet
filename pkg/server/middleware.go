@@ -136,3 +136,15 @@ func recoverer(log *slog.Logger, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// protective marks every response uncacheable and its type final. Responses carry
+// message content and settings, and depend on who is asking; some of that content
+// is chosen by whoever sent the webhook, so no client may guess a type for it.
+func protective(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
+}

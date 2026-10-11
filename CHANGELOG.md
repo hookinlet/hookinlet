@@ -6,6 +6,33 @@ applies.
 
 ## Unreleased
 
+### Phase 10: the document drives the server
+
+#### Changed
+- Routes, the credential each operation needs, and the checks on path parameters,
+  the query string, and the JSON body come from `docs/openapi.json` and the code
+  generated from it. The only route written in Go is the catch-all that answers 404.
+- A method a path does not take is a JSON 405 with an `Allow` header made from the
+  document. `/healthz` and `/readyz` answer it too (they used to answer 404) and now
+  take `HEAD`. A path that needs a credential checks it before answering 405.
+- Every response carries `Cache-Control: no-store` and
+  `X-Content-Type-Options: nosniff`.
+- A query string with invalid UTF-8 is refused (400), except on ingest and the health checks, which take any query string as they always did.
+- A JSON-RPC body that is not an object (a batch, or `null`) and one whose `id` is not a string or an integer are refused before the MCP SDK sees them.
+- MCP tools take their names, descriptions, and argument schemas from the
+  document. The arguments are validated by the SDK against those schemas.
+
+#### Added
+- `PUT` on `/in/{key}` and `/in/{key}/{rest}` is documented as operations of its
+  own (the server always accepted it), and `HEAD` on the health checks.
+- The document describes the MCP tools (`x-mcp-tools`) and the frames of the event
+  stream (`x-frames`); tests hold the server and `docs/mcp.md` to them.
+
+#### Removed
+- `wire.ParseMessages`, `wire.ParseStream`, `wire.QueryValues`, and
+  `wire.RejectParams` (internal): requests are built from the generated parameters
+  by `wire.NewPageRequest` and `wire.NewStreamRequest`.
+
 ### Phase 9: the spec is the contract, enforced in Go
 
 #### Changed

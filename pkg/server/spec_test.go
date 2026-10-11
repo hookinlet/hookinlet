@@ -225,3 +225,44 @@ func TestVerifierConfigNumbersSurviveTheResponse(t *testing.T) {
 		t.Errorf("config numbers changed: %s", out)
 	}
 }
+
+// A request the generated code cannot even read (a parameter of the wrong type) is
+// still answered as the credential deserves: nothing about parameter checking is
+// learned by someone who may not use the operation.
+func TestAMalformedParameterNeverBeatsTheCredentialCheck(t *testing.T) {
+	a := newAdminEnv(t)
+	a.tokenB = a.tokenFor(a.newInbox("agent-b", "none", ""))
+	for _, tc := range []struct {
+		name, method, path, tok string
+		want                    int
+	}{
+		{"anonymous, bad after", http.MethodGet, "/v1/inboxes/agent-a/messages?after=abc", "", http.StatusUnauthorized},
+		{"anonymous, bad seq", http.MethodGet, "/v1/inboxes/agent-a/messages/abc", "", http.StatusUnauthorized},
+		{"anonymous, bad stream cursor", http.MethodGet, "/v1/inboxes/agent-a/stream?after=x", "", http.StatusUnauthorized},
+		{"another inbox's token, bad after", http.MethodGet, "/v1/inboxes/agent-a/messages?after=abc", a.tokenB, http.StatusNotFound},
+		{"another inbox's token, bad seq", http.MethodGet, "/v1/inboxes/agent-a/messages/abc", a.tokenB, http.StatusNotFound},
+		{"an agent on the admin API, bad limit", http.MethodGet, "/admin/inboxes?limit=abc", a.tokenA, http.StatusForbidden},
+		{"anonymous on the admin API, bad limit", http.MethodGet, "/admin/inboxes?limit=abc", "", http.StatusUnauthorized},
+	} {
+		st, _, data := a.call(tc.method, tc.path, nil, tc.tok)
+		if st != tc.want {
+			t.Errorf("%s: %d %s, want %d", tc.name, st, data, tc.want)
+		}
+	}
+}
+
+// A delivery is not refused for its URL, and a probe is not refused for a
+// cache-busting query string.
+func TestIngestAndHealthChecksTakeAnyQueryString(t *testing.T) {
+	a := newAdminEnv(t)
+	for _, path := range []string{"/in/agent-a?a=1;b=2", "/in/agent-a?a=%zz", "/in/agent-a/x?a=1;b=2"} {
+		if st, _, data := a.call(http.MethodPost, path, "{}", ""); st != http.StatusOK {
+			t.Errorf("POST %s: %d %s", path, st, data)
+		}
+	}
+	for _, path := range []string{"/healthz?cb=123", "/readyz?cb=123"} {
+		if st, _, data := a.call(http.MethodGet, path, nil, ""); st != http.StatusOK {
+			t.Errorf("GET %s: %d %s", path, st, data)
+		}
+	}
+}

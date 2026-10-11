@@ -44,30 +44,6 @@ type clientGoneError struct{ err error }
 func (e *clientGoneError) Error() string { return "client gone: " + e.err.Error() }
 func (e *clientGoneError) Unwrap() error { return e.err }
 
-// handleStream serves GET /v1/inboxes/{slug}/stream as Server-Sent Events.
-//
-// A stream starts at Last-Event-ID (a reconnect), else the after parameter, else
-// the present moment with no replay. It then replays what it missed and follows
-// new messages as they arrive. Each message is one event whose id is its seq, so
-// a client that reconnects with Last-Event-ID resumes exactly where it stopped.
-//
-// Waking up is the notifier's job and reading is the Store's. A signal only says
-// "look again"; the stream then reads from its own cursor. That is why a dropped
-// signal costs latency and never data, and why SSERecheckInterval can paper over
-// a notifier that drops them.
-func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "this endpoint accepts GET")
-		return
-	}
-	in, ok := s.authorize(w, r)
-	if !ok || !s.checkQuery(w, r) {
-		return
-	}
-	readHandler(s.streamHandler)(w, r, in)
-}
-
 // takeStream takes a stream slot, both a global one and one of the inbox's share.
 // The per-inbox share keeps one token from using them all. It returns the reason
 // for refusing, or a release function. Anything that holds a connection open for a

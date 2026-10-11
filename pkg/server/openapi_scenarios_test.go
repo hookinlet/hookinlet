@@ -42,26 +42,45 @@ func ordinaryUse(t *testing.T, c *contract) {
 	cl.call("createInbox", "POST", "/admin/inboxes", map[string]any{"slug": "signed-inbox", "verifier": "github", "verifier_secret": "s3"}, admin)
 
 	cl.call("healthz", "GET", "/healthz", nil, "")
+	cl.call("healthz", "POST", "/healthz", nil, "")
+	cl.call("headHealthz", "HEAD", "/healthz", nil, "")
 	cl.call("readyz", "GET", "/readyz", nil, "")
+	cl.call("readyz", "DELETE", "/readyz", nil, "")
+	cl.call("headReadyz", "HEAD", "/readyz", nil, "")
 
 	cl.call("ingest", "POST", "/in/agent-a", `{"hello":"world"}`, "", "Content-Type", "application/json")
+	cl.call("ingestPut", "PUT", "/in/agent-a", `{"hello":"world"}`, "", "Content-Type", "application/json")
 	cl.call("ingest", "POST", "/in/agent-a", "plain text", "", "Content-Type", "text/plain")
-	cl.call("ingest", "POST", "/in/signed-inbox", `{"x":1}`, "", "Content-Type", "application/json") // unsigned: 401
+	cl.call("ingestPut", "PUT", "/in/agent-a", "plain text", "", "Content-Type", "text/plain")
+	cl.call("ingest", "POST", "/in/signed-inbox", `{"x":1}`, "", "Content-Type", "application/json")   // unsigned: 401
+	cl.call("ingestPut", "PUT", "/in/signed-inbox", `{"x":1}`, "", "Content-Type", "application/json") // unsigned: 401
 	cl.call("ingest", "POST", "/in/no-such-inbox", "x", "")
+	cl.call("ingestPut", "PUT", "/in/no-such-inbox", "x", "")
 	cl.call("ingest", "GET", "/in/agent-a", nil, "")
+	cl.call("ingestPut", "GET", "/in/agent-a", nil, "")
 	cl.call("ingestWithPath", "POST", "/in/agent-a/some/sub/path?q=1", `{"n":2}`, "", "Content-Type", "application/json")
+	cl.call("ingestPutWithPath", "PUT", "/in/agent-a/some/sub/path?q=1", `{"n":2}`, "", "Content-Type", "application/json")
 	cl.call("ingestWithPath", "GET", "/in/agent-a/x", nil, "")
-	cl.call("ingestWithPath", "POST", "/in/signed-inbox/sub", `{"x":1}`, "", "Content-Type", "application/json") // unsigned: 401
+	cl.call("ingestPutWithPath", "GET", "/in/agent-a/x", nil, "")
+	cl.call("ingestWithPath", "POST", "/in/signed-inbox/sub", `{"x":1}`, "", "Content-Type", "application/json")   // unsigned: 401
+	cl.call("ingestPutWithPath", "PUT", "/in/signed-inbox/sub", `{"x":1}`, "", "Content-Type", "application/json") // unsigned: 401
 	cl.call("ingestWithPath", "POST", "/in/no-such-inbox/sub", "x", "")
+	cl.call("ingestPutWithPath", "PUT", "/in/no-such-inbox/sub", "x", "")
 	a.mustAdmin("PATCH", "/admin/inboxes/agent-a", map[string]any{"max_body_bytes": 64}, 200)
 	cl.call("ingest", "POST", "/in/agent-a", strings.Repeat("x", 200), "")
+	cl.call("ingestPut", "PUT", "/in/agent-a", strings.Repeat("x", 200), "")
 	cl.call("ingestWithPath", "POST", "/in/agent-a/big", strings.Repeat("x", 200), "")
+	cl.call("ingestPutWithPath", "PUT", "/in/agent-a/big", strings.Repeat("x", 200), "")
 	a.mustAdmin("PATCH", "/admin/inboxes/agent-a", map[string]any{"max_body_bytes": 1048576}, 200)
 	// A body that stops before its declared length.
 	st, h, b := rawBrokenBody(t, addr, "/in/agent-a", "", 100, "short")
 	c.record("ingest", st, h, b, false, false)
 	st, h, b = rawBrokenBody(t, addr, "/in/agent-a/sub", "", 100, "short")
 	c.record("ingestWithPath", st, h, b, false, false)
+	st, h, b = rawBrokenBodyAs(t, addr, "PUT", "/in/agent-a", "", 100, "short")
+	c.record("ingestPut", st, h, b, false, false)
+	st, h, b = rawBrokenBodyAs(t, addr, "PUT", "/in/agent-a/sub", "", 100, "short")
+	c.record("ingestPutWithPath", st, h, b, false, false)
 
 	for _, m := range []string{"GET", "HEAD"} {
 		pre := ""
@@ -212,7 +231,9 @@ func hooksRefuse(t *testing.T, c *contract) {
 		a.hooks.before = func(*inbox.Inbox, int64) error { return fmt.Errorf("%w: test", refusal) }
 		a.hooks.mu.Unlock()
 		cl.call("ingest", "POST", "/in/agent-a", "x", "")
+		cl.call("ingestPut", "PUT", "/in/agent-a", "x", "")
 		cl.call("ingestWithPath", "POST", "/in/agent-a/p", "x", "")
+		cl.call("ingestPutWithPath", "PUT", "/in/agent-a/p", "x", "")
 	}
 }
 
@@ -237,10 +258,13 @@ func storeFails(t *testing.T, c *contract) {
 
 	f.set(false, false, true)
 	cl.call("readyz", "GET", "/readyz", nil, "")
+	cl.call("headReadyz", "HEAD", "/readyz", nil, "")
 
 	f.set(true, false, false)
 	cl.call("ingest", "POST", "/in/agent-a", "x", "")
+	cl.call("ingestPut", "PUT", "/in/agent-a", "x", "")
 	cl.call("ingestWithPath", "POST", "/in/agent-a/p", "x", "")
+	cl.call("ingestPutWithPath", "PUT", "/in/agent-a/p", "x", "")
 	for _, p := range []struct{ id, path string }{
 		{"getInbox", "/v1/inboxes/agent-a"}, {"listMessages", "/v1/inboxes/agent-a/messages"},
 		{"getMessage", "/v1/inboxes/agent-a/messages/1"}, {"getMessageRaw", "/v1/inboxes/agent-a/messages/1/raw"},
@@ -374,6 +398,4 @@ func httpStack(t *testing.T, c *contract) {
 	a := newAdminEnv(t)
 	cl := c.on(a.base)
 	cl.callDefault("getInbox", "GET", "/v1/inboxes/agent-a", nil, a.tokenA, "X-Padding", strings.Repeat("p", 80<<10))
-	cl.callDefault("healthz", "POST", "/healthz", nil, "")
-	cl.callDefault("readyz", "DELETE", "/readyz", nil, "")
 }

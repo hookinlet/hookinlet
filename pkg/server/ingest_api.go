@@ -15,7 +15,6 @@ import (
 // into a response the document lists for the operation, so that an ingest cannot
 // answer with a status the document does not describe.
 type ingestAPI struct {
-	unserved
 	s *Server
 }
 
@@ -103,6 +102,86 @@ func (a *ingestAPI) IngestWithPath(ctx context.Context, _ api.IngestWithPathRequ
 		return api.IngestWithPath429JSONResponse{Body: b, Headers: api.IngestWithPath429ResponseHeaders{XRequestId: id}}, nil
 	}
 	return api.IngestWithPath500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+}
+
+func (a *ingestAPI) IngestPut(ctx context.Context, _ api.IngestPutRequestObject) (api.IngestPutResponseObject, error) {
+	res := a.run(ctx)
+	id := requestIDOf(ctx)
+	switch res.status {
+	case http.StatusOK:
+		if res.challenge != nil {
+			setNosniff(ctx)
+			return api.IngestPut200TextResponse{Body: string(res.challenge), Headers: api.IngestPut200ResponseHeaders{XRequestId: id}}, nil
+		}
+		return api.IngestPut200JSONResponse{Body: api.Accepted{Seq: int(res.seq)}, Headers: api.IngestPut200ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusBadRequest:
+		var b api.ErrorBadRequest
+		b.Error.Code, b.Error.Message = api.ErrorBadRequestErrorCode(res.code), res.msg
+		return api.IngestPut400JSONResponse{Body: b, Headers: api.IngestPut400ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusUnauthorized:
+		var b api.ErrorVerificationFailed
+		b.Error.Code, b.Error.Message = api.VerificationFailed, res.msg
+		return api.IngestPut401JSONResponse{Body: b, Headers: api.IngestPut401ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusPaymentRequired:
+		var b api.ErrorQuotaExceeded
+		b.Error.Code, b.Error.Message = api.QuotaExceeded, res.msg
+		return api.IngestPut402JSONResponse{Body: b, Headers: api.IngestPut402ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusForbidden:
+		var b api.ErrorForbidden
+		b.Error.Code, b.Error.Message = api.ErrorForbiddenErrorCodeForbidden, res.msg
+		return api.IngestPut403JSONResponse{Body: b, Headers: api.IngestPut403ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusNotFound:
+		return api.IngestPut404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, fail{status: res.status, code: res.code, msg: res.msg})}, nil
+	case http.StatusMethodNotAllowed:
+		return api.IngestPut405JSONResponse{MethodNotAllowedJSONResponse: methodNotAllowed(ctx, "POST, PUT", res.msg)}, nil
+	case http.StatusRequestEntityTooLarge:
+		return api.IngestPut413JSONResponse{TooLargeJSONResponse: tooLarge(ctx, res.msg)}, nil
+	case http.StatusTooManyRequests:
+		var b api.ErrorRateLimited
+		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
+		return api.IngestPut429JSONResponse{Body: b, Headers: api.IngestPut429ResponseHeaders{XRequestId: id}}, nil
+	}
+	return api.IngestPut500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+}
+
+func (a *ingestAPI) IngestPutWithPath(ctx context.Context, _ api.IngestPutWithPathRequestObject) (api.IngestPutWithPathResponseObject, error) {
+	res := a.run(ctx)
+	id := requestIDOf(ctx)
+	switch res.status {
+	case http.StatusOK:
+		if res.challenge != nil {
+			setNosniff(ctx)
+			return api.IngestPutWithPath200TextResponse{Body: string(res.challenge), Headers: api.IngestPutWithPath200ResponseHeaders{XRequestId: id}}, nil
+		}
+		return api.IngestPutWithPath200JSONResponse{Body: api.Accepted{Seq: int(res.seq)}, Headers: api.IngestPutWithPath200ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusBadRequest:
+		var b api.ErrorBadRequest
+		b.Error.Code, b.Error.Message = api.ErrorBadRequestErrorCode(res.code), res.msg
+		return api.IngestPutWithPath400JSONResponse{Body: b, Headers: api.IngestPutWithPath400ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusUnauthorized:
+		var b api.ErrorVerificationFailed
+		b.Error.Code, b.Error.Message = api.VerificationFailed, res.msg
+		return api.IngestPutWithPath401JSONResponse{Body: b, Headers: api.IngestPutWithPath401ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusPaymentRequired:
+		var b api.ErrorQuotaExceeded
+		b.Error.Code, b.Error.Message = api.QuotaExceeded, res.msg
+		return api.IngestPutWithPath402JSONResponse{Body: b, Headers: api.IngestPutWithPath402ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusForbidden:
+		var b api.ErrorForbidden
+		b.Error.Code, b.Error.Message = api.ErrorForbiddenErrorCodeForbidden, res.msg
+		return api.IngestPutWithPath403JSONResponse{Body: b, Headers: api.IngestPutWithPath403ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusNotFound:
+		return api.IngestPutWithPath404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, fail{status: res.status, code: res.code, msg: res.msg})}, nil
+	case http.StatusMethodNotAllowed:
+		return api.IngestPutWithPath405JSONResponse{MethodNotAllowedJSONResponse: methodNotAllowed(ctx, "POST, PUT", res.msg)}, nil
+	case http.StatusRequestEntityTooLarge:
+		return api.IngestPutWithPath413JSONResponse{TooLargeJSONResponse: tooLarge(ctx, res.msg)}, nil
+	case http.StatusTooManyRequests:
+		var b api.ErrorRateLimited
+		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
+		return api.IngestPutWithPath429JSONResponse{Body: b, Headers: api.IngestPutWithPath429ResponseHeaders{XRequestId: id}}, nil
+	}
+	return api.IngestPutWithPath500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 }
 
 // setNosniff marks the handshake answer, which echoes what the sender asked for,

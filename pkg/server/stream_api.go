@@ -24,12 +24,7 @@ import (
 // those are typed responses like any other. Once it starts the answer is 200 and
 // the body never ends; that is the sseBody below.
 type streamAPI struct {
-	unserved
 	s *Server
-}
-
-func (s *Server) streamHandler(w http.ResponseWriter, r *http.Request) {
-	s.streamAPI.StreamMessages(w, r, r.PathValue("slug"), api.StreamMessagesParams{})
 }
 
 // StreamMessages starts a stream. It follows Last-Event-ID (a reconnect), else the
@@ -42,16 +37,13 @@ func (s *Server) streamHandler(w http.ResponseWriter, r *http.Request) {
 // "look again"; the stream then reads from its own cursor. That is why a dropped
 // signal costs latency and never data, and why SSERecheckInterval can paper over a
 // notifier that drops them.
-func (a *streamAPI) StreamMessages(ctx context.Context, _ api.StreamMessagesRequestObject) (api.StreamMessagesResponseObject, error) {
+func (a *streamAPI) StreamMessages(ctx context.Context, request api.StreamMessagesRequestObject) (api.StreamMessagesResponseObject, error) {
 	s := a.s
 	rr := readFrom(ctx)
 	id := requestIDOf(ctx)
+	sp := request.Params
 
-	values, err := wire.QueryValues(rr.r.URL.RawQuery)
-	var req wire.StreamRequest
-	if err == nil {
-		req, err = wire.ParseStream(values, rr.r.Header.Values("Last-Event-ID"))
-	}
+	req, err := wire.NewStreamRequest(streamParams(sp))
 	if err != nil {
 		return api.StreamMessages400JSONResponse{BadRequestJSONResponse: badRequest(ctx, fail{status: 400, code: "invalid_parameter", msg: err.Error()})}, nil
 	}
@@ -166,4 +158,10 @@ func (b *sseBody) WriteTo(w io.Writer) (int64, error) {
 	// Whatever ended it, the response is over: the status is sent and a stream has
 	// no result to report.
 	return 0, nil
+}
+
+// streamParams reads the generated parameters of the stream. A test sets every
+// field of the generated struct and fails if one is not read here.
+func streamParams(p api.StreamMessagesParams) wire.StreamParams {
+	return wire.StreamParams{After: p.After, Types: deref(p.Type), Verified: p.Verified, LastEventID: p.LastEventID}
 }

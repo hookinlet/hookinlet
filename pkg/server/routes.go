@@ -1,0 +1,330 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Pat Ramsey
+
+package server
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"mime"
+	"net/http"
+	"net/url"
+	"sort"
+	"strings"
+
+	"github.com/hookinlet/hookinlet/internal/api"
+	"github.com/hookinlet/hookinlet/internal/specvalidate"
+	"github.com/hookinlet/hookinlet/pkg/inbox"
+)
+
+// This file is where the document becomes a server. Which routes exist, who may
+// call each, and what a request may carry are read from docs/openapi.json; nothing
+// here names a route.
+//
+//   - The routes are registered by the generated code, once for every operation of
+//     the document (api.HandlerWithOptions). docRouter only gives the multi-segment
+//     path its net/http spelling and leaves out what this server is not
+//     configured to serve.
+//   - enforce runs before every operation: the credential the operation's
+//     `security` asks for, the path parameters, the query string, and the JSON body,
+//     in that order. An anonymous caller learns nothing, because the credential is
+//     checked before anything else is looked at.
+//   - A method a path does not take is answered by a handler made from the same
+//     list of operations (405 and an Allow header that names the methods the
+//     document gives the path).
+//
+// The only route written in Go is the catch-all that answers 404.
+
+// apiServer is every operation of the document. It embeds one type per family and
+// no more: the compiler refuses it if an operation has no implementation, or has
+// two.
+type apiServer struct {
+	*adminAPI
+	*readAPI
+	*healthAPI
+	*ingestAPI
+	*streamAPI
+	*mcpAPI
+}
+
+func (s *Server) newAPI() *apiServer {
+	return &apiServer{
+		adminAPI:  &adminAPI{s: s},
+		readAPI:   &readAPI{s: s},
+		healthAPI: &healthAPI{s: s},
+		ingestAPI: &ingestAPI{s: s},
+		streamAPI: &streamAPI{s: s},
+		mcpAPI:    &mcpAPI{s: s},
+	}
+}
+
+// registerRoutes mounts every operation of the document the server is configured
+// to serve.
+func (s *Server) registerRoutes(mux *http.ServeMux) {
+	rt := &docRouter{s: s, mux: mux, served: map[string][]string{}}
+	api.HandlerWithOptions(s.strictServer(s.newAPI()), api.StdHTTPServerOptions{
+		BaseRouter:       rt,
+		Middlewares:      []api.MiddlewareFunc{s.enforce},
+		ErrorHandlerFunc: s.paramError,
+	})
+	rt.methodFallbacks()
+}
+
+// serves reports whether this server is set up to serve an operation: those that
+// need a credential exist only when there is an Authenticator to say who may call
+// (there is no safe default for who may read), and MCP can be turned off.
+func (s *Server) serves(op *specvalidate.Operation) bool {
+	switch {
+	case op.Security() != specvalidate.Open && s.opts.Authenticator == nil:
+		return false
+	case op.HasTag("MCP") && s.opts.DisableMCP:
+		return false
+	}
+	return true
+}
+
+// docRouter is the router the generated code registers its routes on.
+type docRouter struct {
+	s      *Server
+	mux    *http.ServeMux
+	served map[string][]string // path template -> methods registered
+}
+
+func (d *docRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) { d.mux.ServeHTTP(w, r) }
+
+func (d *docRouter) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	method, path, _ := strings.Cut(pattern, " ")
+	op := d.s.spec.Lookup(method, path)
+	if op == nil || !d.s.serves(op) {
+		return
+	}
+	d.mux.HandleFunc(method+" "+op.Pattern(), h)
+	d.served[op.Path] = append(d.served[op.Path], method)
+}
+
+// methodFallbacks answers every other method on each path that is served. A path
+// with a GET operation and no HEAD one refuses HEAD too: net/http would otherwise
+// answer it from the GET handler.
+func (d *docRouter) methodFallbacks() {
+	for _, route := range d.s.spec.Routes() {
+		methods := d.served[route.Path]
+		if len(methods) == 0 {
+			continue
+		}
+		sort.Strings(methods)
+		h := d.s.methodNotAllowed(route.Security, methods)
+		d.mux.HandleFunc(route.Pattern, h)
+		if has(methods, http.MethodGet) && !has(methods, http.MethodHead) {
+			d.mux.HandleFunc(http.MethodHead+" "+route.Pattern, h)
+		}
+	}
+}
+
+func has(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// methodNotAllowed answers a method the path does not take. Where the path needs
+// a credential it is checked first, so that an anonymous caller learns nothing
+// about the API.
+func (s *Server) methodNotAllowed(sec specvalidate.Security, methods []string) http.HandlerFunc {
+	allow := strings.Join(methods, ", ")
+	said := allow
+	if len(methods) == 2 {
+		said = methods[0] + " and " + methods[1]
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if sec != specvalidate.Open {
+			if _, ok := s.authenticate(w, r, sec == specvalidate.Admin); !ok {
+				return
+			}
+		}
+		w.Header().Set("Allow", allow)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "this endpoint accepts "+said)
+	}
+}
+
+// readRequest is what an operation needs besides what the generated interface
+// passes it: the request, the response writer (a HEAD sets the headers a GET would
+// have, a download clears its write deadline), who is calling, and the inbox the
+// caller was allowed to read.
+type readRequest struct {
+	w         http.ResponseWriter
+	r         *http.Request
+	in        *inbox.Inbox
+	principal inbox.Principal
+}
+
+const (
+	requestKey ctxKey = 1
+	readKey    ctxKey = 2
+	writerKey  ctxKey = 3
+)
+
+func readFrom(ctx context.Context) *readRequest { return ctx.Value(readKey).(*readRequest) }
+
+// context gives the generated handlers, which are passed a context and nothing
+// else, what enforce found out.
+func (rr *readRequest) context(ctx context.Context) context.Context {
+	ctx = context.WithValue(ctx, requestKey, rr.r)
+	ctx = context.WithValue(ctx, writerKey, rr.w)
+	return context.WithValue(ctx, readKey, rr)
+}
+
+// authenticate checks the credential and, for the admin API, that it is the
+// admin's. It reports false after answering.
+func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, adminOnly bool) (inbox.Principal, bool) {
+	principal, err := s.opts.Authenticator.Authenticate(r)
+	switch {
+	case errors.Is(err, inbox.ErrUnauthenticated):
+		w.Header().Set("WWW-Authenticate", `Bearer realm="hookinlet"`)
+		writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return nil, false
+	case err != nil:
+		s.internalError(r.Context(), w, "authenticate", err)
+		return nil, false
+	case adminOnly && !principal.CanAdmin():
+		writeError(w, http.StatusForbidden, "forbidden", "this credential cannot use the admin API")
+		return nil, false
+	}
+	return principal, true
+}
+
+// secure does what the operation's `security` asks. An operation that needs no
+// credential asks nothing. An agent operation on an inbox finds the inbox only if
+// the caller may read it: an inbox that is not there and one the credential may
+// not see are the same 404, so one inbox's credential cannot be used to learn
+// whether another exists.
+func (s *Server) secure(w http.ResponseWriter, r *http.Request, op *specvalidate.Operation, rr *readRequest) bool {
+	sec := op.Security()
+	if sec == specvalidate.Open {
+		return true
+	}
+	principal, ok := s.authenticate(w, r, sec == specvalidate.Admin)
+	if !ok {
+		return false
+	}
+	rr.principal = principal
+	name, named := op.InboxParam()
+	if sec != specvalidate.Agent || !named {
+		return true
+	}
+	in, err := s.opts.Store.GetInboxBySlug(r.Context(), r.PathValue(name))
+	switch {
+	case errors.Is(err, inbox.ErrNotFound), err == nil && !principal.CanReadInbox(in):
+		writeError(w, http.StatusNotFound, "not_found", "not found")
+		return false
+	case err != nil:
+		s.internalError(r.Context(), w, "load inbox", err)
+		return false
+	}
+	rr.in = in
+	return true
+}
+
+// enforce runs before every operation.
+func (s *Server) enforce(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		op := s.operation(r)
+		if op == nil {
+			// A route the document does not describe would be served with none of the
+			// checks. That is a mistake in the code, so it is refused loudly.
+			s.log.LogAttrs(r.Context(), slog.LevelError, "a route is not in the document",
+				slog.String("route", r.Pattern), slog.String("method", r.Method))
+			writeError(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
+		rr := &readRequest{w: w, r: r}
+		if !s.secure(w, r, op, rr) || !s.checkRequest(w, r, op) {
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(rr.context(r.Context())))
+	})
+}
+
+// checkRequest holds the request to the document: its path parameters, query
+// string, and JSON body. It reports false after answering.
+func (s *Server) checkRequest(w http.ResponseWriter, r *http.Request, op *specvalidate.Operation) bool {
+	// A path parameter outside its schema names something that cannot exist.
+	if len(op.CheckPath(r.PathValue)) > 0 {
+		writeError(w, http.StatusNotFound, "not_found", "not found")
+		return false
+	}
+	// An operation that keeps the query string as the sender wrote it takes whatever
+	// it is, malformed or not: a delivery is not refused for its URL.
+	if !op.AnyQuery() {
+		values, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_parameter", "the query string is malformed")
+			return false
+		}
+		if vs := op.CheckQuery(values); len(vs) > 0 {
+			writeError(w, http.StatusBadRequest, "invalid_parameter", parameterMessage(vs))
+			return false
+		}
+	}
+	limit := op.MaxBodyBytes()
+	if !op.TakesBody() || limit == 0 {
+		return true
+	}
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "send application/json")
+		return false
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	var tooLarge *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
+		return false
+	case err != nil:
+		writeError(w, http.StatusBadRequest, "bad_request", "the request body could not be read")
+		return false
+	}
+	if vs := op.CheckBody(body); len(vs) > 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "the request body is not valid: "+clip(vs[0].String(), 200))
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	return true
+}
+
+// paramError answers a path or query parameter the generated code could not read.
+// The credential is still checked first. A seq that is not a number is a message
+// that does not exist.
+func (s *Server) paramError(w http.ResponseWriter, r *http.Request, err error) {
+	if op := s.operation(r); op != nil {
+		if !s.secure(w, r, op, &readRequest{}) {
+			return
+		}
+		// The document's own check says what is wrong, and says it the same way
+		// everywhere. If it finds nothing, the generated code was stricter.
+		if !s.checkRequest(w, r, op) {
+			return
+		}
+	}
+	var bad *api.InvalidParamFormatError
+	if errors.As(err, &bad) && bad.ParamName == "seq" {
+		writeError(w, http.StatusNotFound, "not_found", "not found")
+		return
+	}
+	var many *api.TooManyValuesForParamError
+	var format *api.InvalidParamFormatError
+	switch {
+	case errors.As(err, &many):
+		writeError(w, http.StatusBadRequest, "invalid_parameter", `parameter "`+truncateName(many.ParamName)+`": may be given only once`)
+	case errors.As(err, &format):
+		writeError(w, http.StatusBadRequest, "invalid_parameter", `parameter "`+truncateName(format.ParamName)+`": is not valid`)
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_parameter", "a path or query parameter is not valid")
+	}
+}
