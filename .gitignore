@@ -3,3 +3,8 @@
 /data/
 /hookinlet
 /dist/
+/created.json
+/relay.state
+/received.log
+/hookinlet-backup.db
+/relay

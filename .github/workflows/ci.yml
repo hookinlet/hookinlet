@@ -50,6 +50,21 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
 
+  # The documentation is code too: its examples must run, and the OpenAPI
+  # document must be valid (a Go test also checks it against the server).
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Run the examples in the documentation
+        run: scripts/test-docs.sh
+      - name: Lint the OpenAPI document
+        run: npx --yes @redocly/cli@2.62.1 lint docs/openapi.json
+
   # A release is only worth tagging if it would work, so check it on every change.
   release-config:
     runs-on: ubuntu-latest
