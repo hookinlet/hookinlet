@@ -1,0 +1,20 @@
+name: Idea or question
+description: A feature you would like, or something you could not work out.
+labels: [question]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: The goal first; how you would like it solved can come after.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried, or looked at
+      description: Pages of the documentation, commands, the examples.
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea

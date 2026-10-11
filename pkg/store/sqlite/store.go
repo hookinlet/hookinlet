@@ -7,6 +7,9 @@
 // writes go through one connection (guardrail 19), and reads use a separate
 // pool of read-only connections so they never wait for the writer. The WAL
 // journal gives readers a consistent snapshot while a write is in progress.
+//
+// Stability: this package is pre-1.0. Its API can still change, and every change is
+// listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
 package sqlite
 
 import (

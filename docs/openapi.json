@@ -1,0 +1,4225 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "hookinlet",
+    "version": "0.1.0",
+    "summary": "A webhook inbox for AI agents.",
+    "description": "Ingest, the read API, a live stream, the admin API, and the MCP endpoint. The prose documentation is in `docs/`: api.md, admin.md, mcp.md, verifiers.md. This file is checked against the server by a test.\n\nEvery error is JSON: `{\"error\": {\"code\": \"...\", \"message\": \"...\"}}`.",
+    "license": {
+      "name": "AGPL-3.0-only",
+      "identifier": "AGPL-3.0-only"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "A local server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Ingest",
+      "description": "Where webhook senders post."
+    },
+    {
+      "name": "Read",
+      "description": "How agents read an inbox."
+    },
+    {
+      "name": "MCP",
+      "description": "The same reads as MCP tools."
+    },
+    {
+      "name": "Admin",
+      "description": "Setting up and looking after inboxes. Admin token only."
+    },
+    {
+      "name": "Operations",
+      "description": "Health checks for a load balancer or supervisor. No credential."
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "summary": "Liveness",
+        "tags": [
+          "Operations"
+        ],
+        "responses": {
+          "200": {
+            "description": "The process is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                },
+                "example": {
+                  "status": "ok"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "readyz",
+        "summary": "Readiness",
+        "tags": [
+          "Operations"
+        ],
+        "responses": {
+          "200": {
+            "description": "The database is reachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                },
+                "example": {
+                  "status": "ready"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "503": {
+            "description": "The database is not reachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorNotReady"
+                },
+                "example": {
+                  "error": {
+                    "code": "not_ready",
+                    "message": "the store is not reachable"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/in/{key}": {
+      "post": {
+        "operationId": "ingest",
+        "summary": "Receive a webhook",
+        "tags": [
+          "Ingest"
+        ],
+        "responses": {
+          "400": {
+            "description": "The request body could not be read (the connection broke, or the sender took too long to send it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                },
+                "example": {
+                  "error": {
+                    "code": "bad_request",
+                    "message": "the request body could not be read"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "200": {
+            "description": "Stored (or recognized as a duplicate of an earlier verified delivery, which answers with the earlier seq). A Slack `url_verification` handshake is answered with its challenge as `text/plain` instead, and is not stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "Slack's `url_verification` challenge, echoed after the signature has been checked."
+                },
+                "example": "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "description": "Verification failed and the inbox rejects such deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorVerificationFailed"
+                },
+                "example": {
+                  "error": {
+                    "code": "verification_failed",
+                    "message": "webhook verification failed"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "402": {
+            "description": "Refused by an embedder's hook (quota).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorQuotaExceeded"
+                },
+                "example": {
+                  "error": {
+                    "code": "quota_exceeded",
+                    "message": "the quota for this inbox has been reached"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "403": {
+            "description": "Refused by an embedder's hook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorForbidden"
+                },
+                "example": {
+                  "error": {
+                    "code": "forbidden",
+                    "message": "this delivery is not allowed"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "429": {
+            "description": "Refused by an embedder's hook (rate limit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorRateLimited"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limited",
+                    "message": "too many requests"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "Webhook senders post here. The credential is the inbox's signature scheme (see docs/verifiers.md), not a bearer token. An unknown key and a disabled inbox are indistinguishable (404). Both `POST` and `PUT` are accepted; this document lists `POST`. The path after the key may contain slashes, which OpenAPI path templates cannot express.",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The inbox's ingest key, which is its slug."
+          }
+        ],
+        "security": [],
+        "requestBody": {
+          "required": false,
+          "description": "Any bytes. They are stored exactly as sent and checked against the inbox's verifier.",
+          "content": {
+            "*/*": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/in/{key}/{rest}": {
+      "post": {
+        "operationId": "ingestWithPath",
+        "summary": "Receive a webhook at a sub-path",
+        "tags": [
+          "Ingest"
+        ],
+        "responses": {
+          "400": {
+            "description": "The request body could not be read (the connection broke, or the sender took too long to send it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBadRequest"
+                },
+                "example": {
+                  "error": {
+                    "code": "bad_request",
+                    "message": "the request body could not be read"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "200": {
+            "description": "Stored (or recognized as a duplicate of an earlier verified delivery, which answers with the earlier seq). A Slack `url_verification` handshake is answered with its challenge as `text/plain` instead, and is not stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "Slack's `url_verification` challenge, echoed after the signature has been checked."
+                },
+                "example": "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P"
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "description": "Verification failed and the inbox rejects such deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorVerificationFailed"
+                },
+                "example": {
+                  "error": {
+                    "code": "verification_failed",
+                    "message": "webhook verification failed"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "402": {
+            "description": "Refused by an embedder's hook (quota).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorQuotaExceeded"
+                },
+                "example": {
+                  "error": {
+                    "code": "quota_exceeded",
+                    "message": "the quota for this inbox has been reached"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "403": {
+            "description": "Refused by an embedder's hook.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorForbidden"
+                },
+                "example": {
+                  "error": {
+                    "code": "forbidden",
+                    "message": "this delivery is not allowed"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "429": {
+            "description": "Refused by an embedder's hook (rate limit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorRateLimited"
+                },
+                "example": {
+                  "error": {
+                    "code": "rate_limited",
+                    "message": "too many requests"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "Webhook senders post here. The credential is the inbox's signature scheme (see docs/verifiers.md), not a bearer token. An unknown key and a disabled inbox are indistinguishable (404). Both `POST` and `PUT` are accepted; this document lists `POST`. The path after the key may contain slashes, which OpenAPI path templates cannot express.",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rest",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stored as the message's `path`. May contain further slashes."
+          }
+        ],
+        "security": [],
+        "requestBody": {
+          "required": false,
+          "description": "Any bytes. They are stored exactly as sent and checked against the inbox's verifier.",
+          "content": {
+            "*/*": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/inboxes/{slug}": {
+      "get": {
+        "operationId": "getInbox",
+        "summary": "Inbox metadata",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "The inbox's metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxInfo"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "An agent token reads one inbox; the admin token reads all. An inbox the credential may not read is a 404, the same as one that does not exist.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      },
+      "head": {
+        "operationId": "headGetInbox",
+        "summary": "Headers only: Inbox metadata",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "The inbox's metadata.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter or body field is missing, unknown, or malformed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "description": "A missing or wrong credential.",
+            "headers": {
+              "WWW-Authenticate": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "Bearer realm=\"hookinlet\""
+                }
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "500": {
+            "description": "A fault on the server's side. Nothing about the cause is revealed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "503": {
+            "description": "Too many reads, streams, or waits are in progress. Retry shortly.",
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again."
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "405": {
+            "description": "The method is not accepted here.",
+            "headers": {
+              "Allow": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The methods the path accepts."
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "The same checks and the same headers as the GET, with no body.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
+    "/v1/inboxes/{slug}/messages": {
+      "get": {
+        "operationId": "listMessages",
+        "summary": "List messages",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "Following `next` visits every message exactly once, in order, however pages are cut. Parameters are strict: an unknown or repeated one (except `type`) is a 400.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Return messages with a seq greater than this, oldest first. This is the polling pattern: keep the `next` link or the last seq you saw."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Return messages with a seq less than this, newest first. With neither `after` nor `before`, the newest messages come first."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 50
+            },
+            "description": "Page size. Above 500 is clamped to 500."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "maxItems": 100
+            },
+            "description": "Only messages whose `event_type` is one of these. Repeat the parameter.",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Only messages received at or after this time."
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Only messages received before this time."
+          },
+          {
+            "name": "verified",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Only messages that did (`true`) or did not (`false`) pass verification."
+          },
+          {
+            "name": "delivery_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "description": "Only the message with this delivery id."
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "default": "full"
+            },
+            "description": "`summary` leaves bodies out."
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      },
+      "head": {
+        "operationId": "headListMessages",
+        "summary": "Headers only: List messages",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter or body field is missing, unknown, or malformed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "description": "A missing or wrong credential.",
+            "headers": {
+              "WWW-Authenticate": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "Bearer realm=\"hookinlet\""
+                }
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "500": {
+            "description": "A fault on the server's side. Nothing about the cause is revealed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "503": {
+            "description": "Too many reads, streams, or waits are in progress. Retry shortly.",
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again."
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "405": {
+            "description": "The method is not accepted here.",
+            "headers": {
+              "Allow": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The methods the path accepts."
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "The same checks and the same headers as the GET, with no body.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Return messages with a seq greater than this, oldest first. This is the polling pattern: keep the `next` link or the last seq you saw."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Return messages with a seq less than this, newest first. With neither `after` nor `before`, the newest messages come first."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 50
+            },
+            "description": "Page size. Above 500 is clamped to 500."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "maxItems": 100
+            },
+            "description": "Only messages whose `event_type` is one of these. Repeat the parameter.",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Only messages received at or after this time."
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Only messages received before this time."
+          },
+          {
+            "name": "verified",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Only messages that did (`true`) or did not (`false`) pass verification."
+          },
+          {
+            "name": "delivery_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "description": "Only the message with this delivery id."
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "default": "full"
+            },
+            "description": "`summary` leaves bodies out."
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
+    "/v1/inboxes/{slug}/messages/{seq}": {
+      "get": {
+        "operationId": "getMessage",
+        "summary": "One message",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "The message with its body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/Seq"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      },
+      "head": {
+        "operationId": "headGetMessage",
+        "summary": "Headers only: One message",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "The message with its body.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter or body field is missing, unknown, or malformed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "description": "A missing or wrong credential.",
+            "headers": {
+              "WWW-Authenticate": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "Bearer realm=\"hookinlet\""
+                }
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "500": {
+            "description": "A fault on the server's side. Nothing about the cause is revealed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "503": {
+            "description": "Too many reads, streams, or waits are in progress. Retry shortly.",
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again."
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "405": {
+            "description": "The method is not accepted here.",
+            "headers": {
+              "Allow": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The methods the path accepts."
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/Seq"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "description": "The same checks and the same headers as the GET, with no body."
+      }
+    },
+    "/v1/inboxes/{slug}/messages/{seq}/raw": {
+      "get": {
+        "operationId": "getMessageRaw",
+        "summary": "The exact bytes received",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "The body byte for byte, with the `Content-Type` the sender used (`application/octet-stream` if it sent none). Served as a download, never as a page.",
+            "headers": {
+              "Content-Disposition": {
+                "required": true,
+                "schema": {
+                  "const": "attachment"
+                }
+              },
+              "X-Content-Type-Options": {
+                "required": true,
+                "schema": {
+                  "const": "nosniff"
+                }
+              },
+              "Content-Security-Policy": {
+                "required": true,
+                "schema": {
+                  "const": "default-src 'none'; sandbox"
+                }
+              },
+              "Cross-Origin-Resource-Policy": {
+                "required": true,
+                "schema": {
+                  "const": "same-origin"
+                }
+              },
+              "Content-Length": {
+                "required": true,
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            },
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/Seq"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      },
+      "head": {
+        "operationId": "headGetMessageRaw",
+        "summary": "Headers only: The exact bytes received",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "The body byte for byte, with the `Content-Type` the sender used (`application/octet-stream` if it sent none). Served as a download, never as a page.",
+            "headers": {
+              "Content-Disposition": {
+                "required": true,
+                "schema": {
+                  "const": "attachment"
+                }
+              },
+              "X-Content-Type-Options": {
+                "required": true,
+                "schema": {
+                  "const": "nosniff"
+                }
+              },
+              "Content-Security-Policy": {
+                "required": true,
+                "schema": {
+                  "const": "default-src 'none'; sandbox"
+                }
+              },
+              "Cross-Origin-Resource-Policy": {
+                "required": true,
+                "schema": {
+                  "const": "same-origin"
+                }
+              },
+              "Content-Length": {
+                "required": true,
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter or body field is missing, unknown, or malformed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "description": "A missing or wrong credential.",
+            "headers": {
+              "WWW-Authenticate": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "Bearer realm=\"hookinlet\""
+                }
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "500": {
+            "description": "A fault on the server's side. Nothing about the cause is revealed.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "503": {
+            "description": "Too many reads, streams, or waits are in progress. Retry shortly.",
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again."
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "405": {
+            "description": "The method is not accepted here.",
+            "headers": {
+              "Allow": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The methods the path accepts."
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/Seq"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "description": "The same checks and the same headers as the GET, with no body."
+      }
+    },
+    "/v1/inboxes/{slug}/stream": {
+      "get": {
+        "operationId": "streamMessages",
+        "summary": "Follow an inbox live (Server-Sent Events)",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "An event stream. Each event has `id: <seq>`, `event: message`, and `data:` holding the same JSON as `Message`, on one line. `retry: 3000` is sent once, and a `: ping` comment when idle (every 15 s by default).",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "retry: 3000\n\nid: 1241\nevent: message\ndata: {\"seq\":1241,\"inbox\":\"stripe-prod\"}\n\n"
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "Open streams are re-checked about every 30 seconds, and end if the token is rotated or the inbox deleted. Browsers' `EventSource` cannot send the Authorization header.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Start after this message, replaying anything newer. `0` replays everything. Without it (and without `Last-Event-ID`) the stream starts from now."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Only messages with one of these event types. Repeat the parameter.",
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "verified",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Only verified (`true`) or unverified (`false`) messages."
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Resume after this message. A reconnecting client sends it by itself. It wins over `after`."
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
+    "/mcp": {
+      "post": {
+        "operationId": "mcp",
+        "summary": "Model Context Protocol (JSON-RPC)",
+        "tags": [
+          "MCP"
+        ],
+        "responses": {
+          "200": {
+            "description": "A JSON-RPC response. Tool failures are results with `isError: true`, not HTTP errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonRpcResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "202": {
+            "description": "A notification was accepted.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "description": "A batch, a method the endpoint does not serve, or a body that is not a JSON-RPC object (a JSON error); or a request without `Accept: application/json, text/event-stream`, which the protocol library refuses as plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/Unsupported"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "Stateless Streamable HTTP with JSON responses and four read-only tools: `list_inboxes`, `query_messages`, `get_message`, `wait_for_messages`. Send `Accept: application/json, text/event-stream` and `Content-Type: application/json`. One request per POST (batches are refused). The tools and their schemas are described in docs/mcp.md and by the protocol's own `tools/list`.",
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JsonRpcRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/inboxes": {
+      "post": {
+        "operationId": "createInbox",
+        "summary": "Create an inbox",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "201": {
+            "description": "Created. The agent token is shown here, once.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Created"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/Unsupported"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "Only the admin token may use the admin API. The verifier and its configuration are checked when saved. A verifier that needs a secret, created without one, produces a warning.",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInbox"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listInboxes",
+        "summary": "List inboxes",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of inboxes in ID order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminList"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Return inboxes with an ID greater than this."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 100
+            },
+            "description": "Page size. Above 1000 is clamped to 1000."
+          }
+        ],
+        "security": [
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
+    "/admin/inboxes/{slug}": {
+      "get": {
+        "operationId": "showInbox",
+        "summary": "Show an inbox",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "The inbox, with its message count.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Admin"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "adminToken": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "updateInbox",
+        "summary": "Change an inbox's settings",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated inbox.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Admin"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/Unsupported"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchInbox"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteInbox",
+        "summary": "Delete an inbox and its messages",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted. The inbox is closed to deliveries and agents first and its messages go in small batches, so an interrupted delete is finished by deleting again.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
+    "/admin/inboxes/{slug}/secret": {
+      "put": {
+        "operationId": "setVerifierSecret",
+        "summary": "Set or replace the verifier secret",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "The inbox (never the secret).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Admin"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/Unsupported"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSecret"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/inboxes/{slug}/rotate-token": {
+      "post": {
+        "operationId": "rotateAgentToken",
+        "summary": "Issue a new agent token",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "The new token, shown once. The old one stops working at once.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Created"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
+    "/admin/retention/run": {
+      "post": {
+        "operationId": "runRetention",
+        "summary": "Apply retention now",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "How many messages were deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deleted"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
+    "/admin/backup": {
+      "get": {
+        "operationId": "backup",
+        "summary": "Download a consistent copy of the database",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "A SQLite database file holding every inbox, message, token hash, and sealed secret. Useless without the master key; protect it accordingly.",
+            "headers": {
+              "Content-Length": {
+                "required": true,
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "Content-Disposition": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            },
+            "content": {
+              "application/vnd.sqlite3": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "agentToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An inbox's agent token. It reads that inbox and no other."
+      },
+      "adminToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The admin token (`HOOKINLET_ADMIN_TOKEN`). It reads every inbox and is the only credential that may use the admin API."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "description": "The shape of every error the server writes. Each status has its own schema (`Error400`, ...) that names the codes it uses.",
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "A stable, machine-readable code such as `not_found` or `invalid_parameter`."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        },
+        "example": {
+          "error": {
+            "code": "not_found",
+            "message": "not found"
+          }
+        }
+      },
+      "ErrorBadRequest": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_parameter",
+                  "invalid_request",
+                  "bad_request"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorUnauthenticated": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "unauthenticated"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorVerificationFailed": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "verification_failed"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorQuotaExceeded": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "quota_exceeded"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorForbidden": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "forbidden"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorNotFound": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "not_found"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorMethodNotAllowed": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "method_not_allowed"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorConflict": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "conflict",
+                  "busy"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorTooLarge": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "payload_too_large"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorUnsupported": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "unsupported_media_type"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorRateLimited": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "rate_limited"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorInternal": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "internal"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorNotImplemented": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "not_implemented"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorOverloaded": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "overloaded"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "ErrorNotReady": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "not_ready"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "seq",
+          "inbox",
+          "received_at",
+          "method",
+          "path",
+          "query",
+          "headers",
+          "content_type",
+          "size",
+          "verified",
+          "verifier",
+          "verify_error",
+          "delivery_id",
+          "event_type",
+          "source_ip"
+        ],
+        "description": "A stored delivery. Exactly one of `body`, `body_text`, and `body_base64` is present, or none with `fields=summary`.",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The message's per-inbox sequence number, assigned in commit order. This is the cursor."
+          },
+          "inbox": {
+            "type": "string"
+          },
+          "received_at": {
+            "type": "string",
+            "description": "UTC, always six fractional digits, so it sorts as text. Never earlier than the previous message's."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "POST",
+              "PUT"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "description": "The part of the ingest URL after the inbox key."
+          },
+          "query": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "The request headers as received, minus `Authorization`, `Cookie`, `Proxy-Authorization`, and the inbox's shared-token header."
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The body's size in bytes. Present even for a summary."
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether the delivery passed the inbox's verifier. Treat unverified content as untrusted input."
+          },
+          "verifier": {
+            "type": "string"
+          },
+          "verify_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "From the sender, and only for verified messages."
+          },
+          "event_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "From the sender, and only for verified messages."
+          },
+          "source_ip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "description": "The body, when it is valid UTF-8, valid JSON, and nested no deeper than 64 levels. It is JSON here, not a string containing JSON."
+          },
+          "body_text": {
+            "type": "string",
+            "description": "The body, when it is valid UTF-8 but not JSON (or is too deeply nested)."
+          },
+          "body_base64": {
+            "type": "string",
+            "description": "The body, base64-encoded, when it is not valid UTF-8."
+          }
+        }
+      },
+      "MessagePage": {
+        "type": "object",
+        "required": [
+          "messages",
+          "next",
+          "latest_seq"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A relative URL for the next page. Polling forward with `after` always has one, even for an empty page: it is the same cursor again."
+          },
+          "latest_seq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "InboxInfo": {
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "verifier",
+          "message_count",
+          "oldest_seq",
+          "latest_seq"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "verifier": {
+            "type": "string"
+          },
+          "message_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "oldest_seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "latest_seq": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Accepted": {
+        "type": "object",
+        "required": [
+          "seq"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "example": {
+          "seq": 1241
+        }
+      },
+      "Status": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "Admin": {
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "version",
+          "verifier",
+          "verifier_config",
+          "has_verifier_secret",
+          "on_verify_fail",
+          "max_body_bytes",
+          "retention_days",
+          "retention_max_count",
+          "event_type_pointer",
+          "disabled",
+          "last_seq",
+          "ingest_path",
+          "created_at",
+          "updated_at"
+        ],
+        "description": "An inbox as the admin API shows it. It never carries a verifier secret, its sealed form, or a token hash.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "description": "Counts successful updates; changes are checked against it."
+          },
+          "verifier": {
+            "type": "string"
+          },
+          "verifier_config": {
+            "type": "object"
+          },
+          "has_verifier_secret": {
+            "type": "boolean"
+          },
+          "on_verify_fail": {
+            "type": "string",
+            "enum": [
+              "reject",
+              "store"
+            ]
+          },
+          "max_body_bytes": {
+            "type": "integer"
+          },
+          "retention_days": {
+            "type": "integer"
+          },
+          "retention_max_count": {
+            "type": "integer"
+          },
+          "event_type_pointer": {
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "last_seq": {
+            "type": "integer"
+          },
+          "message_count": {
+            "type": "integer",
+            "description": "Present when a single inbox is shown, not in lists."
+          },
+          "ingest_path": {
+            "type": "string"
+          },
+          "ingest_url": {
+            "type": "string",
+            "description": "Present when the public base URL is known or can be derived from the request."
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateInbox": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{3,64}$",
+            "description": "3 to 64 characters from `a-z`, `0-9`, and `-`. It never changes."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "verifier": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "`none`, `token`, `hmac`, `stripe`, `github`, `slack`, `standardwebhooks`, or one an embedder registered. It must exist."
+          },
+          "verifier_config": {
+            "type": "object",
+            "description": "Non-secret parameters; unknown keys are an error. See docs/verifiers.md."
+          },
+          "verifier_secret": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "Sealed with the master key before it is stored; never returned."
+          },
+          "on_verify_fail": {
+            "type": "string",
+            "enum": [
+              "reject",
+              "store"
+            ]
+          },
+          "max_body_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10485760,
+            "description": "`0` means the default, 1 MiB."
+          },
+          "retention_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 36500
+          },
+          "retention_max_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "event_type_pointer": {
+            "type": "string",
+            "pattern": "^(/([^~/]|~[01])*)*$",
+            "description": "An RFC 6901 JSON pointer such as `/type`, or empty for none."
+          }
+        }
+      },
+      "PatchInbox": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "description": "Omitted fields are left alone.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "verifier": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "`none`, `token`, `hmac`, `stripe`, `github`, `slack`, `standardwebhooks`, or one an embedder registered. It must exist."
+          },
+          "verifier_config": {
+            "type": "object",
+            "description": "Non-secret parameters; unknown keys are an error. See docs/verifiers.md."
+          },
+          "on_verify_fail": {
+            "type": "string",
+            "enum": [
+              "reject",
+              "store"
+            ]
+          },
+          "max_body_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10485760,
+            "description": "`0` means the default, 1 MiB."
+          },
+          "retention_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 36500
+          },
+          "retention_max_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "event_type_pointer": {
+            "type": "string",
+            "pattern": "^(/([^~/]|~[01])*)*$",
+            "description": "An RFC 6901 JSON pointer such as `/type`, or empty for none."
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "A disabled inbox answers deliveries with 404; agents can still read what it holds."
+          }
+        }
+      },
+      "Created": {
+        "type": "object",
+        "required": [
+          "inbox",
+          "agent_token"
+        ],
+        "properties": {
+          "inbox": {
+            "$ref": "#/components/schemas/Admin"
+          },
+          "agent_token": {
+            "type": "string",
+            "description": "Shown once. It cannot be recovered."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SetSecret": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "secret"
+        ],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        }
+      },
+      "AdminList": {
+        "type": "object",
+        "required": [
+          "inboxes",
+          "next"
+        ],
+        "properties": {
+          "inboxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Admin"
+            }
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Deleted": {
+        "type": "object",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "JsonRpcRequest": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "method"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "initialize",
+              "notifications/initialized",
+              "notifications/cancelled",
+              "ping",
+              "tools/list",
+              "tools/call"
+            ]
+          },
+          "params": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      },
+      "JsonRpcResponse": {
+        "type": "object",
+        "required": [
+          "jsonrpc"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "result": {},
+          "error": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "responses": {
+      "Unauthenticated": {
+        "description": "A missing or wrong credential.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorUnauthenticated"
+            },
+            "example": {
+              "error": {
+                "code": "unauthenticated",
+                "message": "authentication required"
+              }
+            }
+          }
+        },
+        "headers": {
+          "WWW-Authenticate": {
+            "required": true,
+            "schema": {
+              "type": "string",
+              "const": "Bearer realm=\"hookinlet\""
+            }
+          },
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The credential is valid but cannot use the admin API.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorForbidden"
+            },
+            "example": {
+              "error": {
+                "code": "forbidden",
+                "message": "this credential cannot use the admin API"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorNotFound"
+            },
+            "example": {
+              "error": {
+                "code": "not_found",
+                "message": "not found"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "A parameter or body field is missing, unknown, or malformed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorBadRequest"
+            },
+            "example": {
+              "error": {
+                "code": "invalid_parameter",
+                "message": "parameter \"limit\": must be a whole number"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "MethodNotAllowed": {
+        "description": "The method is not accepted here.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorMethodNotAllowed"
+            },
+            "example": {
+              "error": {
+                "code": "method_not_allowed",
+                "message": "this endpoint accepts GET and HEAD"
+              }
+            }
+          }
+        },
+        "headers": {
+          "Allow": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The methods the path accepts."
+          },
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "The request body is too large.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorTooLarge"
+            },
+            "example": {
+              "error": {
+                "code": "payload_too_large",
+                "message": "the request body is too large"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "Unsupported": {
+        "description": "Send `application/json`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorUnsupported"
+            },
+            "example": {
+              "error": {
+                "code": "unsupported_media_type",
+                "message": "send application/json"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The slug is taken, a change could not be settled, or the operation is already running.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorConflict"
+            },
+            "example": {
+              "error": {
+                "code": "conflict",
+                "message": "an inbox with that slug already exists, or it was changed at the same time; check and retry"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "Overloaded": {
+        "description": "Too many reads, streams, or waits are in progress. Retry shortly.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorOverloaded"
+            },
+            "example": {
+              "error": {
+                "code": "overloaded",
+                "message": "the server is busy; retry shortly"
+              }
+            }
+          }
+        },
+        "headers": {
+          "Retry-After": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Seconds to wait before trying again."
+          },
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "Internal": {
+        "description": "A fault on the server's side. Nothing about the cause is revealed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorInternal"
+            },
+            "example": {
+              "error": {
+                "code": "internal",
+                "message": "internal error"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "NotImplemented": {
+        "description": "The server cannot do this (no master key for secrets, or a store that cannot back up).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorNotImplemented"
+            },
+            "example": {
+              "error": {
+                "code": "not_implemented",
+                "message": "this store does not support backups"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      }
+    },
+    "parameters": {
+      "Slug": {
+        "name": "slug",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "The inbox's slug."
+      },
+      "Seq": {
+        "name": "seq",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "description": "A message's per-inbox sequence number."
+      }
+    }
+  }
+}

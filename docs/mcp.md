@@ -203,6 +203,7 @@ your client's documentation):
 
 **Without a client**, a call is one JSON-RPC POST:
 
+<!-- exercise -->
 ```sh
 curl -s https://hooks.example.com/mcp \
   -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN" \

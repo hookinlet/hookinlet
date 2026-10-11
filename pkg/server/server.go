@@ -4,6 +4,9 @@
 // Package server assembles hookinlet's HTTP surface. Handlers reach storage,
 // notification, auth, and secrets only through interfaces in pkg/inbox, so an
 // embedder can swap any of them.
+//
+// Stability: this package is pre-1.0. Its API can still change, and every change is
+// listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
 package server
 
 import (

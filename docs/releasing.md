@@ -40,6 +40,22 @@ nor a newer line's tag.
 Promoting a candidate is a new tag, `v0.1.0`, on the same commit: the workflow
 builds exactly the tag that was pushed, not whichever tag sorts first.
 
+## Before the repository goes public
+
+None of this is done by a workflow; each is a setting or a tag only a maintainer can make.
+
+1. **Tag a final release** (`v0.1.0`). The README and `docs/deploying.md` start with
+   `ghcr.io/hookinlet/hookinlet:latest`, which does not exist until a final release does
+   (a pre-release such as `v0.1.0-rc.1` gets only its own version tag).
+2. **Make the GHCR package public** and link it to the repository, then check with an anonymous
+   `docker pull ghcr.io/hookinlet/hookinlet:0.1.0`.
+3. **Enable private vulnerability reporting** (Settings, Code security). `SECURITY.md` and the
+   issue chooser send reporters there, and it is off until it is enabled.
+4. **Decide what in the repository should stay internal.** `PLAN.md` and `CLAUDE.md` describe the
+   private commercial product and are the working notes for the agent that built this project;
+   they are tracked, so they would be public.
+5. **Read the README once from a clean clone**, in a new shell, as a stranger would.
+
 ## After
 
 - A new GHCR package starts private. Make it public in the repository's package

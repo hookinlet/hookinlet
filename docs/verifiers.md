@@ -189,6 +189,7 @@ reasons:
 Create an inbox (the verifier secret is read from the environment, never from a
 flag, because flags show up in process listings):
 
+<!-- exercise -->
 ```sh
 export HOOKINLET_MASTER_KEY=$(openssl rand -base64 32)   # keep this; it encrypts stored secrets
 HOOKINLET_VERIFIER_SECRET='my-shared-secret' \
@@ -198,6 +199,7 @@ HOOKINLET_VERIFIER_SECRET='my-shared-secret' \
 
 Send a signed request:
 
+<!-- exercise-server -->
 ```sh
 body='{"hello":"world"}'
 sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac 'my-shared-secret' -hex | sed 's/^.* //')

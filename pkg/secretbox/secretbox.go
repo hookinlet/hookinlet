@@ -3,6 +3,9 @@
 
 // Package secretbox is the default inbox.SecretBox: AES-256-GCM with a random
 // nonce per message.
+//
+// Stability: this package is pre-1.0. Its API can still change, and every change is
+// listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
 package secretbox
 
 import (

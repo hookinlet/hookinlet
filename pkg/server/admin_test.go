@@ -906,8 +906,15 @@ func TestAnAbandonedBackupLeavesNoCopyBehind(t *testing.T) {
 		left, _ := filepath.Glob(filepath.Join(dataDir, "backup-*"))
 		return len(left) == 0
 	})
-	// And the next backup is not told one is running.
-	if status, _ := a.admin("GET", "/admin/backup", nil); status != 200 {
+	// And the next backup is not told one is running. The copy is removed a moment
+	// before the abandoned request lets go of the backup lock, so a 409 right after
+	// is correct and must be brief; anything but a 200 in the end is not.
+	var status int
+	waitFor(t, "the abandoned backup to let go of the lock", func() bool {
+		status, _ = a.admin("GET", "/admin/backup", nil)
+		return status != http.StatusConflict
+	})
+	if status != 200 {
 		t.Errorf("a backup after an abandoned one: %d", status)
 	}
 }

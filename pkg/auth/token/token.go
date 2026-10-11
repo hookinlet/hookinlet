@@ -3,6 +3,9 @@
 
 // Package token generates and checks bearer tokens. Tokens are random, shown
 // once, and stored only as a SHA-256 hash.
+//
+// Stability: this package is pre-1.0. Its API can still change, and every change is
+// listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
 package token
 
 import (

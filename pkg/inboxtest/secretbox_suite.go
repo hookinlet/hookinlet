@@ -4,6 +4,9 @@
 // Package inboxtest provides conformance suites that every implementation of
 // the interfaces in pkg/inbox must pass. A behavior that is not in a suite is
 // not part of the contract.
+//
+// Stability: this package is pre-1.0. Its API can still change, and every change is
+// listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
 package inboxtest
 
 import (

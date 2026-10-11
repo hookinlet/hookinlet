@@ -1,0 +1,44 @@
+name: Bug report
+description: Something does not work as the documentation says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not paste tokens, signing secrets, or webhook payloads you would not post
+        publicly.** For a security problem, do not open an issue: see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `hookinlet version`, or the image tag.
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you run it
+      options: [Docker image, Release binary, Built from source, Embedded in my own program]
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened
+      description: Include the HTTP status and the JSON error if there was one.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: The smallest steps that show it
+      description: Commands you ran, with secrets replaced by placeholders.
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: hookinlet never logs bodies or secrets, but check before you paste.
+      render: json
