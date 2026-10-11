@@ -6,6 +6,27 @@ applies.
 
 ## Unreleased
 
+### Phase 5: MCP endpoint
+
+#### Added
+- `POST /mcp`: a stateless Streamable HTTP MCP endpoint with the read-only tools
+  `list_inboxes`, `query_messages`, `get_message`, and `wait_for_messages`
+  (see `docs/mcp.md`). It uses the same bearer tokens as the read API.
+- `server.Options`: `DisableMCP`, `MCPInlineBodyBytes` (default 16 KiB), and
+  `Version` (reported to MCP clients; default `dev`). `MCPInlineBodyBytes` is
+  limited to 64 KiB, and `HOOKINLET_MCP_INLINE_BODY_BYTES` above that is a
+  configuration error. Wired to
+  `HOOKINLET_MCP_ENABLED`, `HOOKINLET_MCP_INLINE_BODY_BYTES`, and the build
+  version.
+- `inbox.SingleInboxPrincipal`: an optional capability of a `Principal` limited
+  to one inbox, checked by `AuthenticatorSuite`. `token.Agent` implements it.
+- Dependency: `github.com/modelcontextprotocol/go-sdk` v1.8.0 (and its
+  permissively licensed dependencies; see `PLAN.md`).
+
+#### Changed
+- The REST message JSON can carry `body_truncated: true`, but only where a size
+  cap is requested, which the REST API never does; its responses are unchanged.
+
 ### Phase 4: SSE and the notifier
 
 #### Added

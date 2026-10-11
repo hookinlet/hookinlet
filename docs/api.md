@@ -2,7 +2,8 @@
 
 This document describes hookinlet's HTTP surface: [ingest](#ingest) (webhooks
 come in), the [read API](#read-api) (agents read them back), and
-[operations](#operations). MCP and the admin API are added in later phases.
+[operations](#operations). The same reads are available to agents as [MCP
+tools](mcp.md). The admin API is added in a later phase.
 
 All error responses are JSON:
 
