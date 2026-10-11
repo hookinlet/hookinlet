@@ -23,6 +23,7 @@ import (
 
 	"github.com/hookinlet/hookinlet/docs"
 	"github.com/hookinlet/hookinlet/internal/admin"
+	"github.com/hookinlet/hookinlet/internal/api"
 	"github.com/hookinlet/hookinlet/internal/specvalidate"
 	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -130,6 +131,7 @@ type Server struct {
 	reads   chan struct{} // a slot per read request being served
 
 	spec      *specvalidate.Document // docs/openapi.json, which requests are held to
+	streamAPI api.ServerInterface    // the stream, through the generated interface
 	adm       *admin.Service
 	backupMu  sync.Mutex     // one backup at a time
 	retention sync.WaitGroup // the scheduled sweep, so Serve can wait for it
@@ -228,6 +230,7 @@ func New(opts Options) (*Server, error) {
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),
 	}
+	s.streamAPI = s.strictServer(&streamAPI{s: s})
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now}
 	mux := http.NewServeMux()
 	health := s.apiHandlers(&healthAPI{s: s})

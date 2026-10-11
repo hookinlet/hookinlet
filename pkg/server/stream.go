@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -66,84 +65,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if !ok || !s.checkQuery(w, r) {
 		return
 	}
-	values, err := wire.QueryValues(r.URL.RawQuery)
-	var req wire.StreamRequest
-	if err == nil {
-		req, err = wire.ParseStream(values, r.Header.Values("Last-Event-ID"))
-	}
-	if err != nil {
-		writeParamError(w, err)
-		return
-	}
-
-	// Streams have their own limits. They must not use the read slots, which are
-	// held for the length of a request and would cap the server at a handful of
-	// open streams.
-	release, ok := s.acquireStream(w, in.ID)
-	if !ok {
-		return
-	}
-	defer release()
-
-	ctx := r.Context()
-	rc := http.NewResponseController(w)
-
-	// If the server starts shutting down while a write is blocked on a client that
-	// has stopped reading, abort that write now. Waiting out the write timeout
-	// would hold shutdown past its deadline, and the fallback for that closes
-	// connections that have deliveries mid-store.
-	stopAbort := context.AfterFunc(s.closeCtx, func() { _ = rc.SetWriteDeadline(time.Now()) })
-	defer stopAbort()
-
-	// Subscribe before reading anything. A message committed after this point
-	// signals us; one committed before it is found by the first read.
-	signal, cancel := s.opts.Notifier.Subscribe(ctx, in.ID)
-	defer cancel()
-
-	latest, err := s.opts.Store.LatestSeq(ctx, in.ID)
-	if err != nil {
-		s.readError(w, r, "stream start", err)
-		return
-	}
-	cursor, ahead := latest, req.After != nil && *req.After > latest
-	if req.After != nil {
-		cursor = *req.After
-	}
-
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("X-Accel-Buffering", "no") // tell nginx-style proxies not to hold events back
-	w.WriteHeader(http.StatusOK)
-	if err := s.writeStream(w, rc, []byte(wire.Retry)); err != nil {
-		return
-	}
-	if ahead {
-		// Typical after an inbox is recreated: the client remembers a position the
-		// new inbox has not reached. Nothing is wrong, but nothing will arrive until
-		// the sequence catches up, which looks exactly like a hung stream.
-		note := fmt.Sprintf(": the requested position (%d) is ahead of the newest message (%d); waiting for new messages\n\n", cursor, latest)
-		if err := s.writeStream(w, rc, []byte(note)); err != nil {
-			return
-		}
-	}
-
-	s.log.LogAttrs(ctx, slog.LevelDebug, "stream opened", slog.String("slug", in.Slug), slog.Int64("from", cursor))
-	err = s.follow(ctx, w, rc, in, req, cursor, signal, s.stillAllowed(r, in.ID))
-
-	var gone *clientGoneError
-	switch {
-	case err == nil, errors.Is(err, errStreamClosed), errors.Is(err, context.Canceled):
-		s.log.LogAttrs(ctx, slog.LevelDebug, "stream closed", slog.String("slug", in.Slug))
-	case errors.Is(err, errStreamRevoked):
-		s.log.LogAttrs(ctx, slog.LevelInfo, "stream ended: no longer authorized", slog.String("slug", in.Slug))
-	case errors.Is(err, inbox.ErrNotFound):
-		s.log.LogAttrs(ctx, slog.LevelInfo, "stream ended: the inbox was deleted", slog.String("slug", in.Slug))
-	case errors.As(err, &gone):
-		// The client left or stopped reading.
-		s.log.LogAttrs(ctx, slog.LevelDebug, "stream ended by the client", slog.String("slug", in.Slug), slog.String("err", err.Error()))
-	default:
-		s.log.LogAttrs(ctx, slog.LevelError, "stream failed", slog.String("slug", in.Slug), slog.String("err", err.Error()))
-	}
+	readHandler(s.streamHandler)(w, r, in)
 }
 
 // acquireStream takes a stream slot, both a global one and one of the inbox's
