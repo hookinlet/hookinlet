@@ -15,9 +15,10 @@ applies.
   verifier is `none` is stored with `verified: false`, with no event type and no
   delivery id taken from the sender, and it is not deduplicated.
 - **Inboxes are reached at an ingest key, not at the slug.** New inboxes get a
-  random key (`ingest_key` in the admin API; `/in/{key}`). An admin may choose one,
-  and `POST /admin/inboxes/{slug}/rotate-ingest-key` / `hookinlet inbox
-  rotate-ingest-key` replaces it. Inboxes that exist keep their slug as their key.
+  random key (`ingest_key` in the admin API; `/in/{key}`), because a name anyone
+  can guess is not something to protect an inbox with (docs/admin.md explains why).
+  An admin may choose one, and `POST /admin/inboxes/{slug}/rotate-ingest-key` /
+  `hookinlet inbox rotate-ingest-key` replaces it.
 - **Deduplication** trusts only delivery ids that the signature covers (Stripe,
   Slack, Standard Webhooks). For GitHub and HMAC inboxes a duplicate is the same
   id and the same body; the same id with another body is a new message.
@@ -26,9 +27,9 @@ applies.
   removes its secret. Calls that change an inbox answer with `warnings`.
 
 #### Upgrading
-- Inboxes that exist keep working at the URL they have, because their slug becomes
-  their ingest key. **That key is guessable**: run `hookinlet inbox rotate-ingest-key
-  SLUG` for each one and give the senders the new URL (`inbox show SLUG` prints it).
+- Migration 0004 gives **every existing inbox a new random ingest key**, so the URLs
+  senders use change (`hookinlet inbox show SLUG` prints the new one). An ingest key is
+  a capability and the slug is a guessable name, so no inbox keeps its slug as its key.
 - Messages that a `none` inbox stored before the upgrade are marked not verified.
 - A delivery from GitHub or an HMAC sender that is retried across the upgrade, with
   an id that was already stored, is stored once more: earlier rows are known by the id
@@ -39,8 +40,9 @@ applies.
 
 #### Added (`pkg/`)
 - `inbox.Inbox.IngestKey`, `inbox.ValidIngestKey`, and `inbox.NewMessage.DedupeKey`.
-  `Store.ResolveIngestKey` resolves by ingest key. A caller that creates inboxes
-  through a `Store` without a key gets the slug as the key.
+  `Store.ResolveIngestKey` resolves by ingest key. The key is required: a `Store`
+  refuses to create an inbox without one (`ErrInvalid`) and does not make one up,
+  and an update has to carry the key it was given.
 - `verify.Result.IDSigned` and `verify.Result.Unauthenticated`, and the optional
   `verify.SecretChecker`.
 - Migration 0003 (ingest keys, dedupe keys).

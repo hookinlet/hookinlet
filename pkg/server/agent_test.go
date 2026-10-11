@@ -48,7 +48,7 @@ func newAgentEnv(t *testing.T) *agentEnv {
 		if err != nil {
 			t.Fatal(err)
 		}
-		in := &inbox.Inbox{Slug: slug, Name: "Inbox " + slug, Verifier: "trusted", AgentTokenHash: hash}
+		in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: "Inbox " + slug, Verifier: "trusted", AgentTokenHash: hash}
 		if err := e.store.CreateInbox(t.Context(), in); err != nil {
 			t.Fatal(err)
 		}
@@ -506,7 +506,7 @@ func TestNoResponseContainsASecret(t *testing.T) {
 	box, _ := secretbox.New(bytes.Repeat([]byte{5}, secretbox.KeySize))
 	sealed, _ := box.Seal([]byte("the-verifier-secret-value"))
 	tok, hash, _ := token.Generate()
-	in := &inbox.Inbox{Slug: "has-secrets", Name: "n", Verifier: "token", VerifierSecret: sealed, AgentTokenHash: hash}
+	in := &inbox.Inbox{Slug: "has-secrets", IngestKey: "has-secrets", Name: "n", Verifier: "token", VerifierSecret: sealed, AgentTokenHash: hash}
 	if err := e.store.CreateInbox(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}

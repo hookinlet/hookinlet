@@ -19,7 +19,7 @@ import (
 )
 
 func validInbox() *inbox.Inbox {
-	in := &inbox.Inbox{Slug: "valid-slug", Name: "Valid", Verifier: "none", AgentTokenHash: []byte{1}}
+	in := &inbox.Inbox{Slug: "valid-slug", IngestKey: "valid-ingest-key", Name: "Valid", Verifier: "none", AgentTokenHash: []byte{1}}
 	in.ApplyDefaults()
 	return in
 }

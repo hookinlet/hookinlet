@@ -44,7 +44,7 @@ func Seed(ctx context.Context, dir, slug string, rows int) (*inbox.Inbox, error)
 		return nil, err
 	}
 	in := &inbox.Inbox{
-		Slug: slug, Name: slug, Verifier: "none",
+		Slug: slug, IngestKey: slug, Name: slug, Verifier: "none",
 		AgentTokenHash: []byte("benchseed-token-hash-" + slug),
 		MaxBodyBytes:   inbox.DefaultMaxBodyBytes,
 	}

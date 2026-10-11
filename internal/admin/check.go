@@ -23,8 +23,11 @@ func CheckSettings(p CreateParams) error {
 	if p.Name == "" {
 		p.Name = p.Slug
 	}
+	if p.IngestKey == "" {
+		p.IngestKey = "placeholder-key" // the key is made when the inbox is, and checked then
+	}
 	in := &inbox.Inbox{
-		Slug: p.Slug, Name: p.Name, Verifier: p.Verifier, VerifierConfig: p.VerifierConfig,
+		Slug: p.Slug, IngestKey: p.IngestKey, Name: p.Name, Verifier: p.Verifier, VerifierConfig: p.VerifierConfig,
 		OnVerifyFail: p.OnVerifyFail, AgentTokenHash: inbox.SecretBytes{1},
 		MaxBodyBytes: p.MaxBodyBytes, RetentionDays: p.RetentionDays, RetentionMaxCount: p.RetentionMaxCount,
 		EventTypePointer: p.EventTypePointer,

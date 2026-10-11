@@ -109,7 +109,8 @@ type Store interface {
 	// Stats returns message counts for the inbox.
 	Stats(ctx context.Context, inboxID ID) (*InboxStats, error)
 
-	// CreateInbox applies defaults, validates in, assigns ID, CreatedAt,
+	// CreateInbox applies defaults, validates in (including that it has an
+	// IngestKey, which a Store does not make up), assigns ID, CreatedAt,
 	// UpdatedAt, and Version 1, sets LastSeq to 0, and stores it, updating
 	// *in. It returns ErrConflict if the slug or the agent token hash is
 	// already used by another inbox.

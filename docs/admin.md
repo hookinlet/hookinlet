@@ -92,7 +92,8 @@ change that leaves an inbox in that state.
 capability: whoever has it can post to the inbox. So it is random by default
 (128 bits), and not the slug. You may choose one (`ingest_key`, 3 to 64 characters
 from letters, digits, `_` and `-`) when a readable URL matters more than it being
-unguessable. `rotate-ingest-key` replaces it; messages stay where they are.
+unguessable. `rotate-ingest-key` replaces it; messages stay where they are. Why it is not
+just the slug is explained [below](#why-the-ingest-url-is-not-the-slug).
 
 `ingest_url` is built from `HOOKINLET_PUBLIC_BASE_URL` if set, and otherwise from
 the request's `Host` (using `X-Forwarded-Proto` only when the request came from
@@ -118,6 +119,33 @@ before it is stored (see `HOOKINLET_MASTER_KEY`) and cannot be read back.
 `POST …/rotate-token` issues a new agent token and invalidates the old one
 immediately. Open SSE streams and MCP waits that used the old token end within
 about 30 seconds.
+
+### Why the ingest URL is not the slug
+
+The ingest endpoint takes requests from anywhere, and the key in the URL is the
+only thing that says which inbox a request is for. A slug is a name you chose so
+that people can tell inboxes apart (`stripe`, `github`, `billing`), which makes it
+the first thing anyone would try. A guessed URL gets less than it looks like: on
+an inbox with a real verifier a request without a valid signature is refused and
+stores nothing. But it still gets something:
+
+- **It finds out what exists.** An unknown name is a `404` and a known one a
+  `401`, so a scanner learns which inboxes you have, and that this is hookinlet.
+- **It can fill a `none` inbox.** An inbox that checks nothing accepts whoever
+  finds it. What it takes is stored as not verified, but it is still stored, and
+  count-based retention then pushes real messages out.
+- **It learns how busy you are.** Every accepted post answers with the next `seq`.
+
+A random 128-bit key closes all three: there is nothing to guess, an unknown key
+and a wrong one look the same, and the signature is left to do what only a
+signature can, which is to say who sent the request. The cost is a URL nobody
+can remember, which is why the admin API and `inbox show` print it and why
+`ingest_url` is built for you. If a readable URL matters more to you, choose one
+with `ingest_key`; you are then trusting the signature alone.
+
+The key is a secret of the same kind as a webhook URL on a chat service: keep it
+out of public places, and rotate it (`rotate-ingest-key`) if it leaks. Messages
+stay where they are.
 
 ## The command line
 

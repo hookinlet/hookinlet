@@ -108,6 +108,9 @@ suite is what makes it testable. The points that are easy to get wrong:
   the message: a wake-up followed by a read must not find it missing.
 - **The Store owns the clock** (UTC, microsecond precision), and `ReceivedAt`
   never decreases with `Seq` within an inbox.
+- **An inbox has an ingest key** (`Inbox.IngestKey`, the `{key}` in `/in/{key}`), which
+  the caller supplies when it creates the inbox; a Store does not make one up. It is
+  a capability, so it should be random.
 - **Deduplication** applies only to verified messages, by `DedupeKey` (the
   `DeliveryID` when it is empty), so a forged delivery cannot suppress the real
   one. The server makes the key the id and a hash of the body when the id is not
