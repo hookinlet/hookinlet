@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Pat Ramsey
+
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Message is the part of a hookinlet message this agent cares about. The full
+// shape is in docs/api.md.
+type Message struct {
+	Seq       int64           `json:"seq"`
+	Verified  bool            `json:"verified"`
+	EventType *string         `json:"event_type"`
+	Body      json.RawMessage `json:"body"`
+	BodyText  *string         `json:"body_text"`
+}
+
+// Agent reads one inbox. Handle is called once per message, in order. The agent
+// keeps a cursor, the seq of the last message handled, so that polling and a
+// reconnecting stream both carry on exactly where they stopped.
+type Agent struct {
+	URL    string // the server, such as http://localhost:8080
+	Token  string // the inbox's agent token
+	Inbox  string // the inbox's slug
+	After  int64  // start after this seq; 0 is the beginning
+	Handle func(Message)
+
+	// Interval is how long to wait between polls when nothing is new.
+	Interval time.Duration
+	// Limit stops after this many messages; 0 never stops.
+	Limit  int
+	Client *http.Client
+}
+
+func (a *Agent) client() *http.Client {
+	if a.Client != nil {
+		return a.Client
+	}
+	return &http.Client{} // no overall timeout: a stream lasts as long as it lasts
+}
+
+func (a *Agent) get(ctx context.Context, path string, header http.Header) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(a.URL, "/")+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, vs := range header {
+		req.Header[k] = vs
+	}
+	req.Header.Set("Authorization", "Bearer "+a.Token)
+	resp, err := a.client().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		err := fmt.Errorf("the server answered %d", resp.StatusCode)
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			// The token or the inbox is wrong; asking again will not help.
+			return nil, &fatalError{fmt.Errorf("%w: is the token right, and the inbox there?", err)}
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+// fatalError is a failure that retrying cannot fix.
+type fatalError struct{ error }
+
+// Poll asks for messages after the cursor until ctx ends or Limit is reached.
+func (a *Agent) Poll(ctx context.Context) error {
+	seen := 0
+	after := a.After
+	for ctx.Err() == nil {
+		resp, err := a.get(ctx, fmt.Sprintf("/v1/inboxes/%s/messages?after=%d&limit=50", url.PathEscape(a.Inbox), after), nil)
+		if err != nil {
+			var fatal *fatalError
+			if errors.As(err, &fatal) {
+				return err
+			}
+			// The server is down, restarting, or busy: wait and ask again.
+			fmt.Fprintf(os.Stderr, "%v; retrying\n", err)
+			select {
+			case <-time.After(a.Interval):
+			case <-ctx.Done():
+			}
+			continue
+		}
+		var page struct {
+			Messages []Message `json:"messages"`
+			Next     string    `json:"next"`
+		}
+		err = json.NewDecoder(io.LimitReader(resp.Body, 64<<20)).Decode(&page)
+		_ = resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("reading a page: %w", err)
+		}
+		for _, m := range page.Messages {
+			a.Handle(m)
+			after = m.Seq
+			if seen++; a.Limit > 0 && seen >= a.Limit {
+				return nil
+			}
+		}
+		// The cursor to keep, which is the same one again when the page was empty.
+		if u, err := url.Parse(page.Next); err == nil {
+			if n, err := strconv.ParseInt(u.Query().Get("after"), 10, 64); err == nil && n > after {
+				after = n
+			}
+		}
+		if len(page.Messages) == 0 {
+			select {
+			case <-time.After(a.Interval):
+			case <-ctx.Done():
+			}
+		}
+	}
+	return nil
+}
+
+// Stream follows the inbox over Server-Sent Events, reconnecting with
+// Last-Event-ID when the connection drops, until ctx ends or Limit is reached.
+func (a *Agent) Stream(ctx context.Context) error {
+	seen := 0
+	last := strconv.FormatInt(a.After, 10)
+	for ctx.Err() == nil {
+		done, err := a.streamOnce(ctx, &last, &seen)
+		if done {
+			return nil
+		}
+		var fatal *fatalError
+		if errors.As(err, &fatal) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "connection lost (%v); reconnecting after %s\n", err, last)
+		select {
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+		}
+	}
+	return nil
+}
+
+func (a *Agent) streamOnce(ctx context.Context, last *string, seen *int) (done bool, err error) {
+	resp, err := a.get(ctx, "/v1/inboxes/"+url.PathEscape(a.Inbox)+"/stream", http.Header{"Last-Event-ID": {*last}})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64<<10), 16<<20) // one event is one line of JSON
+	var id string
+	var data []string
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.HasPrefix(line, "id:"):
+			id = strings.TrimSpace(line[3:])
+		case strings.HasPrefix(line, "data:"):
+			data = append(data, strings.TrimPrefix(line[5:], " "))
+		case line == "" && len(data) > 0:
+			var m Message
+			if err := json.Unmarshal([]byte(strings.Join(data, "\n")), &m); err == nil {
+				a.Handle(m)
+			}
+			if id != "" {
+				*last = id
+			}
+			data = nil
+			if *seen++; a.Limit > 0 && *seen >= a.Limit {
+				return true, nil
+			}
+		}
+	}
+	return false, sc.Err()
+}
