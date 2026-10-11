@@ -68,20 +68,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	readHandler(s.streamHandler)(w, r, in)
 }
 
-// acquireStream takes a stream slot, both a global one and one of the inbox's
-// share, or answers 503. The per-inbox share keeps one token from using them all.
-func (s *Server) acquireStream(w http.ResponseWriter, id inbox.ID) (release func(), ok bool) {
-	release, refusal := s.takeStream(id)
-	if refusal != "" {
-		w.Header().Set("Retry-After", "5")
-		writeError(w, http.StatusServiceUnavailable, "overloaded", refusal)
-		return nil, false
-	}
-	return release, true
-}
-
-// takeStream is acquireStream without the HTTP: it returns the reason for
-// refusing, or a release function. Anything that holds a connection open for a
+// takeStream takes a stream slot, both a global one and one of the inbox's share.
+// The per-inbox share keeps one token from using them all. It returns the reason
+// for refusing, or a release function. Anything that holds a connection open for a
 // long time on an inbox's behalf, such as an MCP wait, takes a slot this way, so
 // that one token cannot open an unbounded number of them.
 func (s *Server) takeStream(id inbox.ID) (release func(), refusal string) {

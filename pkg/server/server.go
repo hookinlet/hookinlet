@@ -132,6 +132,7 @@ type Server struct {
 
 	spec      *specvalidate.Document // docs/openapi.json, which requests are held to
 	streamAPI api.ServerInterface    // the stream, through the generated interface
+	mcpStrict api.ServerInterface    // MCP, through the generated interface
 	adm       *admin.Service
 	backupMu  sync.Mutex     // one backup at a time
 	retention sync.WaitGroup // the scheduled sweep, so Serve can wait for it
@@ -231,6 +232,7 @@ func New(opts Options) (*Server, error) {
 		closing:      closeCtx.Done(),
 	}
 	s.streamAPI = s.strictServer(&streamAPI{s: s})
+	s.mcpStrict = s.strictServer(&mcpAPI{s: s})
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now}
 	mux := http.NewServeMux()
 	health := s.apiHandlers(&healthAPI{s: s})

@@ -6,7 +6,6 @@ package server
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -101,23 +100,6 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (*inbox.Inbox
 		return nil, false
 	}
 	return in, true
-}
-
-// readError answers a failed read: a bad query is the caller's fault, an
-// inbox deleted mid-request is a 404, and anything else is ours.
-func (s *Server) readError(w http.ResponseWriter, r *http.Request, what string, err error) {
-	switch {
-	case errors.Is(err, inbox.ErrInvalid):
-		writeError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
-	case errors.Is(err, inbox.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "not found")
-	default:
-		s.internalError(r.Context(), w, what, err, slog.String("path", r.Pattern))
-	}
-}
-
-func writeParamError(w http.ResponseWriter, err error) {
-	writeError(w, http.StatusBadRequest, "invalid_parameter", err.Error())
 }
 
 // acquireRead waits for one of the limited read slots. It reports false after

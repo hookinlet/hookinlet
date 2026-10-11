@@ -130,7 +130,9 @@ expect "that is the same as an inbox that is not there" \
   "$(read_api /v1/inboxes/not-there "$other_token")" "$(read_api /v1/inboxes/demo "$other_token")"
 expect "the agent token reads its inbox"       '200' "$(read_api /v1/inboxes/demo "$agent_token" | cut -d' ' -f1)"
 info=$(read_api /v1/inboxes/demo "$agent_token")
-case $info in *'"message_count":2'*'"latest_seq":2'*) echo "ok   the inbox reports two messages" ;; *) fail "unexpected inbox info: $info" ;; esac
+# The order of fields is not part of the API, so each is looked for on its own.
+case $info in *'"message_count":2'*) ;; *) fail "unexpected inbox info: $info" ;; esac
+case $info in *'"latest_seq":2'*) echo "ok   the inbox reports two messages" ;; *) fail "unexpected inbox info: $info" ;; esac
 page=$(read_api "/v1/inboxes/demo/messages?after=0" "$agent_token")
 case $page in
   *'"seq":1'*'"seq":2'*'"next":"/v1/inboxes/demo/messages?after=2&limit=50"'*) echo "ok   the page lists both messages and a next link" ;;
@@ -216,7 +218,12 @@ expect "the admin API refuses an agent token" '403' "$(admin_tok=$agent_token ad
 expect "and no token" '401' "$(curl -sS -o /dev/null -w '%{http_code}' "$base/admin/inboxes")"
 created=$(admin POST /admin/inboxes '{"slug":"made-by-api","verifier":"hmac","verifier_config":{"header":"X-Signature","prefix":"sha256="},"verifier_secret":"api-secret"}')
 case $created in
-  201*'"has_verifier_secret":true'*'"agent_token":"hki_'*) echo "ok   the admin API creates an inbox and returns its token once" ;;
+  201*'"has_verifier_secret":true'*) ;;
+  *) fail "unexpected create: $created" ;;
+esac
+# The order of fields is not part of the API.
+case $created in
+  *'"agent_token":"hki_'*) echo "ok   the admin API creates an inbox and returns its token once" ;;
   *) fail "unexpected create: $created" ;;
 esac
 case $created in *api-secret*) fail "the create response shows the verifier secret" ;; esac
@@ -260,7 +267,8 @@ docker run -d --name "$name-quick" -p "$((port + 1)):8080" -v "$vol-quick:/data"
   -e HOOKINLET_ADMIN_TOKEN="$admin_token" -e HOOKINLET_MASTER_KEY="$key" "$image" >/dev/null
 wait_ready
 quick=$(admin POST /admin/inboxes '{"slug": "demo"}')
-case $quick in 201*'"ingest_path":"/in/demo"'*'"agent_token":"hki_'*) echo "ok   an empty volume and two variables: an inbox is created through the API" ;; *) fail "unexpected quick-start create: $quick" ;; esac
+case $quick in 201*'"ingest_path":"/in/demo"'*) ;; *) fail "unexpected quick-start create: $quick" ;; esac
+case $quick in *'"agent_token":"hki_'*) echo "ok   an empty volume and two variables: an inbox is created through the API" ;; *) fail "unexpected quick-start create: $quick" ;; esac
 quick_token=$(printf '%s' "$quick" | sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p')
 expect "and takes an unsigned delivery" '200 {"seq":1}' "$(send POST /in/demo '{"hello": "world"}')"
 case $(read_api /v1/inboxes/demo/messages "$quick_token") in *'"hello":"world"'*) echo "ok   and the agent token reads it back" ;; *) fail "the quick-start message was not readable" ;; esac

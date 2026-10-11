@@ -10,3 +10,11 @@ actions:
     update:
       x-go-type: json.RawMessage
       x-go-type-skip-optional-pointer: true
+  # The MCP endpoint hands JSON-RPC to the MCP SDK and takes its answer as it is:
+  # the document describes the messages, and the SDK is what writes them.
+  - target: $.components.schemas.JsonRpcRequest
+    update:
+      x-go-type: json.RawMessage
+  - target: $.components.schemas.JsonRpcResponse
+    update:
+      x-go-type: json.RawMessage

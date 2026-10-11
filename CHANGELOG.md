@@ -20,10 +20,14 @@ applies.
 - The admin API's `GET`/`DELETE` of one inbox, `rotate-token`, `retention/run`, and
   `backup` refuse a query parameter, where they used to ignore it, and the document
   lists 400 for them. `?limit=` with no value is refused on the list.
+- JSON responses are written with a `Content-Length`, with fields in alphabetical
+  order, and no longer end in a newline.
 
 #### Added
 - `internal/api`, generated from the document, and `make generate`. CI fails when
-  it is out of date.
+  it is out of date. Every operation (ingest, the read API, the stream, the admin
+  API, the backup download, MCP, and the health checks) is served through it, so a
+  status the document does not list for an operation does not compile.
 
 ### Phase 8: open-source polish
 

@@ -129,10 +129,12 @@ func (s *Server) adminBody(next http.HandlerFunc) http.HandlerFunc {
 // answers depend on the address the caller used, or on its headers) and the writer
 // (a download clears its write deadline, an upload sets a read deadline).
 func withRequest(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), requestKey, r)
-		next(w, r.WithContext(context.WithValue(ctx, writerKey, w)))
-	}
+	return func(w http.ResponseWriter, r *http.Request) { next(w, withRequestValues(r, w)) }
+}
+
+func withRequestValues(r *http.Request, w http.ResponseWriter) *http.Request {
+	ctx := context.WithValue(r.Context(), requestKey, r)
+	return r.WithContext(context.WithValue(ctx, writerKey, w))
 }
 
 // closingContext is ctx that also ends when the server starts shutting down.

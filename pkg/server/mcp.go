@@ -119,7 +119,10 @@ func (s *Server) registerMCP(mux *http.ServeMux) {
 		caller := &mcpCaller{principal: principal}
 		r = r.WithContext(context.WithValue(r.Context(), mcpCtxKey{}, caller))
 		caller.req = r
-		handler.ServeHTTP(w, r)
+		// The operation answers with what the SDK's handler writes, as a response
+		// the document lists.
+		ctx := context.WithValue(r.Context(), mcpCallKey, &mcpCall{sdk: handler, r: r})
+		s.mcpStrict.Mcp(w, withRequestValues(r.WithContext(ctx), w))
 	})
 }
 

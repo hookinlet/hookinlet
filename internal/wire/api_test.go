@@ -11,13 +11,13 @@ import (
 	"github.com/hookinlet/hookinlet/internal/api"
 )
 
-// The read API cannot send its messages through the generated types: a message
-// body is JSON that must reach the reader exactly as it was received, and a
-// generated field of type any would decode every number to a float64 on the way.
-// So these types are written by hand. This test is what holds them to the
-// document instead: for each, the generated type (which is the document) and the
-// hand-written one must have the same JSON fields, and agree on which are
-// omitted when empty.
+// The stream and the MCP tools encode messages with these types, and the REST
+// handlers build them before converting to the generated ones (internal/api,
+// which is the document). A body has to reach the reader exactly as it was
+// received, so these are not replaced by the generated types, whose body is a
+// generic value. This test holds them to the document instead: for each, the
+// generated type and the hand-written one must have the same JSON fields, and
+// agree on which are omitted when empty.
 func TestHandWrittenTypesHaveTheFieldsTheDocumentGives(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
