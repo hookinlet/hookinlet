@@ -508,11 +508,32 @@ func (f *faulty) GetInboxBySlug(ctx context.Context, s string) (*inbox.Inbox, er
 	return f.Store.GetInboxBySlug(ctx, s)
 }
 
-func (f *faulty) GetInboxByTokenHash(ctx context.Context, h []byte) (*inbox.Inbox, error) {
+func (f *faulty) GetTokenByHash(ctx context.Context, h []byte) (*inbox.Token, error) {
 	if f.failing() {
 		return nil, errBoom
 	}
-	return f.Store.GetInboxByTokenHash(ctx, h)
+	return f.Store.GetTokenByHash(ctx, h)
+}
+
+func (f *faulty) ListTokens(ctx context.Context, p inbox.TokenListParams) ([]*inbox.Token, error) {
+	if f.failing() {
+		return nil, errBoom
+	}
+	return f.Store.ListTokens(ctx, p)
+}
+
+func (f *faulty) DeleteToken(ctx context.Context, id inbox.TokenID) error {
+	if f.failing() {
+		return errBoom
+	}
+	return f.Store.DeleteToken(ctx, id)
+}
+
+func (f *faulty) CreateToken(ctx context.Context, t *inbox.Token) error {
+	if f.failing() {
+		return errBoom
+	}
+	return f.Store.CreateToken(ctx, t)
 }
 
 func (f *faulty) ListInboxes(ctx context.Context, p inbox.ListParams) ([]*inbox.Inbox, error) {

@@ -117,10 +117,6 @@ type Inbox struct {
 	// OnVerifyFail is OnVerifyFailReject or OnVerifyFailStore.
 	OnVerifyFail string
 
-	// AgentTokenHash is the hash of the inbox's agent token. It is unique
-	// across inboxes. Only the hash is stored; the token is shown once.
-	AgentTokenHash SecretBytes
-
 	// MaxBodyBytes limits accepted body size, up to MaxBodyBytesCeiling.
 	MaxBodyBytes int64
 	// RetentionDays prunes messages older than this many days of 24 hours. 0
@@ -186,8 +182,6 @@ func (in *Inbox) Validate() error {
 		return Invalidf("verifier must be 1-32 characters from a-z, 0-9, and hyphen")
 	case in.OnVerifyFail != OnVerifyFailReject && in.OnVerifyFail != OnVerifyFailStore:
 		return Invalidf("on_verify_fail must be %q or %q", OnVerifyFailReject, OnVerifyFailStore)
-	case len(in.AgentTokenHash) == 0:
-		return Invalidf("agent token hash is required")
 	case in.MaxBodyBytes < 1 || in.MaxBodyBytes > MaxBodyBytesCeiling:
 		return Invalidf("max_body_bytes must be between 1 and %d", MaxBodyBytesCeiling)
 	case in.RetentionDays < 0 || in.RetentionDays > MaxRetentionDays:
@@ -386,3 +380,73 @@ func (p ListParams) EffectiveLimit() int {
 	}
 	return p.Limit
 }
+
+// MaxTokenInboxes bounds how many inboxes one token can be scoped to.
+const MaxTokenInboxes = 100
+
+// MaxTokenNameLen bounds a token's name, in characters.
+const MaxTokenNameLen = 100
+
+// TokenID identifies a token. Like Inbox.ID it is assigned by the Store and
+// never reused.
+type TokenID int64
+
+// Token is a credential for reading inboxes: the hash of a secret that is shown
+// once, a name for people to tell tokens apart by, and what it may read. An
+// inbox can have any number of tokens, so that one can be replaced by another
+// without a moment in which an agent has none that works.
+type Token struct {
+	ID   TokenID
+	Name string
+	// Hash is the hash of the token. Only the hash is stored. It is unique across
+	// tokens.
+	Hash SecretBytes
+	// AllInboxes lets the token read every inbox, including ones created later.
+	// When it is false the token reads exactly InboxIDs.
+	AllInboxes bool
+	// InboxIDs are the inboxes a token that is not AllInboxes may read: at least
+	// one, at most MaxTokenInboxes, no repeats. A Store returns it in ascending
+	// order and empty for an AllInboxes token.
+	InboxIDs  []ID
+	CreatedAt time.Time
+}
+
+// Validate checks the fields a Store cannot sensibly default. Errors wrap
+// ErrInvalid.
+func (t *Token) Validate() error {
+	switch {
+	case t.Name == "" || !utf8.ValidString(t.Name) || utf8.RuneCountInString(t.Name) > MaxTokenNameLen:
+		return Invalidf("token name must be 1-%d characters of valid UTF-8", MaxTokenNameLen)
+	case len(t.Hash) == 0:
+		return Invalidf("token hash is required")
+	case t.AllInboxes && len(t.InboxIDs) > 0:
+		return Invalidf("a token is either for every inbox or for a list of them, not both")
+	case !t.AllInboxes && len(t.InboxIDs) == 0:
+		return Invalidf("a token needs at least one inbox, or all of them")
+	case len(t.InboxIDs) > MaxTokenInboxes:
+		return Invalidf("a token can be scoped to at most %d inboxes", MaxTokenInboxes)
+	}
+	seen := make(map[ID]bool, len(t.InboxIDs))
+	for _, id := range t.InboxIDs {
+		if seen[id] {
+			return Invalidf("a token's inboxes must not repeat")
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+// TokenListParams pages through tokens in ascending ID order.
+type TokenListParams struct {
+	// AfterID returns tokens with an ID greater than this. 0 starts at the
+	// beginning.
+	AfterID TokenID
+	// Limit defaults to DefaultListLimit and is clamped to MaxListLimit.
+	Limit int
+	// InboxID, when non-zero, returns only tokens that can read that inbox: those
+	// scoped to it, and those that read every inbox.
+	InboxID ID
+}
+
+// EffectiveLimit returns Limit with the default and maximum applied.
+func (p TokenListParams) EffectiveLimit() int { return ListParams{Limit: p.Limit}.EffectiveLimit() }

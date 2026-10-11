@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -21,9 +22,10 @@ const maxTokenLen = 512
 //
 //   - the admin token, configured at startup, which can read every inbox and use
 //     the admin API;
-//   - an inbox's agent token, which can read that inbox and nothing else.
+//   - a token stored with the inboxes, which reads the inboxes it is scoped to
+//     (or all of them) and never administers.
 //
-// Agent tokens are looked up by their hash, so the database never holds a token
+// Stored tokens are looked up by their hash, so the database never holds a token
 // that could be replayed.
 type Authenticator struct {
 	store     inbox.Store
@@ -51,17 +53,28 @@ func (Admin) CanReadInbox(*inbox.Inbox) bool { return true }
 // CanAdmin implements inbox.Principal.
 func (Admin) CanAdmin() bool { return true }
 
-// Agent is the Principal for one inbox's agent token.
-type Agent struct{ inboxID inbox.ID }
+// Agent is the Principal for a token scoped to particular inboxes.
+type Agent struct{ ids []inbox.ID }
 
-// InboxID returns the one inbox this principal can read.
-func (a Agent) InboxID() inbox.ID { return a.inboxID }
+// InboxIDs returns the inboxes this principal can read.
+func (a Agent) InboxIDs() []inbox.ID { return slices.Clone(a.ids) }
 
-// CanReadInbox implements inbox.Principal: an agent reads only its own inbox.
-func (a Agent) CanReadInbox(in *inbox.Inbox) bool { return in != nil && in.ID == a.inboxID }
+// CanReadInbox implements inbox.Principal: an agent reads only the inboxes its
+// token names.
+func (a Agent) CanReadInbox(in *inbox.Inbox) bool { return in != nil && slices.Contains(a.ids, in.ID) }
 
 // CanAdmin implements inbox.Principal: an agent is never an admin.
 func (Agent) CanAdmin() bool { return false }
+
+// Reader is the Principal for a token that reads every inbox but cannot
+// administer.
+type Reader struct{}
+
+// CanReadInbox implements inbox.Principal.
+func (Reader) CanReadInbox(in *inbox.Inbox) bool { return in != nil }
+
+// CanAdmin implements inbox.Principal.
+func (Reader) CanAdmin() bool { return false }
 
 // errUnauthenticated is what every authentication failure looks like. It says
 // nothing about why, so it cannot tell a caller whether a token once existed.
@@ -87,14 +100,17 @@ func (a *Authenticator) Authenticate(r *http.Request) (inbox.Principal, error) {
 	if !strings.HasPrefix(tok, Prefix) {
 		return nil, errUnauthenticated
 	}
-	in, err := a.store.GetInboxByTokenHash(r.Context(), Hash(tok))
+	tk, err := a.store.GetTokenByHash(r.Context(), Hash(tok))
 	switch {
 	case errors.Is(err, inbox.ErrNotFound):
 		return nil, errUnauthenticated
 	case err != nil:
 		return nil, fmt.Errorf("token: look up agent token: %w", err)
 	}
-	return Agent{inboxID: in.ID}, nil
+	if tk.AllInboxes {
+		return Reader{}, nil
+	}
+	return Agent{ids: tk.InboxIDs}, nil
 }
 
 // bearerToken extracts the token from a request with exactly one Authorization

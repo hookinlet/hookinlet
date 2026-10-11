@@ -138,7 +138,7 @@ grep -q '"'"'seq=1 {"hello": "examples"}'"'"' received.log || { echo "CHECK: the
   docs/verifiers.md) needles=('{"seq":1}') ;;
   docs/mcp.md) needles=('"structuredContent"') ;;
   docs/admin.md)
-    needles=('"agent_token"' 'rotated the agent token' 'would create' '2 created, 0 updated, 0 unchanged, 2 secrets set' '0 created, 0 updated, 2 unchanged, 2 secrets set')
+    needles=('"agent_token"' 'created token' 'would create' '2 created, 0 updated, 0 unchanged, 2 secrets set' '0 created, 0 updated, 2 unchanged, 2 secrets set')
     checks='
 # apply must have written the new tokens, privately.
 [ "$(find tokens.json -perm 600 | wc -l)" -eq 1 ] || { echo "CHECK: tokens.json is missing or is not mode 0600" >&2; exit 1; }

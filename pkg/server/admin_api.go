@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -155,6 +156,11 @@ func created(c *admin.Created, base string) api.Created {
 		out.Warnings = &c.Warnings
 	}
 	return out
+}
+
+func tokenView(v admin.TokenView) api.Token {
+	at, _ := time.Parse(admin.TimeLayout, v.CreatedAt)
+	return api.Token{AllInboxes: v.AllInboxes, CreatedAt: at, Id: int(v.ID), Inboxes: v.Inboxes, Name: v.Name}
 }
 
 func rawConfig(m *map[string]any) json.RawMessage {
@@ -313,20 +319,67 @@ func (a *adminAPI) SetVerifierSecret(ctx context.Context, req api.SetVerifierSec
 	return api.SetVerifierSecret200JSONResponse{Body: view(v, a.s.baseURLFor(ctx)), Headers: api.SetVerifierSecret200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
 }
 
-func (a *adminAPI) RotateAgentToken(ctx context.Context, req api.RotateAgentTokenRequestObject) (api.RotateAgentTokenResponseObject, error) {
-	c, err := a.s.adm.RotateToken(ctx, req.Slug)
+func (a *adminAPI) CreateToken(ctx context.Context, req api.CreateTokenRequestObject) (api.CreateTokenResponseObject, error) {
+	b := req.Body
+	c, err := a.s.adm.CreateToken(ctx, admin.TokenParams{Name: b.Name, Inboxes: orZero(b.Inboxes), AllInboxes: orZero(b.AllInboxes)})
 	if err != nil {
-		f := a.s.classify(ctx, "rotate token", err)
+		f := a.s.classify(ctx, "create token", err)
 		switch f.status {
+		case http.StatusBadRequest:
+			return api.CreateToken400JSONResponse{BadRequestJSONResponse: badRequest(ctx, f)}, nil
 		case http.StatusNotFound:
-			return api.RotateAgentToken404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, f)}, nil
-		case http.StatusConflict:
-			return api.RotateAgentToken409JSONResponse{ConflictJSONResponse: conflict(ctx, f)}, nil
+			return api.CreateToken404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, f)}, nil
 		}
-		return api.RotateAgentToken500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
+		return api.CreateToken500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
 	}
-	a.s.auditCtx(ctx, "rotate agent token", c.Inbox.Slug)
-	return api.RotateAgentToken200JSONResponse{Body: created(c, a.s.baseURLFor(ctx)), Headers: api.RotateAgentToken200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
+	a.s.auditCtx(ctx, "create token", "", slog.Int64("token_id", c.Record.ID), slog.String("name", c.Record.Name))
+	return api.CreateToken201JSONResponse{
+		Body:    api.TokenCreated{Record: tokenView(c.Record), Token: c.Token},
+		Headers: api.CreateToken201ResponseHeaders{Location: "/admin/tokens/" + strconv.FormatInt(c.Record.ID, 10), XRequestId: requestIDOf(ctx)},
+	}, nil
+}
+
+func (a *adminAPI) ListTokens(ctx context.Context, req api.ListTokensRequestObject) (api.ListTokensResponseObject, error) {
+	limit, slug := orZero(req.Params.Limit), orZero(req.Params.Inbox)
+	views, next, err := a.s.adm.ListTokens(ctx, inbox.TokenID(orZero(req.Params.After)), limit, slug)
+	if err != nil {
+		f := a.s.classify(ctx, "list tokens", err)
+		switch f.status {
+		case http.StatusBadRequest:
+			return api.ListTokens400JSONResponse{BadRequestJSONResponse: badRequest(ctx, f)}, nil
+		case http.StatusNotFound:
+			return api.ListTokens404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, f)}, nil
+		}
+		return api.ListTokens500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
+	}
+	out := api.TokenList{Tokens: make([]api.Token, len(views))}
+	for i, v := range views {
+		out.Tokens[i] = tokenView(v)
+	}
+	if next != 0 {
+		q := url.Values{"after": {strconv.FormatInt(int64(next), 10)}}
+		if limit > 0 {
+			q.Set("limit", strconv.Itoa(limit))
+		}
+		if slug != "" {
+			q.Set("inbox", slug)
+		}
+		n := "/admin/tokens?" + q.Encode()
+		out.Next = &n
+	}
+	return api.ListTokens200JSONResponse{Body: out, Headers: api.ListTokens200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
+}
+
+func (a *adminAPI) RevokeToken(ctx context.Context, req api.RevokeTokenRequestObject) (api.RevokeTokenResponseObject, error) {
+	if err := a.s.adm.RevokeToken(ctx, inbox.TokenID(req.Id)); err != nil {
+		f := a.s.classify(ctx, "revoke token", err)
+		if f.status == http.StatusNotFound {
+			return api.RevokeToken404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, f)}, nil
+		}
+		return api.RevokeToken500JSONResponse{InternalJSONResponse: a.s.fell(ctx, f)}, nil
+	}
+	a.s.auditCtx(ctx, "revoke token", "", slog.Int("token_id", req.Id))
+	return api.RevokeToken204Response{Headers: api.RevokeToken204ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
 }
 
 func (a *adminAPI) RunRetention(ctx context.Context, _ api.RunRetentionRequestObject) (api.RunRetentionResponseObject, error) {

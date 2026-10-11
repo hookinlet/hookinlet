@@ -48,8 +48,11 @@ func newAgentEnv(t *testing.T) *agentEnv {
 		if err != nil {
 			t.Fatal(err)
 		}
-		in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: "Inbox " + slug, Verifier: "trusted", AgentTokenHash: hash}
+		in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: "Inbox " + slug, Verifier: "trusted"}
 		if err := e.store.CreateInbox(t.Context(), in); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.store.CreateToken(t.Context(), &inbox.Token{Name: slug, Hash: hash, InboxIDs: []inbox.ID{in.ID}}); err != nil {
 			t.Fatal(err)
 		}
 		return in, tok
@@ -506,8 +509,11 @@ func TestNoResponseContainsASecret(t *testing.T) {
 	box, _ := secretbox.New(bytes.Repeat([]byte{5}, secretbox.KeySize))
 	sealed, _ := box.Seal([]byte("the-verifier-secret-value"))
 	tok, hash, _ := token.Generate()
-	in := &inbox.Inbox{Slug: "has-secrets", IngestKey: "has-secrets", Name: "n", Verifier: "token", VerifierSecret: sealed, AgentTokenHash: hash}
+	in := &inbox.Inbox{Slug: "has-secrets", IngestKey: "has-secrets", Name: "n", Verifier: "token", VerifierSecret: sealed}
 	if err := e.store.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateToken(t.Context(), &inbox.Token{Name: "t", Hash: hash, InboxIDs: []inbox.ID{in.ID}}); err != nil {
 		t.Fatal(err)
 	}
 	e.post("/in/has-secrets", "payload", "X-Inbox-Token", "the-verifier-secret-value")

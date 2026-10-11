@@ -215,7 +215,7 @@ func applyOne(ctx context.Context, api adminAPI, it applyfile.Item, secret strin
 			}
 			// The token is saved before anything else is done with the inbox.
 			if err := sink.add(slug, created.AgentToken); err != nil {
-				return fmt.Errorf("inbox %q was created but its agent token could not be saved (%w); rotate it with: hookinlet inbox rotate-token %s", slug, err, slug)
+				return fmt.Errorf("inbox %q was created but its agent token could not be saved (%w); issue another with: hookinlet token create --name default --inbox %s, and revoke the lost one with hookinlet token revoke", slug, err, slug)
 			}
 			for _, w := range created.Warnings {
 				fmt.Fprintf(stderr, "warning: %s: %s\n", slug, w)

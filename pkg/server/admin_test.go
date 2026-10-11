@@ -15,12 +15,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
@@ -136,7 +138,8 @@ func TestAdminAPIRequiresTheAdminToken(t *testing.T) {
 	routes := []struct{ method, path string }{
 		{"POST", "/admin/inboxes"}, {"GET", "/admin/inboxes"}, {"GET", "/admin/inboxes/agent-a"},
 		{"PATCH", "/admin/inboxes/agent-a"}, {"DELETE", "/admin/inboxes/agent-a"},
-		{"PUT", "/admin/inboxes/agent-a/secret"}, {"POST", "/admin/inboxes/agent-a/rotate-token"},
+		{"PUT", "/admin/inboxes/agent-a/secret"}, {"POST", "/admin/inboxes/agent-a/rotate-ingest-key"},
+		{"POST", "/admin/tokens"}, {"GET", "/admin/tokens"}, {"DELETE", "/admin/tokens/1"},
 		{"POST", "/admin/retention/run"}, {"GET", "/admin/backup"},
 	}
 	for _, r := range routes {
@@ -167,7 +170,7 @@ func TestAdminAPIWrongMethodIsJSON405(t *testing.T) {
 	a := newAdminEnv(t)
 	for path, allow := range map[string]string{
 		"/admin/inboxes": "GET, POST", "/admin/inboxes/agent-a": "DELETE, GET, PATCH", "/admin/inboxes/agent-a/secret": "PUT",
-		"/admin/inboxes/agent-a/rotate-token": "POST", "/admin/retention/run": "POST", "/admin/backup": "GET",
+		"/admin/inboxes/agent-a/rotate-ingest-key": "POST", "/admin/tokens": "GET, POST", "/admin/tokens/1": "DELETE", "/admin/retention/run": "POST", "/admin/backup": "GET",
 	} {
 		status, hdr, body := a.call("OPTIONS", path, nil, testAdminToken)
 		if status != http.StatusMethodNotAllowed || hdr.Get("Allow") != allow || errorCodeOfBody(t, body) != "method_not_allowed" {
@@ -410,28 +413,96 @@ func TestPatchValidatesTheResultingVerifier(t *testing.T) {
 	}
 }
 
-func TestRotatingTheTokenEndsTheOldOne(t *testing.T) {
+type tokenCreatedJSON struct {
+	Record struct {
+		ID         int64    `json:"id"`
+		Name       string   `json:"name"`
+		AllInboxes bool     `json:"all_inboxes"`
+		Inboxes    []string `json:"inboxes"`
+	} `json:"record"`
+	Token string `json:"token"`
+}
+
+func TestTokensAreIssuedScopedAndRevoked(t *testing.T) {
 	a := newAdminEnv(t)
-	old := a.tokenA
-	read := func(tok string) int {
-		status, _ := do2(t, "GET", a.base+"/v1/inboxes/agent-a", http.Header{"Authorization": {"Bearer " + tok}}, "")
+	a.newInbox("agent-b", "trusted", "")
+	read := func(tok, slug string) int {
+		status, _ := do2(t, "GET", a.base+"/v1/inboxes/"+slug, http.Header{"Authorization": {"Bearer " + tok}}, "")
 		return status
 	}
-	if read(old) != 200 {
+	if read(a.tokenA, "agent-a") != 200 {
 		t.Fatal("the starting token does not work")
 	}
-	c := unjson[createdJSON](t, a.mustAdmin("POST", "/admin/inboxes/agent-a/rotate-token", nil, 200))
-	if c.AgentToken == "" || c.AgentToken == old {
-		t.Fatalf("rotated token %q", c.AgentToken)
+	// A second token for the same inbox, so the first can be retired with no gap.
+	second := unjson[tokenCreatedJSON](t, a.mustAdmin("POST", "/admin/tokens", map[string]any{"name": "next", "inboxes": []string{"agent-a"}}, 201))
+	if second.Token == "" || second.Token == a.tokenA || second.Record.Name != "next" || second.Record.AllInboxes ||
+		len(second.Record.Inboxes) != 1 || second.Record.Inboxes[0] != "agent-a" {
+		t.Fatalf("created token %+v", second)
 	}
-	if read(old) != 401 {
-		t.Errorf("the old token still works: %d", read(old))
+	if read(second.Token, "agent-a") != 200 || read(a.tokenA, "agent-a") != 200 {
+		t.Error("both tokens should work until the old one is revoked")
 	}
-	if read(c.AgentToken) != 200 {
-		t.Error("the new token does not work")
+	if read(second.Token, "agent-b") != 404 && read(second.Token, "agent-b") != 403 {
+		t.Errorf("a token scoped to agent-a reads agent-b: %d", read(second.Token, "agent-b"))
 	}
-	if status, _ := a.admin("POST", "/admin/inboxes/no-such-inbox/rotate-token", nil); status != 404 {
-		t.Errorf("rotating a missing inbox: %d", status)
+
+	list := unjson[struct {
+		Tokens []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"tokens"`
+	}](t, a.mustAdmin("GET", "/admin/tokens?inbox=agent-a", nil, 200))
+	var firstID int64
+	for _, tk := range list.Tokens {
+		if tk.Name == "default" {
+			firstID = tk.ID
+		}
+	}
+	if len(list.Tokens) < 2 {
+		t.Fatalf("tokens for agent-a: %+v", list.Tokens)
+	}
+
+	// An all-inboxes token reads both inboxes and still cannot administer.
+	all := unjson[tokenCreatedJSON](t, a.mustAdmin("POST", "/admin/tokens", map[string]any{"name": "reader", "all_inboxes": true}, 201))
+	if read(all.Token, "agent-a") != 200 || read(all.Token, "agent-b") != 200 {
+		t.Error("an all-inboxes token should read every inbox")
+	}
+	if status, _, _ := a.call("GET", "/admin/inboxes", nil, all.Token); status != http.StatusForbidden {
+		t.Errorf("an all-inboxes token on the admin API: %d, want 403", status)
+	}
+
+	// Revoking the first leaves the second.
+	if firstID == 0 {
+		firstID = list.Tokens[0].ID
+	}
+	a.mustAdmin("DELETE", "/admin/tokens/"+strconv.FormatInt(firstID, 10), nil, 204)
+	if status, _ := a.admin("DELETE", "/admin/tokens/"+strconv.FormatInt(firstID, 10), nil); status != 404 {
+		t.Errorf("revoking twice: %d", status)
+	}
+	if read(a.tokenA, "agent-a") != 401 {
+		t.Errorf("the revoked token still works: %d", read(a.tokenA, "agent-a"))
+	}
+	if read(second.Token, "agent-a") != 200 {
+		t.Error("the other token stopped working")
+	}
+
+	for name, body := range map[string]map[string]any{
+		"an unknown inbox":      {"name": "x", "inboxes": []string{"no-such-inbox"}},
+		"neither scope":         {"name": "x"},
+		"both scopes":           {"name": "x", "inboxes": []string{"agent-a"}, "all_inboxes": true},
+		"a nameless token":      {"name": "", "all_inboxes": true},
+		"an unknown field":      {"name": "x", "all_inboxes": true, "extra": 1},
+		"no name at all":        {"all_inboxes": true},
+		"a repeated inbox name": {"name": "x", "inboxes": []string{"agent-a", "agent-a"}},
+	} {
+		status, _ := a.admin("POST", "/admin/tokens", body)
+		want := http.StatusBadRequest
+		if name == "an unknown inbox" {
+			want = http.StatusNotFound
+		}
+		if status != want {
+			t.Errorf("%s: %d, want %d", name, status, want)
+		}
 	}
 }
 
@@ -478,7 +549,8 @@ func TestNoResponseOrLogContainsASecret(t *testing.T) {
 	call("GET", "/admin/inboxes/leaky", nil)
 	call("PATCH", "/admin/inboxes/leaky", map[string]any{"name": "Leaky"})
 	call("PUT", "/admin/inboxes/leaky/secret", map[string]any{"secret": secret + "-2"})
-	rot := unjson[createdJSON](t, call("POST", "/admin/inboxes/leaky/rotate-token", nil))
+	rot := unjson[tokenCreatedJSON](t, call("POST", "/admin/tokens", map[string]any{"name": "second", "inboxes": []string{"leaky"}}))
+	call("GET", "/admin/tokens", nil)
 	call("POST", "/admin/inboxes", map[string]any{"slug": "leaky", "verifier_secret": secret}) // a conflict
 	call("POST", "/admin/inboxes", map[string]any{"slug": "x", "verifier_secret": secret})     // invalid
 	call("GET", "/admin/inboxes/nope", nil)
@@ -493,7 +565,7 @@ func TestNoResponseOrLogContainsASecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, sealed := []byte(in.AgentTokenHash), []byte(in.VerifierSecret)
+	hash, sealed := token.Hash(c.AgentToken), []byte(in.VerifierSecret)
 	shown := all.String() + "\n" + a.logs.String()
 	forbidden := map[string]string{
 		"the verifier secret": secret, "the sealed secret": string(sealed), "its hex": hex.EncodeToString(sealed),
@@ -508,12 +580,12 @@ func TestNoResponseOrLogContainsASecret(t *testing.T) {
 		}
 	}
 	// A token is shown in exactly the response that created it, and nowhere else.
-	for name, tok := range map[string]string{"created": c.AgentToken, "rotated": rot.AgentToken} {
+	for name, tok := range map[string]string{"created": c.AgentToken, "second": rot.Token} {
 		if got := strings.Count(shown, tok); got != 1 {
 			t.Errorf("the %s token appears %d times in responses and logs, want exactly 1", name, got)
 		}
 	}
-	if strings.Contains(a.logs.String(), c.AgentToken) || strings.Contains(a.logs.String(), rot.AgentToken) {
+	if strings.Contains(a.logs.String(), c.AgentToken) || strings.Contains(a.logs.String(), rot.Token) {
 		t.Error("a token was logged")
 	}
 	if !strings.Contains(a.logs.String(), `"msg":"admin"`) {

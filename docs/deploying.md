@@ -77,7 +77,10 @@ notarized: one downloaded through a browser is quarantined, and
   off. Streams send `X-Accel-Buffering: no`; a proxy that buffers responses
   anyway will hold events back.
 - **The two secrets, kept.** `HOOKINLET_ADMIN_TOKEN` (at least 32 characters, no
-  whitespace) is the credential for the admin API and can read every inbox.
+  whitespace, not mostly one repeated character) is the credential for the admin
+  API and can read every inbox. Keep the admin API off the public address with
+  `HOOKINLET_ADMIN_LISTEN_ADDR`, or turn it off with `HOOKINLET_ADMIN_ENABLED=false`
+  ([why and how](admin.md#keeping-the-admin-api-off-the-public-address)).
   `HOOKINLET_MASTER_KEY` (32 random bytes, base64) encrypts verifier secrets in
   the database. **Lose the master key and every stored verifier secret is
   unreadable**; keep it with your backups, and never in the data directory.
@@ -112,6 +115,8 @@ lists them all.
 | `HOOKINLET_MAX_STREAMS_PER_INBOX` | half of the above | Most streams or waits on one inbox. |
 | `HOOKINLET_SSE_HEARTBEAT` | `15s` | Ping interval on idle streams. |
 | `HOOKINLET_SSE_RECHECK_INTERVAL` | `0` (off) | Re-read the store this often even without a wake-up. Needed only by a notifier that can drop signals; the built-in one does not. |
+| `HOOKINLET_ADMIN_ENABLED` | `true` | Serve the admin API (`/admin/...`). `false` leaves inboxes and tokens to the command line. |
+| `HOOKINLET_ADMIN_LISTEN_ADDR` | none | Serve the admin API on this address instead of `HOOKINLET_LISTEN_ADDR`, and nothing else there. |
 | `HOOKINLET_MCP_ENABLED` | `true` | Serve `/mcp`. |
 | `HOOKINLET_MCP_INLINE_BODY_BYTES` | `16384` | Largest body MCP tools return inline (at most 65536). |
 | `HOOKINLET_RETENTION_INTERVAL` | `1h` | How often retention runs; `off` for never. |

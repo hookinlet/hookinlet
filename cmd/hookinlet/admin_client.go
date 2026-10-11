@@ -28,7 +28,9 @@ type adminAPI interface {
 	List(ctx context.Context) ([]admin.View, error)
 	Update(ctx context.Context, slug string, p admin.Patch) (admin.View, error)
 	SetSecret(ctx context.Context, slug, secret string) (admin.View, error)
-	RotateToken(ctx context.Context, slug string) (*admin.Created, error)
+	CreateToken(ctx context.Context, p admin.TokenParams) (*admin.TokenCreated, error)
+	ListTokens(ctx context.Context, slug string) ([]admin.TokenView, error)
+	RevokeToken(ctx context.Context, id int64) error
 	RotateIngestKey(ctx context.Context, slug string) (admin.View, error)
 	Delete(ctx context.Context, slug string) error
 	RunRetention(ctx context.Context) (deleted int64, err error)
@@ -69,8 +71,26 @@ func (d directAdmin) SetSecret(ctx context.Context, slug, secret string) (admin.
 func (d directAdmin) RotateIngestKey(ctx context.Context, slug string) (admin.View, error) {
 	return d.svc.RotateIngestKey(ctx, slug)
 }
-func (d directAdmin) RotateToken(ctx context.Context, slug string) (*admin.Created, error) {
-	return d.svc.RotateToken(ctx, slug)
+func (d directAdmin) CreateToken(ctx context.Context, p admin.TokenParams) (*admin.TokenCreated, error) {
+	return d.svc.CreateToken(ctx, p)
+}
+func (d directAdmin) ListTokens(ctx context.Context, slug string) ([]admin.TokenView, error) {
+	var all []admin.TokenView
+	var after inbox.TokenID
+	for {
+		page, next, err := d.svc.ListTokens(ctx, after, 0, slug)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if next == 0 {
+			return all, nil
+		}
+		after = next
+	}
+}
+func (d directAdmin) RevokeToken(ctx context.Context, id int64) error {
+	return d.svc.RevokeToken(ctx, inbox.TokenID(id))
 }
 func (d directAdmin) Delete(ctx context.Context, slug string) error { return d.svc.Delete(ctx, slug) }
 func (d directAdmin) RunRetention(ctx context.Context) (int64, error) {
@@ -232,12 +252,41 @@ func (r *remoteAdmin) SetSecret(ctx context.Context, slug, secret string) (admin
 	err := r.do(ctx, http.MethodPut, slugPath(slug)+"/secret", map[string]string{"secret": secret}, &v)
 	return v, err
 }
-func (r *remoteAdmin) RotateToken(ctx context.Context, slug string) (*admin.Created, error) {
-	var out admin.Created
-	if err := r.do(ctx, http.MethodPost, slugPath(slug)+"/rotate-token", nil, &out); err != nil {
+func (r *remoteAdmin) CreateToken(ctx context.Context, p admin.TokenParams) (*admin.TokenCreated, error) {
+	var out admin.TokenCreated
+	if err := r.do(ctx, http.MethodPost, "/admin/tokens", p, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+func (r *remoteAdmin) ListTokens(ctx context.Context, slug string) ([]admin.TokenView, error) {
+	var all []admin.TokenView
+	path := "/admin/tokens"
+	if slug != "" {
+		path += "?" + url.Values{"inbox": {slug}}.Encode()
+	}
+	for pages := 0; path != "" && pages < 10_000; pages++ {
+		var page struct {
+			Tokens []admin.TokenView `json:"tokens"`
+			Next   *string           `json:"next"`
+		}
+		if err := r.do(ctx, http.MethodGet, path, nil, &page); err != nil {
+			return nil, err
+		}
+		all = append(all, page.Tokens...)
+		path = ""
+		if page.Next != nil {
+			// Only ever follow the server's cursor on its own admin path.
+			if !strings.HasPrefix(*page.Next, "/admin/tokens?") {
+				return nil, errors.New("the server sent a next link that was not understood")
+			}
+			path = *page.Next
+		}
+	}
+	return all, nil
+}
+func (r *remoteAdmin) RevokeToken(ctx context.Context, id int64) error {
+	return r.do(ctx, http.MethodDelete, "/admin/tokens/"+strconv.FormatInt(id, 10), nil, nil)
 }
 func (r *remoteAdmin) RotateIngestKey(ctx context.Context, slug string) (admin.View, error) {
 	var v admin.View

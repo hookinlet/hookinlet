@@ -73,6 +73,19 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 			t.Errorf("the slug %q is still a way in", slug)
 		}
 	}
+	// Each inbox's token (the hash stored in its row) still resolves, now as a token
+	// named "default" scoped to that inbox alone.
+	for i, slug := range []string{"signed", "open"} {
+		in, _ := s.GetInboxBySlug(t.Context(), slug)
+		tk, err := s.GetTokenByHash(t.Context(), []byte{byte(i + 1)})
+		if err != nil {
+			t.Errorf("the token of %q after the upgrade: %v", slug, err)
+			continue
+		}
+		if tk.Name != "default" || tk.AllInboxes || len(tk.InboxIDs) != 1 || tk.InboxIDs[0] != in.ID {
+			t.Errorf("the token of %q = %+v, want \"default\" scoped to inbox %d", slug, tk, in.ID)
+		}
+	}
 	// What the "none" inbox took is not verified any more; the signed one's is as it was.
 	for _, tc := range []struct {
 		slug string

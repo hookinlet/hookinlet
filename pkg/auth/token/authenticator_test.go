@@ -24,7 +24,10 @@ type fixture struct {
 	store  *sqlite.Store
 	tokenA string
 	tokenB string
-	a, b   *inbox.Inbox
+	// tokenBoth reads A and B; tokenAll reads every inbox; idA is tokenA's ID.
+	tokenBoth, tokenAll string
+	idA                 inbox.TokenID
+	a, b                *inbox.Inbox
 }
 
 func newFixture(t *testing.T, admin string) *fixture {
@@ -35,19 +38,29 @@ func newFixture(t *testing.T, admin string) *fixture {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	f := &fixture{store: store, auth: token.NewAuthenticator(store, admin)}
-	mk := func(slug string) (*inbox.Inbox, string) {
+	issue := func(name string, all bool, ids ...inbox.ID) (string, inbox.TokenID) {
 		tok, hash, err := token.Generate()
 		if err != nil {
 			t.Fatal(err)
 		}
-		in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: "none", AgentTokenHash: hash}
+		rec := &inbox.Token{Name: name, Hash: hash, AllInboxes: all, InboxIDs: ids}
+		if err := store.CreateToken(t.Context(), rec); err != nil {
+			t.Fatal(err)
+		}
+		return tok, rec.ID
+	}
+	mk := func(slug string) *inbox.Inbox {
+		in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: "none"}
 		if err := store.CreateInbox(t.Context(), in); err != nil {
 			t.Fatal(err)
 		}
-		return in, tok
+		return in
 	}
-	f.a, f.tokenA = mk("inbox-a")
-	f.b, f.tokenB = mk("inbox-b")
+	f.a, f.b = mk("inbox-a"), mk("inbox-b")
+	f.tokenA, f.idA = issue("a", false, f.a.ID)
+	f.tokenB, _ = issue("b", false, f.b.ID)
+	f.tokenBoth, _ = issue("both", false, f.a.ID, f.b.ID)
+	f.tokenAll, _ = issue("all", true)
 	return f
 }
 
@@ -55,13 +68,13 @@ func TestConformance(t *testing.T) {
 	inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
 		f := newFixture(t, adminToken)
 		return inboxtest.AuthFixture{
-			Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, AdminToken: adminToken,
+			Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, AdminToken: adminToken,
 		}
 	})
 	t.Run("without an admin token", func(t *testing.T) {
 		inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
 			f := newFixture(t, "")
-			return inboxtest.AuthFixture{Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB}
+			return inboxtest.AuthFixture{Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll}
 		})
 	})
 }
@@ -105,8 +118,12 @@ func TestAgentTokenReadsOnlyItsOwnInbox(t *testing.T) {
 	if err != nil || !pb.CanReadInbox(f.b) || pb.CanReadInbox(f.a) {
 		t.Errorf("agent B: %v, %v", pb, err)
 	}
-	if got := pa.(token.Agent).InboxID(); got != f.a.ID {
-		t.Errorf("InboxID = %d, want %d", got, f.a.ID)
+	if got := pa.(token.Agent).InboxIDs(); len(got) != 1 || got[0] != f.a.ID {
+		t.Errorf("InboxIDs = %v, want [%d]", got, f.a.ID)
+	}
+	pall, err := f.auth.Authenticate(req(t, "Authorization", "Bearer "+f.tokenAll))
+	if err != nil || pall.CanAdmin() || !pall.CanReadInbox(f.a) || !pall.CanReadInbox(f.b) {
+		t.Errorf("an all-inboxes token should read everything and not administer: %v, %v", pall, err)
 	}
 }
 
@@ -178,22 +195,19 @@ func TestNoAdminTokenConfigured(t *testing.T) {
 	}
 }
 
-func TestRotatedTokenStopsWorking(t *testing.T) {
+func TestRevokedTokenStopsWorkingAndASecondOneKeepsWorking(t *testing.T) {
 	f := newFixture(t, adminToken)
 	if _, err := f.auth.Authenticate(req(t, "Authorization", "Bearer "+f.tokenA)); err != nil {
 		t.Fatal(err)
 	}
-	newTok, newHash, _ := token.Generate()
-	rotated := *f.a
-	rotated.AgentTokenHash = newHash
-	if err := f.store.UpdateInbox(t.Context(), &rotated); err != nil {
+	if err := f.store.DeleteToken(t.Context(), f.idA); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.auth.Authenticate(req(t, "Authorization", "Bearer "+f.tokenA)); !errors.Is(err, inbox.ErrUnauthenticated) {
-		t.Errorf("the old token still works: %v", err)
+		t.Errorf("the revoked token still works: %v", err)
 	}
-	if _, err := f.auth.Authenticate(req(t, "Authorization", "Bearer "+newTok)); err != nil {
-		t.Errorf("the new token does not work: %v", err)
+	if p, err := f.auth.Authenticate(req(t, "Authorization", "Bearer "+f.tokenBoth)); err != nil || !p.CanReadInbox(f.a) {
+		t.Errorf("another token for the inbox stopped working: %v, %v", p, err)
 	}
 }
 
@@ -239,9 +253,9 @@ type lookupCounter struct {
 	n int
 }
 
-func (l *lookupCounter) GetInboxByTokenHash(ctx context.Context, h []byte) (*inbox.Inbox, error) {
+func (l *lookupCounter) GetTokenByHash(ctx context.Context, h []byte) (*inbox.Token, error) {
 	l.n++
-	return l.Store.GetInboxByTokenHash(ctx, h)
+	return l.Store.GetTokenByHash(ctx, h)
 }
 
 // Anything that cannot be a token we issued is turned away without touching the

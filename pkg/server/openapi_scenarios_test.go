@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -188,12 +189,38 @@ func ordinaryUse(t *testing.T, c *contract) {
 	cl.call("setVerifierSecret", "PUT", "/admin/inboxes/contract-test/secret", map[string]any{"secret": "x"}, agent)
 	cl.call("setVerifierSecret", "PUT", "/admin/inboxes/contract-test/secret", map[string]any{"secret": "x"}, "")
 	cl.call("setVerifierSecret", "GET", "/admin/inboxes/contract-test/secret", nil, admin)
-	cl.call("rotateAgentToken", "POST", "/admin/inboxes/contract-test/rotate-token", nil, admin)
-	cl.call("rotateAgentToken", "POST", "/admin/inboxes/contract-test/rotate-token?bogus=1", nil, admin)
-	cl.call("rotateAgentToken", "POST", "/admin/inboxes/nope-nope/rotate-token", nil, admin)
-	cl.call("rotateAgentToken", "POST", "/admin/inboxes/contract-test/rotate-token", nil, agent)
-	cl.call("rotateAgentToken", "POST", "/admin/inboxes/contract-test/rotate-token", nil, "")
-	cl.call("rotateAgentToken", "GET", "/admin/inboxes/contract-test/rotate-token", nil, admin)
+	_, _, made := cl.call("createToken", "POST", "/admin/tokens", map[string]any{"name": "t1", "inboxes": []string{"contract-test"}}, admin)
+	var madeTok struct {
+		Record struct {
+			ID int64 `json:"id"`
+		} `json:"record"`
+	}
+	_ = json.Unmarshal(made, &madeTok)
+	cl.call("createToken", "POST", "/admin/tokens", map[string]any{"name": "t2", "all_inboxes": true}, admin)
+	cl.call("createToken", "POST", "/admin/tokens", map[string]any{"name": "t3"}, admin)
+	cl.call("createToken", "POST", "/admin/tokens", map[string]any{"name": "t4", "inboxes": []string{"nope-nope"}}, admin)
+	cl.call("createToken", "POST", "/admin/tokens?bogus=1", map[string]any{"name": "t5", "all_inboxes": true}, admin)
+	cl.call("createToken", "POST", "/admin/tokens", map[string]any{"name": "t6", "all_inboxes": true}, agent)
+	cl.call("createToken", "POST", "/admin/tokens", map[string]any{"name": "t7", "all_inboxes": true}, "")
+	cl.call("createToken", "POST", "/admin/tokens", `{"name":"t8","all_inboxes":true}`, admin, "Content-Type", "text/plain")
+	cl.call("createToken", "POST", "/admin/tokens", `{"name":"`+strings.Repeat("n", 100<<10)+`"}`, admin)
+	cl.call("createToken", "PUT", "/admin/tokens", nil, admin)
+	st, h, b = rawBrokenBody(t, addr, "/admin/tokens", admin, 100, `{"name":`)
+	c.record("createToken", st, h, b, false, false)
+	cl.call("listTokens", "GET", "/admin/tokens", nil, admin)
+	cl.call("listTokens", "GET", "/admin/tokens?limit=1&inbox=contract-test", nil, admin)
+	cl.call("listTokens", "GET", "/admin/tokens?bogus=1", nil, admin)
+	cl.call("listTokens", "GET", "/admin/tokens?inbox=nope-nope", nil, admin)
+	cl.call("listTokens", "GET", "/admin/tokens", nil, agent)
+	cl.call("listTokens", "GET", "/admin/tokens", nil, "")
+	cl.call("listTokens", "PUT", "/admin/tokens/1", nil, admin)                                                        // 405 on the id path
+	cl.call("revokeToken", "DELETE", "/admin/tokens/"+strconv.FormatInt(madeTok.Record.ID, 10)+"?bogus=1", nil, admin) // refused, so nothing is revoked
+	cl.call("revokeToken", "DELETE", "/admin/tokens/"+strconv.FormatInt(madeTok.Record.ID, 10), nil, admin)
+	cl.call("revokeToken", "DELETE", "/admin/tokens/999999", nil, admin)
+	cl.call("revokeToken", "DELETE", "/admin/tokens/abc", nil, admin)
+	cl.call("revokeToken", "DELETE", "/admin/tokens/1", nil, agent)
+	cl.call("revokeToken", "DELETE", "/admin/tokens/1", nil, "")
+	cl.call("revokeToken", "GET", "/admin/tokens/1", nil, admin)
 	cl.call("rotateIngestKey", "POST", "/admin/inboxes/contract-test/rotate-ingest-key", nil, admin)
 	cl.call("rotateIngestKey", "POST", "/admin/inboxes/contract-test/rotate-ingest-key?bogus=1", nil, admin)
 	cl.call("rotateIngestKey", "POST", "/admin/inboxes/nope-nope/rotate-ingest-key", nil, admin)
@@ -260,7 +287,6 @@ func storeFails(t *testing.T, c *contract) {
 	f.set(false, true, false)
 	cl.call("updateInbox", "PATCH", "/admin/inboxes/agent-a", map[string]any{"name": "x"}, admin)
 	cl.call("setVerifierSecret", "PUT", "/admin/inboxes/agent-a/secret", map[string]any{"secret": "x"}, admin)
-	cl.call("rotateAgentToken", "POST", "/admin/inboxes/agent-a/rotate-token", nil, admin)
 	cl.call("rotateIngestKey", "POST", "/admin/inboxes/agent-a/rotate-ingest-key", nil, admin)
 
 	f.set(false, false, true)
@@ -285,7 +311,10 @@ func storeFails(t *testing.T, c *contract) {
 	cl.call("showInbox", "GET", "/admin/inboxes/agent-a", nil, admin)
 	cl.call("updateInbox", "PATCH", "/admin/inboxes/agent-a", map[string]any{"name": "x"}, admin)
 	cl.call("setVerifierSecret", "PUT", "/admin/inboxes/agent-a/secret", map[string]any{"secret": "x"}, admin)
-	cl.call("rotateAgentToken", "POST", "/admin/inboxes/agent-a/rotate-token", nil, admin)
+	cl.call("createToken", "POST", "/admin/tokens", map[string]any{"name": "x", "all_inboxes": true}, admin)
+	cl.call("createToken", "POST", "/admin/tokens", map[string]any{"name": "x", "inboxes": []string{"agent-a"}}, admin)
+	cl.call("listTokens", "GET", "/admin/tokens", nil, admin)
+	cl.call("revokeToken", "DELETE", "/admin/tokens/1", nil, admin)
 	cl.call("rotateIngestKey", "POST", "/admin/inboxes/agent-a/rotate-ingest-key", nil, admin)
 	cl.call("deleteInbox", "DELETE", "/admin/inboxes/agent-a", nil, admin)
 	cl.call("runRetention", "POST", "/admin/retention/run", nil, admin) // Prune is not failing: this one succeeds

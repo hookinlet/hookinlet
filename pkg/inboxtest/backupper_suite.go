@@ -74,9 +74,9 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 		ctx := t.Context()
 
 		a := &inbox.Inbox{Slug: "backup-a", IngestKey: "backup-a", Name: "A", Verifier: "hmac", VerifierConfig: []byte(`{"header":"X-Sig"}`),
-			VerifierSecret: []byte("sealed-bytes-a"), AgentTokenHash: []byte("hash-a-0123456789"), OnVerifyFail: inbox.OnVerifyFailStore,
+			VerifierSecret: []byte("sealed-bytes-a"), OnVerifyFail: inbox.OnVerifyFailStore,
 			RetentionDays: 7, RetentionMaxCount: 1000, EventTypePointer: "/type", MaxBodyBytes: 4096}
-		b := &inbox.Inbox{Slug: "backup-b", IngestKey: "backup-b", Name: "B", Verifier: "none", AgentTokenHash: []byte("hash-b-0123456789"), Disabled: true}
+		b := &inbox.Inbox{Slug: "backup-b", IngestKey: "backup-b", Name: "B", Verifier: "none", Disabled: true}
 		for _, in := range []*inbox.Inbox{a, b} {
 			if err := s.CreateInbox(ctx, in); err != nil {
 				t.Fatal(err)
@@ -110,9 +110,6 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("%s differs after restore:\n got  %+v\n want %+v", want.Slug, got, want)
 			}
-			if found, err := r.GetInboxByTokenHash(ctx, want.AgentTokenHash); err != nil || found.ID != want.ID {
-				t.Errorf("%s: its token no longer resolves: %v", want.Slug, err)
-			}
 			if !reflect.DeepEqual(all(t, r, got), all(t, s, want)) {
 				t.Errorf("%s: the messages differ after restore", want.Slug)
 			}
@@ -138,7 +135,7 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 		s := newStore(t)
 		defer func() { _ = s.Close() }()
 		ctx := t.Context()
-		in := &inbox.Inbox{Slug: "backup-busy", IngestKey: "backup-busy", Name: "busy", Verifier: "none", AgentTokenHash: []byte("hash-busy-0123456")}
+		in := &inbox.Inbox{Slug: "backup-busy", IngestKey: "backup-busy", Name: "busy", Verifier: "none"}
 		if err := s.CreateInbox(ctx, in); err != nil {
 			t.Fatal(err)
 		}
@@ -204,7 +201,7 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 		s := newStore(t)
 		defer func() { _ = s.Close() }()
 		ctx := t.Context()
-		in := &inbox.Inbox{Slug: "backup-held", IngestKey: "backup-held", Name: "held", Verifier: "none", AgentTokenHash: []byte("hash-held-01234567")}
+		in := &inbox.Inbox{Slug: "backup-held", IngestKey: "backup-held", Name: "held", Verifier: "none"}
 		if err := s.CreateInbox(ctx, in); err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +244,7 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 	t.Run("TheSnapshotIsIndependentOfTheStore", func(t *testing.T) {
 		s := newStore(t)
 		defer func() { _ = s.Close() }()
-		in := &inbox.Inbox{Slug: "backup-indep", IngestKey: "backup-indep", Name: "x", Verifier: "none", AgentTokenHash: []byte("hash-indep-012345")}
+		in := &inbox.Inbox{Slug: "backup-indep", IngestKey: "backup-indep", Name: "x", Verifier: "none"}
 		if err := s.CreateInbox(t.Context(), in); err != nil {
 			t.Fatal(err)
 		}

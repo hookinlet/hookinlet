@@ -28,7 +28,7 @@ func CheckSettings(p CreateParams) error {
 	}
 	in := &inbox.Inbox{
 		Slug: p.Slug, IngestKey: p.IngestKey, Name: p.Name, Verifier: p.Verifier, VerifierConfig: p.VerifierConfig,
-		OnVerifyFail: p.OnVerifyFail, AgentTokenHash: inbox.SecretBytes{1},
+		OnVerifyFail: p.OnVerifyFail,
 		MaxBodyBytes: p.MaxBodyBytes, RetentionDays: p.RetentionDays, RetentionMaxCount: p.RetentionMaxCount,
 		EventTypePointer: p.EventTypePointer,
 	}

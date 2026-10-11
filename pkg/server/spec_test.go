@@ -173,7 +173,10 @@ func TestEveryAdminOperationRefusesAnUnknownQueryParameter(t *testing.T) {
 		{http.MethodGet, "/admin/inboxes?x=1"},
 		{http.MethodGet, "/admin/inboxes/agent-a?x=1"},
 		{http.MethodDelete, "/admin/inboxes/agent-a?x=1"},
-		{http.MethodPost, "/admin/inboxes/agent-a/rotate-token?x=1"},
+		{http.MethodGet, "/admin/tokens?x=1"},
+		{http.MethodPost, "/admin/tokens?x=1"},
+		{http.MethodDelete, "/admin/tokens/1?x=1"},
+		{http.MethodPost, "/admin/inboxes/agent-a/rotate-ingest-key?x=1"},
 		{http.MethodPost, "/admin/retention/run?x=1"},
 		{http.MethodGet, "/admin/backup?x=1"},
 	} {

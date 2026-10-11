@@ -6,6 +6,43 @@ applies.
 
 ## Unreleased
 
+### Phase 13: tokens
+
+#### Added
+- **Several named agent tokens per inbox, each scoped to some inboxes or to all of
+  them.** `POST /admin/tokens` (`{"name", "inboxes": [slugs]}` or `{"name",
+  "all_inboxes": true}`), `GET /admin/tokens` (`?inbox=`), `DELETE /admin/tokens/{id}`;
+  `hookinlet token create|list|revoke`. A token is replaced by issuing the new one and
+  revoking the old, with no moment in which an agent has none that works.
+- `inbox.Token`, `inbox.TokenID`, and the Store methods `CreateToken`, `GetTokenByHash`,
+  `ListTokens`, and `DeleteToken`, with conformance tests in `inboxtest`. Tokens are
+  looked up by an indexed hash.
+- `inbox.ScopedPrincipal` (a `Principal` that can say which inboxes it reads).
+- `--admin-enabled` and `--admin-listen-addr` (and `server.Options.DisableAdmin` /
+  `AdminAddr`, `Server.ServeAdmin`, `Server.AdminHandler`): the admin API can be turned
+  off, or served on its own address and nowhere else.
+- Admin actions are logged with the caller's address (`client_ip`).
+
+#### Changed
+- **The admin token must not be mostly one repeated character** (at least 10 different
+  characters), as well as being at least 32 long.
+- `inbox.Store.GetInboxByTokenHash` is replaced by `GetTokenByHash`, and
+  `Inbox.AgentTokenHash` is gone. `inbox.SingleInboxPrincipal` is replaced by
+  `ScopedPrincipal`; `token.Agent` now carries a list of inboxes, and `token.Reader`
+  (all inboxes, no admin) is new. A Store that was written against the old interface
+  needs the four token methods.
+- Deleting an inbox revokes the tokens that read only that inbox. A token for several
+  inboxes keeps working for the rest.
+
+#### Removed
+- `POST /admin/inboxes/{slug}/rotate-token`, `hookinlet inbox rotate-token`, and
+  `admin.Service.RotateToken`. Issue a new token and revoke the old one.
+
+#### Upgrading
+- Migration 0005 turns each inbox's agent token into a token named `default`, scoped to
+  that inbox, so every existing token keeps working. The old column is left in place
+  (unused) because SQLite cannot drop a unique column cheaply.
+
 ### Phase 12: the trust model
 
 #### Changed

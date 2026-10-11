@@ -194,7 +194,6 @@ Commands:
   show SLUG     Show one inbox
   update SLUG   Change an inbox's settings
   set-secret SLUG    Set or replace the verifier secret
-  rotate-token SLUG  Issue a new agent token; the old one stops working
   rotate-ingest-key SLUG  Give the inbox a new ingest URL; the old one stops working
   delete SLUG   Delete an inbox and all of its messages
 
@@ -223,8 +222,6 @@ func inboxCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 		return inboxUpdate(rest, getenv, stdout, stderr)
 	case "set-secret":
 		return inboxSetSecret(rest, getenv, stdin, stdout, stderr)
-	case "rotate-token":
-		return inboxRotate(rest, getenv, stdout, stderr)
 	case "rotate-ingest-key":
 		return inboxRotateIngestKey(rest, getenv, stdout, stderr)
 	case "delete":
@@ -616,37 +613,6 @@ func inboxSetSecret(args []string, getenv func(string) string, in io.Reader, std
 	for _, w := range v.Warnings {
 		fmt.Fprintf(stderr, "warning: %s\n", w)
 	}
-	return 0
-}
-
-func inboxRotate(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("hookinlet inbox rotate-token", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	c := addConn(fs, getenv)
-	slug, code, done := parseSlugArgs(fs, args, stderr)
-	if done {
-		return code
-	}
-	ctx, stop := notifyContext()
-	defer stop()
-	api, closeAPI, code := c.open(ctx, stderr, false)
-	if code != 0 {
-		return code
-	}
-	defer closeAPI()
-	ctx, cancel := context.WithTimeout(ctx, callTimeout)
-	defer cancel()
-	created, err := api.RotateToken(ctx, slug)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	if *c.asJSON {
-		printJSON(stdout, created)
-		return 0
-	}
-	fmt.Fprintf(stdout, "rotated the agent token of inbox %q; the old one no longer works\n", created.Inbox.Slug)
-	fmt.Fprintf(stdout, "  agent token:  %s\n", created.AgentToken)
-	fmt.Fprintln(stdout, "\nThe agent token is shown only once and cannot be recovered; store it now.")
 	return 0
 }
 

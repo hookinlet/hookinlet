@@ -235,11 +235,17 @@ esac
 expect "retention runs on demand" '200 {"deleted":0}' "$(admin POST /admin/retention/run)"
 cli() { docker exec -e HOOKINLET_URL=http://127.0.0.1:8080 -e HOOKINLET_ADMIN_TOKEN="$admin_token" "$name" /hookinlet "$@"; }
 case $(cli inbox list) in *made-by-api*demo*|*demo*made-by-api*) echo "ok   the command line lists inboxes through the admin API" ;; *) fail "unexpected inbox list" ;; esac
-rotated=$(cli inbox rotate-token made-by-api)
-new_token=$(printf '%s\n' "$rotated" | sed -n 's/^ *agent token: *//p')
-[ -n "$new_token" ] || fail "rotate-token printed no token"
-expect "the rotated token reads the inbox" '200' "$(read_api /v1/inboxes/made-by-api "$new_token" | cut -d' ' -f1)"
-expect "and the old one does not" '401' "$(read_api /v1/inboxes/made-by-api "$(printf '%s' "$created" | sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p')" | cut -d' ' -f1)"
+old_token=$(printf '%s' "$created" | sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p')
+issued=$(cli token create --name replacement --inbox made-by-api)
+new_token=$(printf '%s\n' "$issued" | sed -n 's/^ *agent token: *//p')
+[ -n "$new_token" ] || fail "token create printed no token"
+expect "the new token reads the inbox" '200' "$(read_api /v1/inboxes/made-by-api "$new_token" | cut -d' ' -f1)"
+expect "and the old one still does, until it is revoked" '200' "$(read_api /v1/inboxes/made-by-api "$old_token" | cut -d' ' -f1)"
+old_id=$(cli token list --inbox made-by-api | awk '$2 == "default" {print $1}')
+[ -n "$old_id" ] || fail "token list did not show the default token"
+cli token revoke "$old_id" >/dev/null
+expect "after revoking it, the old one does not" '401' "$(read_api /v1/inboxes/made-by-api "$old_token" | cut -d' ' -f1)"
+expect "and the new one still does" '200' "$(read_api /v1/inboxes/made-by-api "$new_token" | cut -d' ' -f1)"
 
 # A backup taken from the running server restores into a fresh volume.
 backup=$(mktemp)

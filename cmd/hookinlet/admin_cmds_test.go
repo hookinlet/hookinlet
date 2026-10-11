@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -146,15 +147,44 @@ func TestDirectModeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	before, _ := s.GetInboxBySlug(t.Context(), "beta-inbox")
-	code, out, errOut := runCmd(t, env, "inbox", "rotate-token", "beta-inbox")
+	code, out, errOut := runCmd(t, env, "token", "create", "--name", "second", "--inbox", "beta-inbox")
 	if code != 0 {
-		t.Fatalf("rotate: %d %s", code, errOut)
+		t.Fatalf("token create: %d %s", code, errOut)
 	}
-	newTok := tokenIn(t, out)
-	after, _ := s.GetInboxBySlug(t.Context(), "beta-inbox")
-	if !token.Equal(newTok, after.AgentTokenHash) || string(before.AgentTokenHash) == string(after.AgentTokenHash) {
-		t.Error("the rotated token is not the stored one, or nothing changed")
+	newTok := tokenRE.FindStringSubmatch(out)
+	if newTok == nil {
+		t.Fatalf("no token in:\n%s", out)
+	}
+	if rec, err := s.GetTokenByHash(t.Context(), token.Hash(newTok[1])); err != nil || rec.Name != "second" || len(rec.InboxIDs) != 1 {
+		t.Errorf("the new token is not the stored one: %+v, %v", rec, err)
+	}
+	if code, out, _ := runCmd(t, env, "token", "list", "--inbox", "beta-inbox"); code != 0 || !strings.Contains(out, "second") || !strings.Contains(out, "default") || strings.Contains(out, newTok[1]) {
+		t.Errorf("token list: %d\n%s", code, out)
+	}
+	for _, args := range [][]string{
+		{"token", "create", "--name", "x"},
+		{"token", "create", "--name", "x", "--all-inboxes", "--inbox", "beta-inbox"},
+		{"token", "create", "--inbox", "beta-inbox"},
+		{"token", "revoke"},
+		{"token", "revoke", "abc"},
+		{"token", "nonsense"},
+	} {
+		if code, _, _ := runCmd(t, env, args...); code != exitUsage {
+			t.Errorf("%v: exit %d, want a usage error", args, code)
+		}
+	}
+	if code, _, _ := runCmd(t, env, "token", "create", "--name", "x", "--inbox", "no-such-inbox"); code == 0 {
+		t.Error("a token for an unknown inbox was created")
+	}
+	rec, _ := s.GetTokenByHash(t.Context(), token.Hash(newTok[1]))
+	if code, _, errOut := runCmd(t, env, "token", "revoke", strconv.FormatInt(int64(rec.ID), 10)); code != 0 {
+		t.Fatalf("token revoke: %d %s", code, errOut)
+	}
+	if _, err := s.GetTokenByHash(t.Context(), token.Hash(newTok[1])); err == nil {
+		t.Error("a revoked token still resolves")
+	}
+	if code, _, _ := runCmd(t, env, "token", "revoke", strconv.FormatInt(int64(rec.ID), 10)); code == 0 {
+		t.Error("revoking twice succeeded")
 	}
 
 	// delete needs --yes.
@@ -268,8 +298,11 @@ func TestRemoteModeLifecycle(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 	in, err := s.GetInboxBySlug(t.Context(), "remote-one")
-	if err != nil || !token.Equal(agentTok, in.AgentTokenHash) {
+	if err != nil {
 		t.Fatalf("stored inbox: %+v %v", in, err)
+	}
+	if rec, err := s.GetTokenByHash(t.Context(), token.Hash(agentTok)); err != nil || len(rec.InboxIDs) != 1 || rec.InboxIDs[0] != in.ID {
+		t.Fatalf("stored token: %+v %v", rec, err)
 	}
 
 	if code, out, _ := runCmd(t, env, "inbox", "list"); code != 0 || !strings.Contains(out, "remote-one") {
@@ -290,14 +323,27 @@ func TestRemoteModeLifecycle(t *testing.T) {
 		t.Errorf("after update and set-secret: %+v", got)
 	}
 
-	// Rotating prints a token that works; the old one does not.
-	code, out, _ = runCmd(t, env, "inbox", "rotate-token", "remote-one", "--json")
-	var created admin.Created
-	if code != 0 || json.Unmarshal([]byte(out), &created) != nil || created.AgentToken == "" || created.AgentToken == agentTok {
-		t.Fatalf("rotate --json: %d %s", code, out)
+	// A second token works beside the first; revoking the first leaves it.
+	code, out, _ = runCmd(t, env, "token", "create", "--name", "next", "--inbox", "remote-one", "--json")
+	var created admin.TokenCreated
+	if code != 0 || json.Unmarshal([]byte(out), &created) != nil || created.Token == "" || created.Token == agentTok {
+		t.Fatalf("token create --json: %d %s", code, out)
 	}
-	if _, err := s.GetInboxByTokenHash(t.Context(), token.Hash(agentTok)); err == nil {
-		t.Error("the old token still resolves")
+	if code, out, _ := runCmd(t, env, "token", "list", "--json"); code != 0 || !strings.Contains(out, `"next"`) || strings.Contains(out, created.Token) {
+		t.Errorf("token list --json: %d %s", code, out)
+	}
+	old, err := s.GetTokenByHash(t.Context(), token.Hash(agentTok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _, e := runCmd(t, env, "token", "revoke", strconv.FormatInt(int64(old.ID), 10)); code != 0 {
+		t.Fatalf("token revoke: %d %s", code, e)
+	}
+	if _, err := s.GetTokenByHash(t.Context(), token.Hash(agentTok)); err == nil {
+		t.Error("the revoked token still resolves")
+	}
+	if _, err := s.GetTokenByHash(t.Context(), token.Hash(created.Token)); err != nil {
+		t.Errorf("the other token stopped resolving: %v", err)
 	}
 
 	if code, out, _ := runCmd(t, env, "retention", "run"); code != 0 || !strings.Contains(out, "deleted 0 messages") {
@@ -451,7 +497,7 @@ func TestDirectModeRefusesAMissingDatabaseExceptForCreate(t *testing.T) {
 	env := map[string]string{"HOOKINLET_DATA_DIR": typo}
 	for _, args := range [][]string{
 		{"inbox", "list"}, {"inbox", "show", "x-inbox"}, {"inbox", "update", "x-inbox", "--name", "n"}, {"inbox", "delete", "x-inbox", "--yes"},
-		{"inbox", "rotate-token", "x-inbox"}, {"retention", "run"}, {"backup", "--out", filepath.Join(t.TempDir(), "b.db")},
+		{"token", "list"}, {"token", "create", "--name", "n", "--all-inboxes"}, {"token", "revoke", "1"}, {"retention", "run"}, {"backup", "--out", filepath.Join(t.TempDir(), "b.db")},
 	} {
 		code, out, errOut := runCmd(t, env, args...)
 		if code != exitRuntime || !strings.Contains(errOut, "there is no database in") {

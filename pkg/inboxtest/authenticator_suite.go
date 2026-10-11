@@ -21,6 +21,9 @@ type AuthFixture struct {
 	InboxA, InboxB *inbox.Inbox
 	// TokenA reads InboxA and nothing else; TokenB reads InboxB and nothing else.
 	TokenA, TokenB string
+	// TokenBoth, if non-empty, reads InboxA and InboxB and cannot administer.
+	// TokenAll, if non-empty, reads every inbox and cannot administer.
+	TokenBoth, TokenAll string
 	// AdminToken, if non-empty, can read every inbox and administer. An
 	// implementation without an admin credential leaves it empty.
 	AdminToken string
@@ -65,24 +68,44 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 		}
 	})
 
-	// A principal that can read one inbox only may say which. It must name the
-	// inbox it reads, and nothing that can administer may claim to be limited.
-	t.Run("ASingleInboxPrincipalNamesItsInbox", func(t *testing.T) {
+	// A principal limited to some inboxes may say which. It must name exactly the
+	// inboxes it reads, and nothing that can administer may claim to be limited.
+	t.Run("AScopedPrincipalNamesItsInboxes", func(t *testing.T) {
 		f := newFixture(t)
 		pa, err := authenticate(t, f, bearer(f.TokenA)...)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if single, ok := pa.(inbox.SingleInboxPrincipal); ok && single.InboxID() != f.InboxA.ID {
-			t.Errorf("InboxID = %d, but the token reads inbox %d", single.InboxID(), f.InboxA.ID)
+		if sc, ok := pa.(inbox.ScopedPrincipal); ok {
+			if ids := sc.InboxIDs(); len(ids) != 1 || ids[0] != f.InboxA.ID {
+				t.Errorf("InboxIDs = %v, but the token reads inbox %d", ids, f.InboxA.ID)
+			}
 		}
-		if f.AdminToken != "" {
-			admin, err := authenticate(t, f, bearer(f.AdminToken)...)
+		if f.TokenBoth != "" {
+			p, err := authenticate(t, f, bearer(f.TokenBoth)...)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := admin.(inbox.SingleInboxPrincipal); ok {
-				t.Error("a principal that can administer must not claim to be limited to one inbox")
+			if p.CanAdmin() || !p.CanReadInbox(f.InboxA) || !p.CanReadInbox(f.InboxB) {
+				t.Error("a token for both inboxes should read both and not administer")
+			}
+			if sc, ok := p.(inbox.ScopedPrincipal); ok && len(sc.InboxIDs()) != 2 {
+				t.Errorf("InboxIDs = %v, want both inboxes", sc.InboxIDs())
+			}
+		}
+		for name, tok := range map[string]string{"admin": f.AdminToken, "all-inboxes": f.TokenAll} {
+			if tok == "" {
+				continue
+			}
+			p, err := authenticate(t, f, bearer(tok)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !p.CanReadInbox(f.InboxA) || !p.CanReadInbox(f.InboxB) {
+				t.Errorf("the %s credential should read every inbox", name)
+			}
+			if _, ok := p.(inbox.ScopedPrincipal); ok {
+				t.Errorf("the %s credential must not claim to be limited to some inboxes", name)
 			}
 		}
 	})
