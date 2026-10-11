@@ -21,7 +21,7 @@ func parseStream(t *testing.T, raw string, lastEventID ...string) (StreamRequest
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ParseStream(v, lastEventID)
+	return parseStreamValues(v, lastEventID)
 }
 
 func TestParseStreamStartingPoint(t *testing.T) {
@@ -60,35 +60,13 @@ func TestParseStreamFilters(t *testing.T) {
 	}
 }
 
-func TestParseStreamRejects(t *testing.T) {
-	tests := []struct {
-		raw  string
-		last []string
-		bad  string
-	}{
-		{"limit=5", nil, "limit"},
-		{"since=2026-01-01T00:00:00Z", nil, "since"},
-		{"fields=summary", nil, "fields"},
-		{"before=5", nil, "before"},
-		{"after=1&after=2", nil, "after"},
-		{"after=-1", nil, "after"},
-		{"after=abc", nil, "after"},
-		{"after=", nil, "after"},
-		{"type=", nil, "type"},
-		{"verified=maybe", nil, "verified"},
-		{"verified=1", nil, "verified"},
-		{"", []string{"abc"}, "Last-Event-ID"},
-		{"", []string{"-5"}, "Last-Event-ID"},
-		{"", []string{"1.5"}, "Last-Event-ID"},
-		{"", []string{" 5"}, "Last-Event-ID"},
-		{"", []string{"5", "6"}, "Last-Event-ID"},
-		{"", []string{"99999999999999999999"}, "Last-Event-ID"},
-	}
-	for _, tt := range tests {
-		_, err := parseStream(t, tt.raw, tt.last...)
+// Last-Event-ID is a header, so the document's parameter checks do not see it.
+func TestParseStreamRejectsABadLastEventID(t *testing.T) {
+	for _, last := range [][]string{{"abc"}, {"-5"}, {"1.5"}, {" 5"}, {"5", "6"}, {"99999999999999999999"}} {
+		_, err := parseStream(t, "", last...)
 		var pe *ParamError
-		if !errors.As(err, &pe) || pe.Param != tt.bad {
-			t.Errorf("%q %v: error = %v, want a ParamError for %q", tt.raw, tt.last, err, tt.bad)
+		if !errors.As(err, &pe) || pe.Param != "Last-Event-ID" {
+			t.Errorf("%v: error = %v, want a ParamError for Last-Event-ID", last, err)
 		}
 	}
 }

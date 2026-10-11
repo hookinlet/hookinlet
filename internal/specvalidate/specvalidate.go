@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Keywords is what a schema in the document may use. The first group constrains
@@ -575,6 +576,9 @@ func (d *Document) check(schema, v any, at string, opts Options) []Violation {
 			bad("must have at most %v item(s)", n)
 		}
 	case string:
+		if !utf8.ValidString(x) {
+			bad("must be valid UTF-8")
+		}
 		if p, ok := sm["pattern"].(string); ok && !d.patterns[p].MatchString(x) {
 			bad("is not in the required form")
 		}

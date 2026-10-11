@@ -1558,6 +1558,7 @@
               "type": "array",
               "items": {
                 "type": "string",
+                "minLength": 1,
                 "maxLength": 256
               },
               "maxItems": 100
@@ -1601,7 +1602,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "maxLength": 256
+              "maxLength": 256,
+              "minLength": 1
             },
             "description": "Only the message with this delivery id."
           },
@@ -1810,6 +1812,7 @@
               "type": "array",
               "items": {
                 "type": "string",
+                "minLength": 1,
                 "maxLength": 256
               },
               "maxItems": 100
@@ -1853,7 +1856,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "maxLength": 256
+              "maxLength": 256,
+              "minLength": 1
             },
             "description": "Only the message with this delivery id."
           },
@@ -2522,8 +2526,11 @@
             "schema": {
               "type": "array",
               "items": {
-                "type": "string"
-              }
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "maxItems": 100
             },
             "description": "Only messages with one of these event types. Repeat the parameter.",
             "style": "form",

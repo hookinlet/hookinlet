@@ -95,11 +95,6 @@ func head(rr *readRequest, body any) {
 
 func (a *readAPI) info(ctx context.Context) (api.InboxInfo, *readFail) {
 	rr := readFrom(ctx)
-	if values, err := wire.QueryValues(rr.r.URL.RawQuery); err != nil {
-		return api.InboxInfo{}, &readFail{http.StatusBadRequest, "invalid_parameter", err.Error()}
-	} else if err := wire.RejectParams(values); err != nil {
-		return api.InboxInfo{}, &readFail{http.StatusBadRequest, "invalid_parameter", err.Error()}
-	}
 	info, err := wire.FetchInfo(ctx, a.s.opts.Store, rr.in)
 	if err != nil {
 		f := a.s.classifyRead(ctx, "inbox info", err)
@@ -163,13 +158,9 @@ func (a *readAPI) HeadGetInbox(ctx context.Context, _ api.HeadGetInboxRequestObj
 
 // ---- messages ----
 
-func (a *readAPI) messages(ctx context.Context) (api.MessagePage, *readFail) {
+func (a *readAPI) messages(ctx context.Context, params wire.MessagesParams) (api.MessagePage, *readFail) {
 	rr := readFrom(ctx)
-	values, err := wire.QueryValues(rr.r.URL.RawQuery)
-	var req wire.PageRequest
-	if err == nil {
-		req, err = wire.ParseMessages(values)
-	}
+	req, err := wire.NewPageRequest(params)
 	if err != nil {
 		return api.MessagePage{}, &readFail{http.StatusBadRequest, "invalid_parameter", err.Error()}
 	}
@@ -181,7 +172,7 @@ func (a *readAPI) messages(ctx context.Context) (api.MessagePage, *readFail) {
 	return page(p), nil
 }
 
-func (a *readAPI) ListMessages(ctx context.Context, _ api.ListMessagesRequestObject) (api.ListMessagesResponseObject, error) {
+func (a *readAPI) ListMessages(ctx context.Context, req api.ListMessagesRequestObject) (api.ListMessagesResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -192,7 +183,7 @@ func (a *readAPI) ListMessages(ctx context.Context, _ api.ListMessagesRequestObj
 		return api.ListMessages503JSONResponse{OverloadedJSONResponse: *busy}, nil
 	}
 	defer release()
-	p, f := a.messages(ctx)
+	p, f := a.messages(ctx, messagesParams(req.Params))
 	if f != nil {
 		switch f.status {
 		case http.StatusBadRequest:
@@ -205,7 +196,7 @@ func (a *readAPI) ListMessages(ctx context.Context, _ api.ListMessagesRequestObj
 	return api.ListMessages200JSONResponse{Body: p, Headers: api.ListMessages200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
 }
 
-func (a *readAPI) HeadListMessages(ctx context.Context, _ api.HeadListMessagesRequestObject) (api.HeadListMessagesResponseObject, error) {
+func (a *readAPI) HeadListMessages(ctx context.Context, req api.HeadListMessagesRequestObject) (api.HeadListMessagesResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -216,7 +207,7 @@ func (a *readAPI) HeadListMessages(ctx context.Context, _ api.HeadListMessagesRe
 		return api.HeadListMessages503Response{Headers: api.HeadListMessages503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
 	}
 	defer release()
-	p, f := a.messages(ctx)
+	p, f := a.messages(ctx, headMessagesParams(req.Params))
 	id := requestIDOf(ctx)
 	if f != nil {
 		switch f.status {
@@ -237,11 +228,6 @@ func (a *readAPI) HeadListMessages(ctx context.Context, _ api.HeadListMessagesRe
 // sequence number is simply a message that does not exist.
 func (a *readAPI) load(ctx context.Context) (*inbox.Message, *readFail) {
 	rr := readFrom(ctx)
-	if values, err := wire.QueryValues(rr.r.URL.RawQuery); err != nil {
-		return nil, &readFail{http.StatusBadRequest, "invalid_parameter", err.Error()}
-	} else if err := wire.RejectParams(values); err != nil {
-		return nil, &readFail{http.StatusBadRequest, "invalid_parameter", err.Error()}
-	}
 	raw := rr.r.PathValue("seq")
 	seq, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || seq < 1 || strconv.FormatInt(seq, 10) != raw {
@@ -410,4 +396,28 @@ func overloaded(ctx context.Context, retryAfter, msg string) api.OverloadedJSONR
 	var b api.ErrorOverloaded
 	b.Error.Code, b.Error.Message = api.ErrorOverloadedErrorCodeOverloaded, msg
 	return api.OverloadedJSONResponse{Body: b, Headers: api.OverloadedResponseHeaders{RetryAfter: retryAfter, XRequestId: requestIDOf(ctx)}}
+}
+
+// messagesParams reads the generated parameters of the two list operations into
+// the one form the page request is built from. A test sets every field of the
+// generated structs and fails if one is not read here.
+func messagesParams(p api.ListMessagesParams) wire.MessagesParams {
+	return wire.MessagesParams{
+		After: p.After, Before: p.Before, Limit: p.Limit, Types: deref(p.Type), Since: p.Since, Until: p.Until,
+		Verified: p.Verified, DeliveryID: p.DeliveryId, Summary: p.Fields != nil && *p.Fields == api.ListMessagesParamsFields("summary"),
+	}
+}
+
+func headMessagesParams(p api.HeadListMessagesParams) wire.MessagesParams {
+	return wire.MessagesParams{
+		After: p.After, Before: p.Before, Limit: p.Limit, Types: deref(p.Type), Since: p.Since, Until: p.Until,
+		Verified: p.Verified, DeliveryID: p.DeliveryId, Summary: p.Fields != nil && *p.Fields == api.HeadListMessagesParamsFields("summary"),
+	}
+}
+
+func deref[T any](p *[]T) []T {
+	if p == nil {
+		return nil
+	}
+	return *p
 }

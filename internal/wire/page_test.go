@@ -54,7 +54,7 @@ func follow(t *testing.T, s inbox.Store, in *inbox.Inbox, firstQuery string) (se
 		if err != nil {
 			t.Fatal(err)
 		}
-		req, err := ParseMessages(v)
+		req, err := parseMessages(v)
 		if err != nil {
 			t.Fatalf("%q: %v", raw, err)
 		}
@@ -129,7 +129,7 @@ func TestEmptyAscendingPageKeepsTheCursor(t *testing.T) {
 	s, in := newStore(t)
 	add(t, s, in, 3, nil)
 	v, _ := url.ParseQuery("after=3")
-	req, _ := ParseMessages(v)
+	req, _ := parseMessages(v)
 	page, err := FetchPage(t.Context(), s, in, req)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestEmptyAscendingPageKeepsTheCursor(t *testing.T) {
 	add(t, s, in, 1, nil)
 	_, raw, _ := strings.Cut(*page.Next, "?")
 	v, _ = url.ParseQuery(raw)
-	req, _ = ParseMessages(v)
+	req, _ = parseMessages(v)
 	page, _ = FetchPage(t.Context(), s, in, req)
 	if len(page.Messages) != 1 || page.Messages[0].Seq != 4 {
 		t.Errorf("the poll after the new message got %+v", page.Messages)
@@ -231,7 +231,7 @@ func TestPagesAreBoundedByBodyBytes(t *testing.T) {
 	})
 
 	v, _ := url.ParseQuery("after=0&limit=500")
-	req, _ := ParseMessages(v)
+	req, _ := parseMessages(v)
 	first, err := FetchPage(t.Context(), s, in, req)
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestSummaryIgnoresTheBodyBudget(t *testing.T) {
 	s, in := newStore(t)
 	add(t, s, in, 5, func(i int, m *inbox.NewMessage) { m.Body = bytes.Repeat([]byte("x"), 6<<20) })
 	v, _ := url.ParseQuery("after=0&fields=summary&limit=500")
-	req, _ := ParseMessages(v)
+	req, _ := parseMessages(v)
 	page, err := FetchPage(t.Context(), s, in, req)
 	if err != nil {
 		t.Fatal(err)
@@ -304,7 +304,7 @@ func TestAMessagePrunedMidPageIsLeftOut(t *testing.T) {
 	add(t, s, in, 3, func(i int, m *inbox.NewMessage) { m.Body = bytes.Repeat([]byte("y"), InlineBodyBytes+10) })
 	st := failingGet{Store: s, seq: 2, err: inbox.ErrNotFound}
 	v, _ := url.ParseQuery("after=0")
-	req, _ := ParseMessages(v)
+	req, _ := parseMessages(v)
 	page, err := FetchPage(t.Context(), st, in, req)
 	if err != nil {
 		t.Fatal(err)
@@ -368,7 +368,7 @@ func TestPageQueriesNeverAskForUnboundedBodies(t *testing.T) {
 
 	spy := &querySpy{Store: s}
 	v, _ := url.ParseQuery("after=0")
-	req, _ := ParseMessages(v)
+	req, _ := parseMessages(v)
 	if _, err := FetchPage(t.Context(), spy, in, req); err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestPageQueriesNeverAskForUnboundedBodies(t *testing.T) {
 	// A summary asks for no bodies at all, and loads none.
 	spy = &querySpy{Store: s}
 	v, _ = url.ParseQuery("after=0&fields=summary")
-	req, _ = ParseMessages(v)
+	req, _ = parseMessages(v)
 	if _, err := FetchPage(t.Context(), spy, in, req); err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func fetch(t *testing.T, s inbox.Store, in *inbox.Inbox, raw string, budget int6
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := ParseMessages(v)
+	req, err := parseMessages(v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +482,7 @@ func TestACursorAdvancesPastMessagesPrunedMidRead(t *testing.T) {
 	add(t, s, in, 3, func(i int, m *inbox.NewMessage) { m.Body = bytes.Repeat([]byte("y"), InlineBodyBytes+10) })
 	st := failingGet{Store: s, seq: 2, err: inbox.ErrNotFound}
 	v, _ := url.ParseQuery("after=0&limit=2") // a full page, so not complete
-	req, _ := ParseMessages(v)
+	req, _ := parseMessages(v)
 	page, err := FetchPage(t.Context(), st, in, req)
 	if err != nil {
 		t.Fatal(err)

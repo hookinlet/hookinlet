@@ -82,7 +82,7 @@ func TestPageBudgetCountsEncodedSize(t *testing.T) {
 		m.Body = bytes.Repeat([]byte{0x01}, each) // valid UTF-8, not JSON: sent as body_text with \u0001 for every byte
 	})
 	v, _ := url.ParseQuery("after=0&limit=500")
-	req, _ := ParseMessages(v)
+	req, _ := parseMessages(v)
 	page, err := FetchPage(t.Context(), s, in, req)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestPageBudgetCountsHeadersEvenForSummaries(t *testing.T) {
 	})
 	for _, q := range []string{"after=0&limit=500&fields=summary", "after=0&limit=500", "limit=500&fields=summary"} {
 		v, _ := url.ParseQuery(q)
-		req, _ := ParseMessages(v)
+		req, _ := parseMessages(v)
 		page, err := FetchPage(t.Context(), s, in, req)
 		if err != nil {
 			t.Fatal(err)
@@ -163,28 +163,6 @@ func TestEncodedSizeEstimateIsClose(t *testing.T) {
 		if est > int64(len(raw))*2+1024 {
 			t.Errorf("%s: estimated %d bytes for a message that encodes to %d", name, est, len(raw))
 		}
-	}
-}
-
-func TestMalformedQueryStringsAreRejected(t *testing.T) {
-	for _, raw := range []string{"after=5;&limit=2", "after=%zz", "a=b;c=d", "%", "after=%"} {
-		if _, err := QueryValues(raw); err == nil {
-			t.Errorf("QueryValues(%q) accepted a malformed query string", raw)
-		}
-	}
-	v, err := QueryValues("after=5&type=a%2Fb&type=c")
-	if err != nil || v.Get("after") != "5" || len(v["type"]) != 2 {
-		t.Errorf("a valid query string: %v, %v", v, err)
-	}
-}
-
-func TestRejectParams(t *testing.T) {
-	if err := RejectParams(url.Values{}); err != nil {
-		t.Errorf("no parameters: %v", err)
-	}
-	err := RejectParams(url.Values{strings.Repeat("x", 5000): {"1"}})
-	if err == nil || len(err.Error()) > 200 {
-		t.Errorf("a hostile parameter name was echoed in full or accepted: %v", err)
 	}
 }
 

@@ -4,7 +4,6 @@
 package wire
 
 import (
-	"errors"
 	"net/url"
 	"reflect"
 	"strings"
@@ -20,7 +19,7 @@ func parse(t *testing.T, raw string) (PageRequest, error) {
 	if err != nil {
 		t.Fatalf("test input %q: %v", raw, err)
 	}
-	return ParseMessages(v)
+	return parseMessages(v)
 }
 
 func TestParseMessagesDefaults(t *testing.T) {
@@ -148,91 +147,6 @@ func TestParseMessagesValid(t *testing.T) {
 			}
 			tt.check(t, req)
 		})
-	}
-}
-
-func TestParseMessagesRejects(t *testing.T) {
-	tests := []struct{ raw, param string }{
-		{"limt=5", "limt"},
-		{"token=abc", "token"},
-		{"access_token=abc", "access_token"},
-		{"After=1", "After"},
-		{"after=1&after=2", "after"},
-		{"limit=1&limit=2", "limit"},
-		{"verified=true&verified=false", "verified"},
-		{"fields=summary&fields=full", "fields"},
-		{"after=-1", "after"},
-		{"after=+1", "after"},
-		{"after=1.5", "after"},
-		{"after=1e3", "after"},
-		{"after=0x10", "after"},
-		{"after=%20", "after"},
-		{"after=", "after"},
-		{"after=abc", "after"},
-		{"after=١٢٣", "after"},
-		{"after=99999999999999999999", "after"},
-		{"before=-5", "before"},
-		{"before=", "before"},
-		{"limit=0", "limit"},
-		{"limit=-1", "limit"},
-		{"limit=", "limit"},
-		{"limit=ten", "limit"},
-		{"type=", "type"},
-		{"type=a&type=", "type"},
-		{"type=" + strings.Repeat("a", 257), "type"},
-		{"type=%ff", "type"},
-		{"since=yesterday", "since"},
-		{"since=2026-03-01", "since"},
-		{"since=2026-03-01T12:00:00", "since"},
-		{"since=1700000000", "since"},
-		{"until=", "until"},
-		{"until=2026-13-01T00:00:00Z", "until"},
-		{"verified=yes", "verified"},
-		{"verified=1", "verified"},
-		{"verified=TRUE", "verified"},
-		{"verified=", "verified"},
-		{"delivery_id=", "delivery_id"},
-		{"delivery_id=" + strings.Repeat("d", 257), "delivery_id"},
-		{"fields=body", "fields"},
-		{"fields=SUMMARY", "fields"},
-		{"after=1&before=5", ""},
-		{"since=2026-03-02T00:00:00Z&until=2026-03-01T00:00:00Z", ""},
-		{"since=2026-03-01T00:00:00Z&until=2026-03-01T00:00:00Z", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.raw, func(t *testing.T) {
-			_, err := parse(t, tt.raw)
-			var pe *ParamError
-			if !errors.As(err, &pe) {
-				t.Fatalf("error = %v, want a *ParamError", err)
-			}
-			if pe.Param != tt.param {
-				t.Errorf("Param = %q, want %q (%v)", pe.Param, tt.param, err)
-			}
-			if pe.Reason == "" {
-				t.Error("no reason given")
-			}
-		})
-	}
-}
-
-func TestParseMessagesTooManyTypes(t *testing.T) {
-	var parts []string
-	for i := range inbox.MaxQueryTypes + 1 {
-		parts = append(parts, "type=t"+formatInt(int64(i)))
-	}
-	if _, err := parse(t, strings.Join(parts, "&")); err == nil {
-		t.Error("an unbounded number of types was accepted")
-	}
-	if _, err := parse(t, strings.Join(parts[:inbox.MaxQueryTypes], "&")); err != nil {
-		t.Errorf("exactly the maximum was rejected: %v", err)
-	}
-}
-
-func TestUnknownParameterNamesAreBoundedInTheError(t *testing.T) {
-	_, err := parse(t, strings.Repeat("x", 5000)+"=1")
-	if err == nil || len(err.Error()) > 200 {
-		t.Errorf("a hostile parameter name was echoed in full: %d bytes", len(err.Error()))
 	}
 }
 

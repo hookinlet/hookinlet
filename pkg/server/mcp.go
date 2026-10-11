@@ -11,10 +11,9 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
-	"net/url"
-	"strconv"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -345,40 +344,61 @@ type queryOutput struct {
 	LatestSeq  int64  `json:"latest_seq"`
 }
 
-// pageRequest builds a request through the same parser the REST API uses, so a
-// parameter means the same thing and is checked the same way in both.
+// pageRequest builds a request the way the REST API does (wire.NewPageRequest),
+// so a parameter means the same thing in both. The values arrive as a tool's
+// arguments, not as a query string the document has approved, so the checks the
+// document would have made are made here.
 func pageRequest(after, before *int64, limit *int, types []string, since, until string, verified *bool, summary bool) (wire.PageRequest, error) {
-	v := url.Values{}
-	if after != nil {
-		v.Set("after", strconv.FormatInt(*after, 10))
+	p := wire.MessagesParams{Types: types, Verified: verified, Summary: summary}
+	seq := func(name string, v *int64, dst **int) error {
+		if v == nil {
+			return nil
+		}
+		if *v < 0 || *v > 999_999_999_999_999_999 {
+			return &wire.ParamError{Param: name, Reason: "must be a whole number"}
+		}
+		n := int(*v)
+		*dst = &n
+		return nil
 	}
-	if before != nil {
-		v.Set("before", strconv.FormatInt(*before, 10))
+	if err := seq("after", after, &p.After); err != nil {
+		return wire.PageRequest{}, err
+	}
+	if err := seq("before", before, &p.Before); err != nil {
+		return wire.PageRequest{}, err
 	}
 	n := mcpDefaultLimit
 	if limit != nil {
 		n = *limit
 	}
-	if n > mcpMaxLimit {
-		n = mcpMaxLimit
+	if n < 1 {
+		return wire.PageRequest{}, &wire.ParamError{Param: "limit", Reason: "must be at least 1"}
 	}
-	v.Set("limit", strconv.Itoa(n))
+	n = min(n, mcpMaxLimit)
+	p.Limit = &n
+	if len(types) > inbox.MaxQueryTypes {
+		return wire.PageRequest{}, &wire.ParamError{Param: "type", Reason: "too many values"}
+	}
 	for _, ty := range types {
-		v.Add("type", ty)
+		if ty == "" || len(ty) > 256 || !utf8.ValidString(ty) {
+			return wire.PageRequest{}, &wire.ParamError{Param: "type", Reason: "each value must be 1 to 256 characters of valid UTF-8"}
+		}
 	}
-	if since != "" {
-		v.Set("since", since)
+	for _, tm := range []struct {
+		name string
+		raw  string
+		dst  **time.Time
+	}{{"since", since, &p.Since}, {"until", until, &p.Until}} {
+		if tm.raw == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339Nano, tm.raw)
+		if err != nil {
+			return wire.PageRequest{}, &wire.ParamError{Param: tm.name, Reason: "must be an RFC 3339 timestamp such as 2026-03-01T12:00:00Z"}
+		}
+		*tm.dst = &t
 	}
-	if until != "" {
-		v.Set("until", until)
-	}
-	if verified != nil {
-		v.Set("verified", strconv.FormatBool(*verified))
-	}
-	if summary {
-		v.Set("fields", "summary")
-	}
-	return wire.ParseMessages(v)
+	return wire.NewPageRequest(p)
 }
 
 // fetch reads one page, holding a read slot only while it does.

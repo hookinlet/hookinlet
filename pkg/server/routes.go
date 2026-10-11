@@ -297,13 +297,29 @@ func (s *Server) checkRequest(w http.ResponseWriter, r *http.Request, op *specva
 // The credential is still checked first. A seq that is not a number is a message
 // that does not exist.
 func (s *Server) paramError(w http.ResponseWriter, r *http.Request, err error) {
-	if op := s.operation(r); op != nil && !s.secure(w, r, op, &readRequest{}) {
-		return
+	if op := s.operation(r); op != nil {
+		if !s.secure(w, r, op, &readRequest{}) {
+			return
+		}
+		// The document's own check says what is wrong, and says it the same way
+		// everywhere. If it finds nothing, the generated code was stricter.
+		if !s.checkRequest(w, r, op) {
+			return
+		}
 	}
 	var bad *api.InvalidParamFormatError
 	if errors.As(err, &bad) && bad.ParamName == "seq" {
 		writeError(w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
-	writeError(w, http.StatusBadRequest, "invalid_parameter", "a path or query parameter is not valid")
+	var many *api.TooManyValuesForParamError
+	var format *api.InvalidParamFormatError
+	switch {
+	case errors.As(err, &many):
+		writeError(w, http.StatusBadRequest, "invalid_parameter", `parameter "`+truncateName(many.ParamName)+`": may be given only once`)
+	case errors.As(err, &format):
+		writeError(w, http.StatusBadRequest, "invalid_parameter", `parameter "`+truncateName(format.ParamName)+`": is not valid`)
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_parameter", "a path or query parameter is not valid")
+	}
 }
