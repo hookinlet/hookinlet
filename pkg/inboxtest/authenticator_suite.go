@@ -65,6 +65,28 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 		}
 	})
 
+	// A principal that can read one inbox only may say which. It must name the
+	// inbox it reads, and nothing that can administer may claim to be limited.
+	t.Run("ASingleInboxPrincipalNamesItsInbox", func(t *testing.T) {
+		f := newFixture(t)
+		pa, err := authenticate(t, f, bearer(f.TokenA)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if single, ok := pa.(inbox.SingleInboxPrincipal); ok && single.InboxID() != f.InboxA.ID {
+			t.Errorf("InboxID = %d, but the token reads inbox %d", single.InboxID(), f.InboxA.ID)
+		}
+		if f.AdminToken != "" {
+			admin, err := authenticate(t, f, bearer(f.AdminToken)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := admin.(inbox.SingleInboxPrincipal); ok {
+				t.Error("a principal that can administer must not claim to be limited to one inbox")
+			}
+		}
+	})
+
 	// A hosted implementation will have inboxes that share slugs across tenants,
 	// and slugs can change meaning. Authorization must follow the immutable ID.
 	t.Run("ReadAccessFollowsTheInboxIDNotItsName", func(t *testing.T) {
