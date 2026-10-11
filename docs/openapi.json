@@ -3856,9 +3856,13 @@
             "const": "2.0"
           },
           "id": {
-            "type": [
-              "string",
-              "integer"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
             ]
           },
           "method": {
@@ -3888,10 +3892,16 @@
             "const": "2.0"
           },
           "id": {
-            "type": [
-              "string",
-              "integer",
-              "null"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "result": {},
