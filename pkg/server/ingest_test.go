@@ -119,6 +119,7 @@ func (h *recHooks) beforeCalls() []string {
 
 type env struct {
 	t        *testing.T
+	dataDir  string
 	store    *sqlite.Store
 	box      *secretbox.Box
 	server   *Server
@@ -129,7 +130,8 @@ type env struct {
 
 func newEnv(t *testing.T, mods ...func(*Options)) *env {
 	t.Helper()
-	store, err := sqlite.Open(t.Context(), t.TempDir())
+	dataDir := t.TempDir()
+	store, err := sqlite.Open(t.Context(), dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +140,7 @@ func newEnv(t *testing.T, mods ...func(*Options)) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, store: store, box: box, notifier: &recNotifier{}, hooks: &recHooks{}, logs: &syncBuffer{}}
+	e := &env{t: t, dataDir: dataDir, store: store, box: box, notifier: &recNotifier{}, hooks: &recHooks{}, logs: &syncBuffer{}}
 	opts := Options{
 		Addr:      "127.0.0.1:0",
 		Logger:    slog.New(slog.NewJSONHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),

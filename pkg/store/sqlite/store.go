@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
@@ -34,16 +35,26 @@ const (
 	// file; this process serializes its own writes.
 	busyTimeout = 5000 // ms
 	// pruneBatchRows bounds how many rows one Prune transaction deletes, so
-	// appends can interleave with a large prune.
-	pruneBatchRows = 5000
+	// appends can interleave with a large prune. Appends wait for the single
+	// writer, so this is also the longest one can be made to wait. Measured while
+	// a million rows were pruned and four senders appended (see
+	// TestIngestLatencyWhileAMillionRowsArePruned), the append p99 was 279 ms at
+	// 5000 rows, 48 ms at 1000, 32 ms at 500, 16 ms at 250 and 10 ms at 100, for
+	// a prune that took 9, 9, 10, 11 and 14 seconds.
+	pruneBatchRows = 250
+	// pruneBatchBytes also bounds a batch by the size of the bodies in it, since
+	// a batch of large messages takes far longer than 250 small ones.
+	pruneBatchBytes = 2 << 20
 )
 
 // Store implements inbox.Store on SQLite.
 type Store struct {
+	path      string  // the database file
 	wdb       *sql.DB // exactly one connection
 	rdb       *sql.DB // read-only pool
 	now       func() time.Time
 	applied   []int
+	closed    atomic.Bool
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -105,7 +116,8 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
 	wdb.SetMaxIdleConns(1)
 	wdb.SetConnMaxLifetime(0)
 
-	s := &Store{wdb: wdb, now: cfg.now}
+	removeStaleBackups(filepath.Dir(abs), time.Now())
+	s := &Store{path: abs, wdb: wdb, now: cfg.now}
 	if err := wdb.PingContext(ctx); err != nil {
 		_ = wdb.Close()
 		return nil, fmt.Errorf("sqlite: open %s: %w", abs, err)
@@ -162,6 +174,7 @@ func (s *Store) AppliedMigrations() []int { return append([]int(nil), s.applied.
 // than once.
 func (s *Store) Close() error {
 	s.closeOnce.Do(func() {
+		s.closed.Store(true)
 		var errs []error
 		if s.rdb != nil {
 			errs = append(errs, s.rdb.Close())

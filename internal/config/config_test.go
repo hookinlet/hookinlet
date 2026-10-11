@@ -46,6 +46,17 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+func TestRetentionIntervalCanBeTurnedOffOrSet(t *testing.T) {
+	for in, want := range map[string]time.Duration{"off": -1, "OFF": -1, "30s": 30 * time.Second, "1s": time.Second, "6h": 6 * time.Hour} {
+		e := validEnv()
+		e["HOOKINLET_RETENTION_INTERVAL"] = in
+		c, err := Load(nil, env(e), io.Discard)
+		if err != nil || c.RetentionInterval != want {
+			t.Errorf("%q: interval %v, err %v; want %v", in, c.RetentionInterval, err, want)
+		}
+	}
+}
+
 func TestFlagsBeatEnvBeatDefault(t *testing.T) {
 	e := validEnv()
 	e["HOOKINLET_LISTEN_ADDR"] = ":9000"
@@ -100,6 +111,8 @@ func TestInvalidValues(t *testing.T) {
 		{"negative recheck", map[string]string{"HOOKINLET_SSE_RECHECK_INTERVAL": "-1s"}, "must not be negative"},
 		{"bad log format", map[string]string{"HOOKINLET_LOG_FORMAT": "xml"}, "--log-format"},
 		{"bad log level", map[string]string{"HOOKINLET_LOG_LEVEL": "loud"}, "--log-level"},
+		{"retention interval too short", map[string]string{"HOOKINLET_RETENTION_INTERVAL": "1ns"}, "at least 1s"},
+		{"retention interval zero", map[string]string{"HOOKINLET_RETENTION_INTERVAL": "0"}, "retention-interval"},
 		{"bad bool", map[string]string{"HOOKINLET_MCP_ENABLED": "maybe"}, "--mcp-enabled"},
 		{"bad body bytes", map[string]string{"HOOKINLET_MCP_INLINE_BODY_BYTES": "0"}, "--mcp-inline-body-bytes"},
 		{"body bytes above the REST inline size", map[string]string{"HOOKINLET_MCP_INLINE_BODY_BYTES": "65537"}, "--mcp-inline-body-bytes"},

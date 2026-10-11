@@ -49,6 +49,10 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		return migrateCmd(args[1:], getenv, stdout, stderr)
 	case "inbox":
 		return inboxCmd(args[1:], getenv, stdout, stderr)
+	case "retention":
+		return retentionCmd(args[1:], getenv, stdout, stderr)
+	case "backup":
+		return backupCmd(args[1:], getenv, stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0
@@ -68,12 +72,18 @@ func usage(w io.Writer) {
 Commands:
   serve     Run the HTTP server (see "hookinlet serve -h" for settings)
   migrate   Apply pending database migrations and report the schema version
-  inbox     Manage inboxes directly in the data directory (inbox create)
+  inbox     Manage inboxes: create, list, show, update, set-secret, rotate-token, delete
+  retention Apply retention policies now (retention run)
+  backup    Write a consistent copy of the database (backup --out FILE)
   version   Print the version
   help      Show this help
 
 Every setting is a flag and an environment variable: --listen-addr is also
 HOOKINLET_LISTEN_ADDR. Flags win over the environment.
+
+The inbox, retention, and backup commands call a running server's admin API when
+given --url (with the admin token in HOOKINLET_ADMIN_TOKEN), and otherwise work
+directly in the data directory (--data-dir).
 `)
 }
 
@@ -142,6 +152,8 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		SSERecheckInterval: cfg.SSERecheckInterval,
 		DisableMCP:         !cfg.MCPEnabled,
 		Version:            version,
+		PublicBaseURL:      cfg.PublicBaseURL,
+		RetentionInterval:  cfg.RetentionInterval,
 		MCPInlineBodyBytes: cfg.MCPInlineBodyBytes,
 		TrustedProxies:     cfg.TrustedProxies,
 	})

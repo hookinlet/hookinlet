@@ -56,6 +56,41 @@ The first run at a million messages found two reads far over budget:
 | lookup by `delivery_id` | 804 ms | 0.16 ms | A full scan: the only delivery-id index covers verified messages. Migration 0002 adds an index on `(inbox_id, delivery_id, seq)`, and the query says `delivery_id IS NOT NULL` so SQLite may use it. A test checks the query plan. |
 | message count (`message_count`) | 140 ms | 0.07 ms | `COUNT(*)` over every row. Retention only ever removes a prefix, so the stored seqs are contiguous and the count is `latest - oldest + 1`. The conformance suite checks this against a real walk of the inbox. |
 
+## Deliveries while a large prune runs
+
+Retention (and deleting an inbox) removes messages in batches, and a delivery
+that arrives meanwhile waits for the one batch in progress, because all writes
+share one connection. So the batch is the longest a delivery can be made to wait.
+A batch is at most 250 rows and at most 2 MiB of message bodies, whichever comes
+first, since large messages make a batch slower. With one million rows being
+pruned (everything but one message) and four senders appending every couple of
+milliseconds, on the same machine as the figures above:
+
+| Rows per batch | Append p50 | Append p99 | Longest wait | The whole prune |
+|---|---|---|---|---|
+| 5000 | 35 ms | 279 ms | 592 ms | 9 s |
+| 1000 | 6 ms | 48 ms | 222 ms | 9 s |
+| 500 | 2 ms | 32 ms | 130 ms | 10 s |
+| **250 (used)** | **2 ms** | **16 ms** | **66 ms** | **11 s** |
+| 100 | 1 ms | 10 ms | 44 ms | 14 s |
+
+The gate is a p99 under 50 ms; 250 rows leaves a wide margin and costs two extra
+seconds on a prune nobody is waiting for. Measured with the final settings
+(counting only appends made while the operation runs):
+
+| Operation | Append p99 | Longest wait |
+|---|---|---|
+| Prune 1,000,000 rows; appends to another inbox | 16 ms | 69 ms |
+| The same; appends to the inbox being pruned | 18 ms | 74 ms |
+| Delete a 1,000,000-message inbox (12 s) | 17 ms | 102 ms |
+| Prune 1,500 messages of 512 KiB (0.6 s) | 9 ms | 15 ms |
+
+What is measured is `Store.Append`, not the HTTP request around it, which adds
+verification and encoding but nothing that waits for the writer. The senders are
+closed loops with a 2 ms pause, so one stuck behind a batch sends nothing while it
+waits, and with more senders the queue behind each batch is longer; the figures
+are for four senders.
+
 ## Repeating the measurement
 
 Seeding a million rows takes about 15 seconds. The measurements run only when
@@ -67,6 +102,9 @@ HOOKINLET_BENCH=1 go test -run TestAPILatencyAtScale -v -timeout 20m ./pkg/serve
 
 # The store alone, every query shape
 HOOKINLET_BENCH=1 go test -run TestQueryLatencyAtScale -v -timeout 20m ./pkg/store/sqlite/
+
+# Deliveries while a million rows are pruned or an inbox that size is deleted
+HOOKINLET_BENCH=1 go test -run 'WhileA|WhileLarge' -v -timeout 20m ./pkg/store/sqlite/
 
 # Go's usual ns/op for the common shapes
 go test -run '^$' -bench BenchmarkQuery ./pkg/store/sqlite/
