@@ -363,6 +363,9 @@ type queryOutput struct {
 // document would have made are made here.
 func pageRequest(after, before *int64, limit *int, types []string, since, until string, verified *bool, summary bool, epoch string) (wire.PageRequest, error) {
 	p := wire.MessagesParams{Types: types, Verified: verified, Summary: summary}
+	if err := checkEpochArg(epoch); err != nil {
+		return wire.PageRequest{}, err
+	}
 	if epoch != "" {
 		p.Epoch = &epoch
 	}
@@ -498,6 +501,12 @@ func (t *mcpTools) getMessage(ctx context.Context, _ *mcp.CallToolRequest, args 
 	if args.Seq < 1 {
 		return nil, nil, errToolNotFound
 	}
+	if err := checkEpochArg(stringOf(args.Epoch)); err != nil {
+		return nil, nil, t.fail(ctx, "get", err)
+	}
+	if err := wire.CheckEpoch(in, stringOf(args.Epoch)); err != nil {
+		return nil, nil, t.fail(ctx, "get", err)
+	}
 	release, err := t.s.readSlot(ctx)
 	if err != nil {
 		return nil, nil, t.fail(ctx, "get", err)
@@ -512,7 +521,7 @@ func (t *mcpTools) getMessage(ctx context.Context, _ *mcp.CallToolRequest, args 
 		return nil, nil, t.fail(ctx, "get", err)
 	}
 	if n := wireSize(b); n > mcpMaxMessageResult {
-		return nil, nil, toolError(fmt.Sprintf("this message is too large to return here (%d bytes once encoded); fetch /v1/inboxes/%s/messages/%d/raw over HTTP", n, in.Slug, m.Seq))
+		return nil, nil, toolError(fmt.Sprintf("this message is too large to return here (%d bytes once encoded); fetch /v1/inboxes/%s/messages/%d/raw?epoch=%s over HTTP", n, in.Slug, m.Seq, in.Epoch))
 	}
 	return pack(b), nil, nil
 }
@@ -617,4 +626,21 @@ func stringOf(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// checkEpochArg holds an epoch given as a tool argument to the shape the REST API
+// holds the parameter to, so that the two refuse the same things.
+func checkEpochArg(epoch string) error {
+	if epoch == "" {
+		return nil
+	}
+	if len(epoch) > 64 {
+		return &wire.ParamError{Param: "epoch", Reason: "is not an epoch"}
+	}
+	for _, r := range epoch {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return &wire.ParamError{Param: "epoch", Reason: "is not an epoch"}
+		}
+	}
+	return nil
 }

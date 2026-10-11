@@ -139,6 +139,10 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 		var one int
 		switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE slug = ?`, cp.Slug).Scan(&one); {
 		case err == nil:
+			var deleting int
+			if tx.QueryRowContext(ctx, `SELECT deleting FROM inboxes WHERE slug = ?`, cp.Slug).Scan(&deleting) == nil && deleting == 1 {
+				return fmt.Errorf("%w: slug %q belongs to an inbox that is still being deleted; the retention sweep finishes that (or run: hookinlet retention run)", inbox.ErrConflict, cp.Slug)
+			}
 			return fmt.Errorf("%w: slug %q is already taken", inbox.ErrConflict, cp.Slug)
 		case !errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("sqlite: check slug: %w", err)
@@ -259,7 +263,12 @@ func (s *Store) DeleteInbox(ctx context.Context, id inbox.ID) error {
 	if err != nil {
 		return err
 	}
-	return s.finishDelete(ctx, id)
+	// A sweep may have finished it while this one was working: the inbox is gone,
+	// which is what was asked for.
+	if err := s.finishDelete(ctx, id); err != nil && !errors.Is(err, inbox.ErrNotFound) {
+		return err
+	}
+	return nil
 }
 
 // finishDelete removes the messages of an inbox marked as being deleted, then
@@ -297,6 +306,18 @@ func (s *Store) unfinishedDeletes(ctx context.Context) ([]inbox.ID, error) {
 		ids = append(ids, id)
 	}
 	return ids, s.ctxErr(ctx, rows.Err())
+}
+
+// RenewEpochs gives every inbox a new epoch. Do it after restoring a database
+// from a copy of the data directory, or after restoring one snapshot more than
+// once: the sequence numbers the restored server hands out may not be the ones
+// its predecessor handed out, and a new epoch is how a client holding an old
+// cursor finds out. (A snapshot taken by Backup already has new epochs.)
+func (s *Store) RenewEpochs(ctx context.Context) error {
+	return s.writeTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE inboxes SET epoch = lower(hex(randomblob(16))), version = version + 1`)
+		return err
+	})
 }
 
 // newEpoch returns a fresh random epoch: 128 bits, hex.

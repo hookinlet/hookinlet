@@ -9,6 +9,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/hookinlet/hookinlet/internal/config"
@@ -51,6 +53,42 @@ func migrateCmd(args []string, getenv func(string) string, stdout, stderr io.Wri
 	} else {
 		fmt.Fprintf(stdout, "schema is up to date at version %d\n", version)
 	}
+	return 0
+}
+
+// renewEpochsCmd gives every inbox a new epoch, in the data directory. It is for
+// the moment after a database is restored from a copy of the data directory (or
+// one snapshot is restored a second time): the restored server may hand out
+// sequence numbers that differ from the ones its predecessor handed out, and a new
+// epoch is how a client holding an old cursor finds out. Snapshots from `hookinlet
+// backup` and GET /admin/backup already have new epochs. Stop the server first.
+func renewEpochsCmd(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("hookinlet renew-epochs", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	resolve := config.AddDataFlags(fs, getenv)
+	if code, done := parseFlags(fs, args, stderr); done {
+		return code
+	}
+	data, err := resolve()
+	if err != nil {
+		return configError(stderr, err)
+	}
+	if _, err := os.Stat(filepath.Join(data.DataDir, sqlite.DBFileName)); err != nil {
+		fmt.Fprintf(stderr, "hookinlet: there is no database in %s; check --data-dir\n", data.DataDir)
+		return exitRuntime
+	}
+	ctx := context.Background()
+	store, err := sqlite.Open(ctx, data.DataDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
+		return exitRuntime
+	}
+	defer func() { _ = store.Close() }()
+	if err := store.RenewEpochs(ctx); err != nil {
+		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
+		return exitRuntime
+	}
+	fmt.Fprintln(stdout, "every inbox has a new epoch; readers holding an old cursor will be told to start again")
 	return 0
 }
 

@@ -107,10 +107,12 @@ func ordinaryUse(t *testing.T, c *contract) {
 		cl.call(id("getMessage"), m, "/v1/inboxes/agent-a/messages/1", nil, agent)
 		cl.call(id("getMessage"), m, "/v1/inboxes/agent-a/messages/999", nil, agent)
 		cl.call(id("getMessage"), m, "/v1/inboxes/agent-a/messages/1?x=1", nil, agent)
+		cl.call(id("getMessage"), m, "/v1/inboxes/agent-a/messages/1?epoch=0badc0de", nil, agent) // another epoch
 		cl.call(id("getMessage"), m, "/v1/inboxes/agent-a/messages/1", nil, "")
 		cl.call(id("getMessageRaw"), m, "/v1/inboxes/agent-a/messages/1/raw", nil, agent)
 		cl.call(id("getMessageRaw"), m, "/v1/inboxes/agent-a/messages/999/raw", nil, agent)
 		cl.call(id("getMessageRaw"), m, "/v1/inboxes/agent-a/messages/1/raw?x=1", nil, agent)
+		cl.call(id("getMessageRaw"), m, "/v1/inboxes/agent-a/messages/1/raw?epoch=0badc0de", nil, agent) // another epoch
 		cl.call(id("getMessageRaw"), m, "/v1/inboxes/agent-a/messages/1/raw", nil, "")
 	}
 	cl.call("getInbox", "POST", "/v1/inboxes/agent-a", nil, agent)

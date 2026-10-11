@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,5 +187,62 @@ func TestAnInboxIsClosedToAgentsAndIngestBeforeItsMessagesGo(t *testing.T) {
 	}
 	if err := s.DeleteInbox(t.Context(), in.ID); err == nil {
 		t.Error("deleting a deleted inbox succeeded")
+	}
+}
+
+// A delete that overlaps the retention sweep is still a success: whichever of the
+// two removes the row last finds it already gone.
+func TestADeleteThatOverlapsTheSweepSucceeds(t *testing.T) {
+	for round := range 10 {
+		s, in := internalStore(t)
+		for range 700 {
+			if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("x"), Verified: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		done := make(chan error, 2)
+		go func() { done <- s.DeleteInbox(t.Context(), in.ID) }()
+		go func() { _, err := s.Prune(t.Context(), time.Now()); done <- err }()
+		for range 2 {
+			if err := <-done; err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+		if _, err := s.Prune(t.Context(), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		var left int
+		if err := s.rdb.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM inboxes`).Scan(&left); err != nil || left != 0 {
+			t.Fatalf("round %d: %d inboxes remain (%v)", round, left, err)
+		}
+	}
+}
+
+func TestRenewEpochs(t *testing.T) {
+	s, in := internalStore(t)
+	if err := s.RenewEpochs(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetInbox(t.Context(), in.ID)
+	if err != nil || got.Epoch == "" || got.Epoch == in.Epoch {
+		t.Errorf("epoch %q after renewing, was %q (%v)", got.Epoch, in.Epoch, err)
+	}
+	if got.Version != in.Version+1 {
+		t.Errorf("version %d, want %d: an admin holding the old copy must be made to re-read", got.Version, in.Version+1)
+	}
+}
+
+// A slug that an unfinished delete still holds says so.
+func TestASlugHeldByAnUnfinishedDeleteSaysWhy(t *testing.T) {
+	s, in := internalStore(t)
+	if err := s.writeTx(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(t.Context(), `UPDATE inboxes SET disabled = 1, deleting = 1 WHERE id = ?`, int64(in.ID))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := s.CreateInbox(t.Context(), &inbox.Inbox{Slug: in.Slug, IngestKey: "another-key-entirely", Name: "n", Verifier: "none"})
+	if !errors.Is(err, inbox.ErrConflict) || !strings.Contains(err.Error(), "being deleted") {
+		t.Errorf("creating over an unfinished delete: %v", err)
 	}
 }

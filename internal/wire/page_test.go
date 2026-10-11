@@ -583,3 +583,39 @@ func TestCheckEpoch(t *testing.T) {
 		t.Errorf("another epoch: %v", err)
 	}
 }
+
+// getFails is a Store whose Get says the message is gone, as it is when retention
+// removes a message between the query and the load of its large body.
+type getFails struct{ inbox.Store }
+
+func (getFails) Get(context.Context, inbox.ID, int64) (*inbox.Message, error) {
+	return nil, inbox.ErrNotFound
+}
+
+func TestAMessagePrunedWhileThePageIsBuiltIsAGap(t *testing.T) {
+	st, err := sqlite.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	in := &inbox.Inbox{Slug: "pruned-mid-read", IngestKey: "pruned-mid-read", Name: "n", Verifier: "none"}
+	if err := st.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte("x"), InlineBodyBytes+1) // not loaded with the query
+	for _, body := range [][]byte{[]byte("one"), big, []byte("three")} {
+		if _, _, err := st.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: body, Verified: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after := int64(1)
+	req := PageRequest{Query: inbox.Query{After: &after, Limit: 10}, Limit: 10}
+	whole, err := FetchPage(t.Context(), st, in, req)
+	if err != nil || whole.Gap || len(whole.Messages) != 2 {
+		t.Fatalf("with nothing pruned: gap %v, %d messages, %v", whole.Gap, len(whole.Messages), err)
+	}
+	cut, err := FetchPage(t.Context(), getFails{st}, in, req)
+	if err != nil || !cut.Gap || len(cut.Messages) != 1 {
+		t.Errorf("with seq 2 pruned mid-read: gap %v, %d messages, %v", cut.Gap, len(cut.Messages), err)
+	}
+}

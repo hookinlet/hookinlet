@@ -127,7 +127,10 @@ func removeStaleBackups(dir string, now time.Time) {
 	}
 	for _, e := range entries {
 		n := e.Name()
-		if e.IsDir() || !strings.HasPrefix(n, backupPrefix) || !strings.HasSuffix(n, backupSuffix) {
+		// Beside a snapshot that died while its epochs were being renewed there may
+		// be the journal files SQLite keeps for it.
+		base := strings.TrimSuffix(strings.TrimSuffix(n, "-wal"), "-shm")
+		if e.IsDir() || !strings.HasPrefix(base, backupPrefix) || !strings.HasSuffix(base, backupSuffix) {
 			continue
 		}
 		if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > staleBackup {

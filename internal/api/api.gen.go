@@ -737,6 +737,9 @@ type JsonRpcResponse = json.RawMessage
 
 // McpGetMessageInput defines model for McpGetMessageInput.
 type McpGetMessageInput struct {
+	// Epoch the epoch of the message's inbox from your earlier result; if it is not the current one the call fails with epoch_changed instead of returning another message that now has this seq. Omit it to skip the check
+	Epoch *string `json:"epoch,omitempty"`
+
 	// Inbox slug of the inbox
 	Inbox string `json:"inbox"`
 
@@ -1075,6 +1078,30 @@ type HeadListMessagesParams struct {
 // HeadListMessagesParamsFields defines parameters for HeadListMessages.
 type HeadListMessagesParamsFields string
 
+// GetMessageParams defines parameters for GetMessage.
+type GetMessageParams struct {
+	// Epoch The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// HeadGetMessageParams defines parameters for HeadGetMessage.
+type HeadGetMessageParams struct {
+	// Epoch The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// GetMessageRawParams defines parameters for GetMessageRaw.
+type GetMessageRawParams struct {
+	// Epoch The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
+// HeadGetMessageRawParams defines parameters for HeadGetMessageRaw.
+type HeadGetMessageRawParams struct {
+	// Epoch The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check.
+	Epoch *string `form:"epoch,omitempty" json:"epoch,omitempty"`
+}
+
 // StreamMessagesParams defines parameters for StreamMessages.
 type StreamMessagesParams struct {
 	// After Start after this message, replaying anything newer. `0` replays everything. Without it (and without `Last-Event-ID`) the stream starts from now.
@@ -1187,16 +1214,16 @@ type ServerInterface interface {
 	HeadListMessages(w http.ResponseWriter, r *http.Request, slug Slug, params HeadListMessagesParams)
 	// GetMessage One message
 	// (GET /v1/inboxes/{slug}/messages/{seq})
-	GetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq)
+	GetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageParams)
 	// HeadGetMessage Headers only: One message
 	// (HEAD /v1/inboxes/{slug}/messages/{seq})
-	HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq)
+	HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageParams)
 	// GetMessageRaw The exact bytes received
 	// (GET /v1/inboxes/{slug}/messages/{seq}/raw)
-	GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq)
+	GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageRawParams)
 	// HeadGetMessageRaw Headers only: The exact bytes received
 	// (HEAD /v1/inboxes/{slug}/messages/{seq}/raw)
-	HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq)
+	HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageRawParams)
 	// StreamMessages Follow an inbox live (Server-Sent Events)
 	// (GET /v1/inboxes/{slug}/stream)
 	StreamMessages(w http.ResponseWriter, r *http.Request, slug Slug, params StreamMessagesParams)
@@ -2114,8 +2141,24 @@ func (siw *ServerInterfaceWrapper) GetMessage(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMessageParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetMessage(w, r, slug, seq)
+		siw.Handler.GetMessage(w, r, slug, seq, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2149,8 +2192,24 @@ func (siw *ServerInterfaceWrapper) HeadGetMessage(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params HeadGetMessageParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.HeadGetMessage(w, r, slug, seq)
+		siw.Handler.HeadGetMessage(w, r, slug, seq, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2184,8 +2243,24 @@ func (siw *ServerInterfaceWrapper) GetMessageRaw(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMessageRawParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetMessageRaw(w, r, slug, seq)
+		siw.Handler.GetMessageRaw(w, r, slug, seq, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2219,8 +2294,24 @@ func (siw *ServerInterfaceWrapper) HeadGetMessageRaw(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params HeadGetMessageRawParams
+
+	// ------------- Optional query parameter "epoch" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "epoch", r.URL.Query(), &params.Epoch, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "epoch"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "epoch", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.HeadGetMessageRaw(w, r, slug, seq)
+		siw.Handler.HeadGetMessageRaw(w, r, slug, seq, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7249,8 +7340,9 @@ func (response HeadListMessagesdefaultTextResponse) VisitHeadListMessagesRespons
 }
 
 type GetMessageRequestObject struct {
-	Slug Slug `json:"slug"`
-	Seq  Seq  `json:"seq"`
+	Slug   Slug `json:"slug"`
+	Seq    Seq  `json:"seq"`
+	Params GetMessageParams
 }
 
 type GetMessageResponseObject interface {
@@ -7346,6 +7438,22 @@ func (response GetMessage405JSONResponse) VisitGetMessageResponse(w http.Respons
 	return err
 }
 
+type GetMessage409JSONResponse struct{ EpochChangedJSONResponse }
+
+func (response GetMessage409JSONResponse) VisitGetMessageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetMessage500JSONResponse struct{ InternalJSONResponse }
 
 func (response GetMessage500JSONResponse) VisitGetMessageResponse(w http.ResponseWriter) error {
@@ -7424,8 +7532,9 @@ func (response GetMessagedefaultTextResponse) VisitGetMessageResponse(w http.Res
 }
 
 type HeadGetMessageRequestObject struct {
-	Slug Slug `json:"slug"`
-	Seq  Seq  `json:"seq"`
+	Slug   Slug `json:"slug"`
+	Seq    Seq  `json:"seq"`
+	Params HeadGetMessageParams
 }
 
 type HeadGetMessageResponseObject interface {
@@ -7506,6 +7615,20 @@ func (response HeadGetMessage405Response) VisitHeadGetMessageResponse(w http.Res
 	return nil
 }
 
+type HeadGetMessage409ResponseHeaders struct {
+	XRequestId string
+}
+
+type HeadGetMessage409Response struct {
+	Headers HeadGetMessage409ResponseHeaders
+}
+
+func (response HeadGetMessage409Response) VisitHeadGetMessageResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(409)
+	return nil
+}
+
 type HeadGetMessage500ResponseHeaders struct {
 	XRequestId string
 }
@@ -7581,8 +7704,9 @@ func (response HeadGetMessagedefaultTextResponse) VisitHeadGetMessageResponse(w 
 }
 
 type GetMessageRawRequestObject struct {
-	Slug Slug `json:"slug"`
-	Seq  Seq  `json:"seq"`
+	Slug   Slug `json:"slug"`
+	Seq    Seq  `json:"seq"`
+	Params GetMessageRawParams
 }
 
 type GetMessageRawResponseObject interface {
@@ -7692,6 +7816,22 @@ func (response GetMessageRaw405JSONResponse) VisitGetMessageRawResponse(w http.R
 	return err
 }
 
+type GetMessageRaw409JSONResponse struct{ EpochChangedJSONResponse }
+
+func (response GetMessageRaw409JSONResponse) VisitGetMessageRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetMessageRaw500JSONResponse struct{ InternalJSONResponse }
 
 func (response GetMessageRaw500JSONResponse) VisitGetMessageRawResponse(w http.ResponseWriter) error {
@@ -7770,8 +7910,9 @@ func (response GetMessageRawdefaultTextResponse) VisitGetMessageRawResponse(w ht
 }
 
 type HeadGetMessageRawRequestObject struct {
-	Slug Slug `json:"slug"`
-	Seq  Seq  `json:"seq"`
+	Slug   Slug `json:"slug"`
+	Seq    Seq  `json:"seq"`
+	Params HeadGetMessageRawParams
 }
 
 type HeadGetMessageRawResponseObject interface {
@@ -7859,6 +8000,20 @@ func (response HeadGetMessageRaw405Response) VisitHeadGetMessageRawResponse(w ht
 	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(405)
+	return nil
+}
+
+type HeadGetMessageRaw409ResponseHeaders struct {
+	XRequestId string
+}
+
+type HeadGetMessageRaw409Response struct {
+	Headers HeadGetMessageRaw409ResponseHeaders
+}
+
+func (response HeadGetMessageRaw409Response) VisitHeadGetMessageRawResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(409)
 	return nil
 }
 
@@ -8970,11 +9125,12 @@ func (sh *strictHandler) HeadListMessages(w http.ResponseWriter, r *http.Request
 }
 
 // GetMessage operation middleware
-func (sh *strictHandler) GetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq) {
+func (sh *strictHandler) GetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageParams) {
 	var request GetMessageRequestObject
 
 	request.Slug = slug
 	request.Seq = seq
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetMessage(ctx, request.(GetMessageRequestObject))
@@ -8997,11 +9153,12 @@ func (sh *strictHandler) GetMessage(w http.ResponseWriter, r *http.Request, slug
 }
 
 // HeadGetMessage operation middleware
-func (sh *strictHandler) HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq) {
+func (sh *strictHandler) HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageParams) {
 	var request HeadGetMessageRequestObject
 
 	request.Slug = slug
 	request.Seq = seq
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.HeadGetMessage(ctx, request.(HeadGetMessageRequestObject))
@@ -9024,11 +9181,12 @@ func (sh *strictHandler) HeadGetMessage(w http.ResponseWriter, r *http.Request, 
 }
 
 // GetMessageRaw operation middleware
-func (sh *strictHandler) GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq) {
+func (sh *strictHandler) GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageRawParams) {
 	var request GetMessageRawRequestObject
 
 	request.Slug = slug
 	request.Seq = seq
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetMessageRaw(ctx, request.(GetMessageRawRequestObject))
@@ -9051,11 +9209,12 @@ func (sh *strictHandler) GetMessageRaw(w http.ResponseWriter, r *http.Request, s
 }
 
 // HeadGetMessageRaw operation middleware
-func (sh *strictHandler) HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq) {
+func (sh *strictHandler) HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageRawParams) {
 	var request HeadGetMessageRawRequestObject
 
 	request.Slug = slug
 	request.Seq = seq
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.HeadGetMessageRaw(ctx, request.(HeadGetMessageRawRequestObject))

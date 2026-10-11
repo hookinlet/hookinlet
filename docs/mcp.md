@@ -63,7 +63,7 @@ value.)
 
 ### `list_inboxes`
 
-The inboxes this token can read: `slug`, `name`, `verifier`, and `latest_seq`.
+The inboxes this token can read: `slug`, `name`, `verifier`, `latest_seq`, and `epoch`.
 An agent token lists the inboxes it reads. A token for all inboxes, and the admin
 token, list up to 100;
 `truncated: true` says it can read more than that. Nothing is ever reported about
@@ -114,8 +114,10 @@ never reports one.)
 
 ### `get_message`
 
-`inbox` and `seq`. One message with its **full** body, up to the size limit
-described under [Limits](#limits).
+`inbox` and `seq`, and optionally `epoch` (as for `query_messages`, so that a `seq`
+from an earlier life of the inbox is refused rather than answered with another
+message). One message with its **full** body, up to the size limit described under
+[Limits](#limits).
 
 ### `wait_for_messages`
 

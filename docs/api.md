@@ -216,13 +216,19 @@ cursor you want (`after=0` for everything stored). A `next` link already include
 `gap` is `true` on a page read with `after=` when retention removed messages after
 your cursor before you got to them: what follows does not continue where you left
 off. `after=0` never reports one. If you must see every message, size retention
-for how long your reader may be away.
+for how long your reader may be away. A stream announces a gap the same way
+(`event: gap`) whenever it arises, including while the stream is running.
 
 ### One message
 
 `GET /v1/inboxes/{slug}/messages/{seq}` returns a single message object, with its
 full body. A number that cannot be a sequence number (`0`, `-1`, `01`, `abc`) is
 a `404`, like one that does not exist.
+
+Both this and `.../raw` take `epoch=`, to refuse a `seq` that belongs to an earlier
+life of the inbox with `409` instead of answering with whatever message has that
+number now. A message carries its `epoch`; raw bytes do not, so pin a raw fetch
+with the parameter.
 
 ### Raw bytes
 

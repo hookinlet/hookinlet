@@ -6,11 +6,13 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
@@ -256,10 +258,77 @@ func TestMCPToolsKnowAboutEpochsAndGaps(t *testing.T) {
 			t.Errorf("%s with another epoch: %q", name, out.err)
 		}
 	}
-	// A wait whose cursor is behind what is kept returns at once, not after its timeout.
+	// A wait whose cursor is behind what is kept returns at once, not after its
+	// timeout, even when nothing that is left matches its filter.
 	begin := time.Now()
-	out := callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "mcp-epoch", "after": 1, "timeout_seconds": 20, "epoch": in.Epoch})
+	out := callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "mcp-epoch", "after": 1, "timeout_seconds": 20, "types": []string{"nothing-has-this-type"}})
 	if time.Since(begin) > 5*time.Second || out.err != "" {
-		t.Errorf("a wait behind the oldest message: %v, %q", time.Since(begin), out.err)
+		t.Fatalf("a wait behind the oldest message: %v, %q", time.Since(begin), out.err)
+	}
+	if err := json.Unmarshal(out.raw, &page); err != nil || !page.Gap {
+		t.Errorf("the wait did not report the gap: %s", out.raw)
+	}
+
+	// get_message can be pinned to an epoch too.
+	if out := callTool(t, cs, "get_message", map[string]any{"inbox": "mcp-epoch", "seq": 4, "epoch": in.Epoch}); out.err != "" {
+		t.Errorf("get_message with the right epoch: %s", out.err)
+	}
+	if out := callTool(t, cs, "get_message", map[string]any{"inbox": "mcp-epoch", "seq": 4, "epoch": "someotherepoch"}); !strings.HasPrefix(out.err, "epoch_changed") {
+		t.Errorf("get_message with another epoch: %q", out.err)
+	}
+	if out := callTool(t, cs, "get_message", map[string]any{"inbox": "mcp-epoch", "seq": 4, "epoch": "not an epoch!"}); out.err == "" || strings.HasPrefix(out.err, "epoch_changed") {
+		t.Errorf("a malformed epoch: %q", out.err)
+	}
+}
+
+// A message fetched by seq can be pinned to an epoch too.
+func TestAMessageBySeqCanBePinnedToAnEpoch(t *testing.T) {
+	e := newAgentEnv(t)
+	e.post("/in/agent-a", "one")
+	for _, suffix := range []string{"", "/raw"} {
+		path := "/v1/inboxes/agent-a/messages/1" + suffix
+		if rec := e.get(path+"?epoch="+e.a.Epoch, e.tokenA); rec.Code != http.StatusOK {
+			t.Errorf("%s with the right epoch: %d", path, rec.Code)
+		}
+		rec := e.get(path+"?epoch=0123abc", e.tokenA)
+		if rec.Code != http.StatusConflict || errorCode(t, rec) != "epoch_changed" {
+			t.Errorf("%s with another epoch: %d %s", path, rec.Code, rec.Body)
+		}
+		if rec := e.do(req{method: http.MethodHead, path: path + "?epoch=0123abc", headers: http.Header{"Authorization": {"Bearer " + e.tokenA}}}); rec.Code != http.StatusConflict {
+			t.Errorf("HEAD %s with another epoch: %d", path, rec.Code)
+		}
+	}
+}
+
+// A gap that arises while a stream is open is announced too, not only one that
+// was there when it opened.
+func TestAStreamAnnouncesAGapThatArisesWhileItRuns(t *testing.T) {
+	e := newAgentEnv(t)
+	in := e.newInbox("late-gap", "trusted", "", func(i *inbox.Inbox) { i.RetentionMaxCount = 2 })
+	for range 6 {
+		e.post("/in/late-gap", "x")
+	}
+	if _, err := e.store.Prune(t.Context(), time.Now()); err != nil { // seqs 5 and 6 remain
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	rc := http.NewResponseController(rec)
+	// The stream's cursor is at 2: it saw 1 and 2, and 3 and 4 have gone since.
+	sent, next, err := e.server.drain(t.Context(), rec, rc, in, wire.StreamRequest{}, 2)
+	if err != nil || !sent || next != 6 {
+		t.Fatalf("drain: sent %v, next %d, %v", sent, next, err)
+	}
+	out := rec.Body.String()
+	gapAt, firstAt := strings.Index(out, "event: gap"), strings.Index(out, "event: message")
+	if gapAt < 0 || firstAt < 0 || gapAt > firstAt {
+		t.Fatalf("want a gap event before the messages:\n%s", out)
+	}
+	if !strings.Contains(out, `"after":2`) || !strings.Contains(out, `"oldest_seq":5`) {
+		t.Errorf("gap data:\n%s", out)
+	}
+	// Caught up: no more.
+	rec = httptest.NewRecorder()
+	if _, _, err := e.server.drain(t.Context(), rec, http.NewResponseController(rec), in, wire.StreamRequest{}, 6); err != nil || strings.Contains(rec.Body.String(), "gap") {
+		t.Errorf("a caught-up stream: %v %q", err, rec.Body.String())
 	}
 }

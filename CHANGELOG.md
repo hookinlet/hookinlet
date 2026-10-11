@@ -22,6 +22,11 @@ applies.
   `event: gap` first. `inbox.Page.OldestSeq` (set by every Store) is what it is computed
   from. A cursor of 0 never reports a gap.
 - The store logs a clock that stepped back (`sqlite.WithLogger`).
+- `epoch` on `GET .../messages/{seq}` and `.../raw` (and `get_message`), so a `seq` from
+  an earlier life of the inbox can be refused.
+- `hookinlet renew-epochs` (and `sqlite.Store.RenewEpochs`) gives every inbox a new
+  epoch, for use after restoring from a copy of the data directory or restoring one
+  snapshot twice. Snapshots from `Backup` have new epochs already.
 
 #### Changed
 - `message_count` is kept by every append and removal, so it no longer assumes that

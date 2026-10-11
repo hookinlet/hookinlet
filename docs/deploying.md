@@ -179,7 +179,8 @@ and those may be breaking.
 
 `GET /admin/backup`, `hookinlet backup --out FILE`, or copying the data
 directory while the process is stopped. See [administration](admin.md#backups),
-including how to restore. Keep the master key with the backup, but apart from it.
+including how to restore (after restoring from a copy of the data directory, run
+`hookinlet renew-epochs`, so that readers' old cursors are not trusted). Keep the master key with the backup, but apart from it.
 
 ## Logs
 

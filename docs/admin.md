@@ -54,7 +54,7 @@ shown exactly once is a new agent token, in the response that creates it.
 | `PATCH /admin/inboxes/{slug}` | Change settings. |
 | `PUT /admin/inboxes/{slug}/secret` | Set or replace the verifier secret. |
 | `POST /admin/inboxes/{slug}/rotate-ingest-key` | A new random ingest key. The old URL stops working at once; give senders the new one. |
-| `DELETE /admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). It is closed to deliveries and to tokens scoped to it first (the admin token and tokens for all inboxes can still read it until it is gone), and its messages go in small batches so that other inboxes keep receiving; if it is interrupted, run it again. |
+| `DELETE /admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). The inbox is gone as far as readers, senders and tokens are concerned the moment the call starts; its messages are then removed in small batches so that other inboxes keep receiving. If the server stops part way, the retention sweep finishes the job (`hookinlet retention run` does it at once, and is the way to do it if the sweep is off); until then the slug and ingest key are still taken. |
 | `POST /admin/tokens` | Issue an agent token for some inboxes (`inboxes`: a list of slugs) or all of them (`all_inboxes`). Returns the token once. |
 | `GET /admin/tokens` | List tokens, never their secrets (`?inbox=slug` for those that can read an inbox; `?limit=`; follow `next`). |
 | `DELETE /admin/tokens/{id}` | Revoke a token (`204`). It stops working at once. |
@@ -413,3 +413,18 @@ sensitive with it, so protect it like the data directory.
 `hookinlet.db-shm` beside the database, put the backup at `<data-dir>/hookinlet.db`,
 and start the server with the **same master key**. Check the copy first if you
 like: `sqlite3 backup.db 'PRAGMA integrity_check'` should print `ok`.
+
+**Epochs.** A restored server may hand out sequence numbers that differ from the
+ones the original handed out after the backup was taken, so cursors held from before
+must not be believed. Each snapshot from `GET /admin/backup` or `hookinlet backup`
+therefore has a **new epoch** for every inbox, and readers using
+[`epoch`](api.md#epochs-and-gaps) are told to start again. Two cases the snapshot
+cannot cover: a **copy of the data directory** made with the server stopped, and
+**one snapshot restored more than once**. After restoring either, with the server
+stopped, run
+
+```sh
+hookinlet renew-epochs --data-dir ./data
+```
+
+which gives every inbox a new epoch in place.

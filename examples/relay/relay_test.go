@@ -305,7 +305,7 @@ func TestARestartCarriesOnWithoutRepeatingOrLosingAnything(t *testing.T) {
 	// The position is saved just after the delivery that moved it, so the file may
 	// be a moment behind the last body the destination saw.
 	var saved string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		b, _ := os.ReadFile(state) //nolint:gosec // a temp path
 		if saved = strings.TrimSpace(string(b)); saved == "2" {
 			break

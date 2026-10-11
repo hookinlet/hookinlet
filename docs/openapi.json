@@ -1961,6 +1961,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/EpochChanged"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -2001,6 +2004,16 @@
           },
           {
             "$ref": "#/components/parameters/Seq"
+          },
+          {
+            "name": "epoch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{1,64}$"
+            },
+            "description": "The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check."
           }
         ],
         "security": [
@@ -2064,6 +2077,18 @@
           },
           "404": {
             "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "409": {
+            "description": "The `epoch` is not the inbox's current one.",
             "headers": {
               "X-Request-Id": {
                 "required": true,
@@ -2155,6 +2180,16 @@
           },
           {
             "$ref": "#/components/parameters/Seq"
+          },
+          {
+            "name": "epoch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{1,64}$"
+            },
+            "description": "The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check."
           }
         ],
         "security": [
@@ -2235,6 +2270,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/EpochChanged"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -2275,6 +2313,16 @@
           },
           {
             "$ref": "#/components/parameters/Seq"
+          },
+          {
+            "name": "epoch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{1,64}$"
+            },
+            "description": "The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check."
           }
         ],
         "security": [
@@ -2378,6 +2426,18 @@
               }
             }
           },
+          "409": {
+            "description": "The `epoch` is not the inbox's current one.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
           "500": {
             "description": "A fault on the server's side. Nothing about the cause is revealed.",
             "headers": {
@@ -2459,6 +2519,16 @@
           },
           {
             "$ref": "#/components/parameters/Seq"
+          },
+          {
+            "name": "epoch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{1,64}$"
+            },
+            "description": "The `epoch` the `seq` came from (every page and message carries it). If it is not the inbox's current epoch the request fails with `409 epoch_changed` instead of returning whatever message now has that seq. Leave it out to skip the check."
           }
         ],
         "security": [
@@ -4986,6 +5056,10 @@
           "seq": {
             "type": "integer",
             "description": "the message's seq"
+          },
+          "epoch": {
+            "type": "string",
+            "description": "the epoch of the message's inbox from your earlier result; if it is not the current one the call fails with epoch_changed instead of returning another message that now has this seq. Omit it to skip the check"
           }
         },
         "additionalProperties": false,

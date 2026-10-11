@@ -82,28 +82,13 @@ func (a *streamAPI) StreamMessages(ctx context.Context, request api.StreamMessag
 		return api.StreamMessages500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 	}
 	cursor, ahead := latest, req.After != nil && *req.After > latest
-	var oldest int64
-	var gap bool
 	if req.After != nil {
 		cursor = *req.After
-		if cursor > 0 && !ahead {
-			st, err := s.opts.Store.Stats(ctx, rr.in.ID)
-			if err != nil {
-				cancel()
-				release()
-				switch f := s.classifyRead(ctx, "stream start", err); f.status {
-				case http.StatusNotFound:
-					return api.StreamMessages404JSONResponse{NotFoundJSONResponse: f.notFound(ctx)}, nil
-				}
-				return api.StreamMessages500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
-			}
-			oldest, gap = st.OldestSeq, wire.Gap(cursor, st.OldestSeq, st.LatestSeq)
-		}
 	}
 
 	rr.w.Header().Set("X-Accel-Buffering", "no") // tell nginx-style proxies not to hold events back
 	return api.StreamMessages200TexteventStreamResponse{
-		Body: &sseBody{s: s, ctx: ctx, rr: rr, req: req, cursor: cursor, latest: latest, ahead: ahead, gap: gap, oldest: oldest,
+		Body: &sseBody{s: s, ctx: ctx, rr: rr, req: req, cursor: cursor, latest: latest, ahead: ahead,
 			signal: signal, release: func() { cancel(); release() }},
 		Headers: api.StreamMessages200ResponseHeaders{XRequestId: id},
 	}, nil
@@ -120,8 +105,6 @@ type sseBody struct {
 	cursor  int64
 	latest  int64
 	ahead   bool
-	gap     bool  // messages after the starting cursor were removed
-	oldest  int64 // the lowest seq stored when the stream opened
 	signal  <-chan struct{}
 	release func()
 }
@@ -150,11 +133,6 @@ func (b *sseBody) WriteTo(w io.Writer) (int64, error) {
 
 	if err := s.writeStream(rw, rc, []byte(wire.Retry)); err != nil {
 		return 0, nil
-	}
-	if b.gap {
-		if err := s.writeStream(rw, rc, wire.GapEvent(b.cursor, b.oldest, in.Epoch)); err != nil {
-			return 0, nil
-		}
 	}
 	if b.ahead {
 		// Typical after an inbox is recreated: the client remembers a position the

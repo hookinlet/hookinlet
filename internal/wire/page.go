@@ -35,6 +35,9 @@ type Page struct {
 	// Gap is true when an ascending read started below the oldest message kept:
 	// messages after the cursor were removed before they were read.
 	Gap bool `json:"gap"`
+	// OldestSeq is the lowest seq the Store held when the page was read, or 0. Not
+	// part of the response.
+	OldestSeq int64 `json:"-"`
 
 	// Cursor is the seq to ask for messages after to continue an ascending read.
 	// It is the last message returned, except that when Complete it may jump
@@ -75,7 +78,7 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 	if budget <= 0 {
 		budget = PageBudget
 	}
-	page := &Page{Messages: make([]Message, 0, len(res.Messages)), LatestSeq: res.LatestSeq, Epoch: in.Epoch}
+	page := &Page{Messages: make([]Message, 0, len(res.Messages)), LatestSeq: res.LatestSeq, Epoch: in.Epoch, OldestSeq: res.OldestSeq}
 	page.Gap = q.After != nil && Gap(*q.After, res.OldestSeq, res.LatestSeq)
 	kept := make([]*inbox.Message, 0, len(res.Messages))
 	var used int64
@@ -94,7 +97,12 @@ func FetchPage(ctx context.Context, st inbox.Store, in *inbox.Inbox, req PageReq
 		} else if !req.Summary && m.Body == nil {
 			full, err := st.Get(ctx, in.ID, m.Seq)
 			if errors.Is(err, inbox.ErrNotFound) {
-				continue // pruned since the query ran
+				// Pruned since the query ran. Whoever is reading forward has just
+				// missed it, so say so.
+				if q.Ascending() {
+					page.Gap = true
+				}
+				continue
 			}
 			if err != nil {
 				return nil, fmt.Errorf("wire: load body of seq %d: %w", m.Seq, err)

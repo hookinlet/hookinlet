@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -37,8 +38,12 @@ func (s *Store) Prune(ctx context.Context, now time.Time) (int64, error) {
 		return 0, err
 	}
 	for _, id := range unfinished {
+		// One delete that keeps failing must not stop retention for every inbox.
 		if err := s.finishDelete(ctx, id); err != nil && !errors.Is(err, inbox.ErrNotFound) {
-			return 0, err
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
+			s.log.LogAttrs(ctx, slog.LevelError, "could not finish deleting an inbox; it will be tried again", slog.Int64("inbox_id", int64(id)), slog.String("err", err.Error()))
 		}
 	}
 	policies, err := s.retentionPolicies(ctx)

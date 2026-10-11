@@ -97,7 +97,7 @@ func Seed(ctx context.Context, dir, slug string, rows int) (*inbox.Inbox, error)
 			return nil, fmt.Errorf("seed row %d: %w", i, err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE inboxes SET last_seq = ? WHERE id = ?`, rows, int64(in.ID)); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE inboxes SET last_seq = ?, message_count = ? WHERE id = ?`, rows, rows, int64(in.ID)); err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}

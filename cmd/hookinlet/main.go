@@ -55,6 +55,8 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		return retentionCmd(args[1:], getenv, stdout, stderr)
 	case "apply":
 		return applyCmd(args[1:], getenv, stdout, stderr)
+	case "renew-epochs":
+		return renewEpochsCmd(args[1:], getenv, stdout, stderr)
 	case "backup":
 		return backupCmd(args[1:], getenv, stdout, stderr)
 	case "version":
@@ -80,6 +82,7 @@ Commands:
   token     Manage agent tokens: create, list, revoke
   retention Apply retention policies now (retention run)
   apply     Bring inboxes to the state a YAML file declares (apply -f FILE)
+  renew-epochs  Give every inbox a new epoch, after restoring from a copy (server stopped)
   backup    Write a consistent copy of the database (backup --out FILE)
   version   Print the version
   help      Show this help

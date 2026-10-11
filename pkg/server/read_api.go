@@ -238,8 +238,12 @@ func (a *readAPI) HeadListMessages(ctx context.Context, req api.HeadListMessages
 
 // load reads the seq from the path and loads that message. A seq that cannot be a
 // sequence number is simply a message that does not exist.
-func (a *readAPI) load(ctx context.Context) (*inbox.Message, *readFail) {
+func (a *readAPI) load(ctx context.Context, epoch *string) (*inbox.Message, *readFail) {
 	rr := readFrom(ctx)
+	if err := wire.CheckEpoch(rr.in, stringOf(epoch)); err != nil {
+		f := a.s.classifyRead(ctx, "message", err)
+		return nil, &f
+	}
 	raw := rr.r.PathValue("seq")
 	seq, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || seq < 1 || strconv.FormatInt(seq, 10) != raw {
@@ -253,7 +257,7 @@ func (a *readAPI) load(ctx context.Context) (*inbox.Message, *readFail) {
 	return m, nil
 }
 
-func (a *readAPI) GetMessage(ctx context.Context, _ api.GetMessageRequestObject) (api.GetMessageResponseObject, error) {
+func (a *readAPI) GetMessage(ctx context.Context, req api.GetMessageRequestObject) (api.GetMessageResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -264,13 +268,15 @@ func (a *readAPI) GetMessage(ctx context.Context, _ api.GetMessageRequestObject)
 		return api.GetMessage503JSONResponse{OverloadedJSONResponse: *busy}, nil
 	}
 	defer release()
-	m, f := a.load(ctx)
+	m, f := a.load(ctx, req.Params.Epoch)
 	if f != nil {
 		switch f.status {
 		case http.StatusBadRequest:
 			return api.GetMessage400JSONResponse{BadRequestJSONResponse: f.badRequest(ctx)}, nil
 		case http.StatusNotFound:
 			return api.GetMessage404JSONResponse{NotFoundJSONResponse: f.notFound(ctx)}, nil
+		case http.StatusConflict:
+			return api.GetMessage409JSONResponse{EpochChangedJSONResponse: f.epochChanged(ctx)}, nil
 		}
 		return api.GetMessage500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 	}
@@ -281,7 +287,7 @@ func (a *readAPI) GetMessage(ctx context.Context, _ api.GetMessageRequestObject)
 	}, nil
 }
 
-func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageRequestObject) (api.HeadGetMessageResponseObject, error) {
+func (a *readAPI) HeadGetMessage(ctx context.Context, req api.HeadGetMessageRequestObject) (api.HeadGetMessageResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -292,7 +298,7 @@ func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageReques
 		return api.HeadGetMessage503Response{Headers: api.HeadGetMessage503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
 	}
 	defer release()
-	m, f := a.load(ctx)
+	m, f := a.load(ctx, req.Params.Epoch)
 	id := requestIDOf(ctx)
 	if f != nil {
 		switch f.status {
@@ -300,6 +306,8 @@ func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageReques
 			return api.HeadGetMessage400Response{Headers: api.HeadGetMessage400ResponseHeaders{XRequestId: id}}, nil
 		case http.StatusNotFound:
 			return api.HeadGetMessage404Response{Headers: api.HeadGetMessage404ResponseHeaders{XRequestId: id}}, nil
+		case http.StatusConflict:
+			return api.HeadGetMessage409Response{Headers: api.HeadGetMessage409ResponseHeaders{XRequestId: id}}, nil
 		}
 		return api.HeadGetMessage500Response{Headers: api.HeadGetMessage500ResponseHeaders{XRequestId: id}}, nil
 	}
@@ -318,7 +326,7 @@ func (a *readAPI) HeadGetMessage(ctx context.Context, _ api.HeadGetMessageReques
 // from guessing a more dangerous type, the sandbox policy neutralizes any script
 // in HTML or SVG that does get rendered, and attachment tells it to save the file
 // instead. None of this changes the body or the Content-Type.
-func (a *readAPI) GetMessageRaw(ctx context.Context, _ api.GetMessageRawRequestObject) (api.GetMessageRawResponseObject, error) {
+func (a *readAPI) GetMessageRaw(ctx context.Context, req api.GetMessageRawRequestObject) (api.GetMessageRawResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -329,13 +337,15 @@ func (a *readAPI) GetMessageRaw(ctx context.Context, _ api.GetMessageRawRequestO
 		return api.GetMessageRaw503JSONResponse{OverloadedJSONResponse: *busy}, nil
 	}
 	defer release()
-	m, f := a.load(ctx)
+	m, f := a.load(ctx, req.Params.Epoch)
 	if f != nil {
 		switch f.status {
 		case http.StatusBadRequest:
 			return api.GetMessageRaw400JSONResponse{BadRequestJSONResponse: f.badRequest(ctx)}, nil
 		case http.StatusNotFound:
 			return api.GetMessageRaw404JSONResponse{NotFoundJSONResponse: f.notFound(ctx)}, nil
+		case http.StatusConflict:
+			return api.GetMessageRaw409JSONResponse{EpochChangedJSONResponse: f.epochChanged(ctx)}, nil
 		}
 		return api.GetMessageRaw500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 	}
@@ -350,7 +360,7 @@ func (a *readAPI) GetMessageRaw(ctx context.Context, _ api.GetMessageRawRequestO
 	}, nil
 }
 
-func (a *readAPI) HeadGetMessageRaw(ctx context.Context, _ api.HeadGetMessageRawRequestObject) (api.HeadGetMessageRawResponseObject, error) {
+func (a *readAPI) HeadGetMessageRaw(ctx context.Context, req api.HeadGetMessageRawRequestObject) (api.HeadGetMessageRawResponseObject, error) {
 	// Only authenticated, authorized requests take a slot, so anonymous traffic
 	// cannot starve real readers.
 	release, busy, err := a.slot(ctx)
@@ -361,7 +371,7 @@ func (a *readAPI) HeadGetMessageRaw(ctx context.Context, _ api.HeadGetMessageRaw
 		return api.HeadGetMessageRaw503Response{Headers: api.HeadGetMessageRaw503ResponseHeaders{RetryAfter: "1", XRequestId: requestIDOf(ctx)}}, nil
 	}
 	defer release()
-	m, f := a.load(ctx)
+	m, f := a.load(ctx, req.Params.Epoch)
 	id := requestIDOf(ctx)
 	if f != nil {
 		switch f.status {
@@ -369,6 +379,8 @@ func (a *readAPI) HeadGetMessageRaw(ctx context.Context, _ api.HeadGetMessageRaw
 			return api.HeadGetMessageRaw400Response{Headers: api.HeadGetMessageRaw400ResponseHeaders{XRequestId: id}}, nil
 		case http.StatusNotFound:
 			return api.HeadGetMessageRaw404Response{Headers: api.HeadGetMessageRaw404ResponseHeaders{XRequestId: id}}, nil
+		case http.StatusConflict:
+			return api.HeadGetMessageRaw409Response{Headers: api.HeadGetMessageRaw409ResponseHeaders{XRequestId: id}}, nil
 		}
 		return api.HeadGetMessageRaw500Response{Headers: api.HeadGetMessageRaw500ResponseHeaders{XRequestId: id}}, nil
 	}
