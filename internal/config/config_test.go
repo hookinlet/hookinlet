@@ -273,6 +273,8 @@ func TestAdminTokenMustBeStrong(t *testing.T) {
 		"with a unicode space": strings.Repeat("a", 20) + "\u00a0" + strings.Repeat("b", 20),
 		"with a control byte":  strings.Repeat("a", 40) + "\x01",
 		"short sentinel":       sentinel,
+		"one letter repeated":  strings.Repeat("a", 64),
+		"a word repeated":      strings.Repeat("password", 8),
 	} {
 		e := validEnv()
 		e["HOOKINLET_ADMIN_TOKEN"] = tok
@@ -286,7 +288,7 @@ func TestAdminTokenMustBeStrong(t *testing.T) {
 		}
 	}
 	for name, tok := range map[string]string{
-		"exactly 32":       strings.Repeat("a", 32),
+		"exactly 32":       "abcdefghijklmnopqrstuvwxyz012345",
 		"openssl base64":   "dGhpcyBpcyBhIGxvbmcgcmFuZG9tIHRva2VuIQ==" + "AAAA",
 		"with punctuation": "correct-horse_battery.staple/0123456789+=",
 	} {

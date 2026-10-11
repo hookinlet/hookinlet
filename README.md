@@ -62,7 +62,7 @@ curl -sf localhost:8080/readyz      # {"status":"ready"}; if this fails, somethi
 
 Create an inbox that accepts only GitHub's signature, for a secret you choose. (This one is made up; a real one
 belongs in a file or a password manager, never in a command line.) The response carries the **agent token** that
-reads this inbox. It is shown once. The response also carries the **ingest path**, the URL senders post to. Its last part is a
+reads this inbox. It is shown once (more tokens, for several inboxes or all, are issued with `hookinlet token create`, and a token is replaced by issuing the new one and revoking the old). The response also carries the **ingest path**, the URL senders post to. Its last part is a
 random key, not the slug: whoever has it can post to the inbox, so it is not a name anyone can guess ([why](docs/admin.md#why-the-ingest-url-is-not-the-slug)). (The admin API shows it
 again whenever you ask.)
 

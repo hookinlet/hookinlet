@@ -6,6 +6,8 @@ package admin_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -75,10 +77,6 @@ func TestEditsAreRetriedWhenAnotherProcessGotThereFirst(t *testing.T) {
 			_, err := svc.SetSecret(t.Context(), "retry-inbox", "a-secret")
 			return err
 		},
-		"rotate token": func(svc *admin.Service) error {
-			_, err := svc.RotateToken(t.Context(), "retry-inbox")
-			return err
-		},
 	}
 	for name, do := range cases {
 		svc, st, real := newService(t, 2)
@@ -91,7 +89,7 @@ func TestEditsAreRetriedWhenAnotherProcessGotThereFirst(t *testing.T) {
 			t.Errorf("%s: %d update attempts, want 3 (two stale, one good)", name, got)
 		}
 		after, _ := real.GetInboxBySlug(t.Context(), "retry-inbox")
-		if after.Name == before.Name && name != "update" && len(after.VerifierSecret) == len(before.VerifierSecret) && string(after.AgentTokenHash) == string(before.AgentTokenHash) {
+		if after.Name == before.Name && name != "update" && len(after.VerifierSecret) == len(before.VerifierSecret) {
 			t.Errorf("%s: nothing changed", name)
 		}
 		// The other process's edits are still there.
@@ -116,21 +114,86 @@ func TestEditsGiveUpWhenTheInboxKeepsChanging(t *testing.T) {
 	}
 }
 
-func TestRotatedTokensAreNeverReusedOrReturnedTwice(t *testing.T) {
+func TestIssuedTokensAreNeverReusedAndCanBeListedAndRevoked(t *testing.T) {
 	svc, _, real := newService(t, 0)
+	ctx := t.Context()
 	seen := map[string]bool{}
-	for range 5 {
-		c, err := svc.RotateToken(t.Context(), "retry-inbox")
+	var ids []int64
+	// The inbox came with its default token.
+	if first, _, err := svc.ListTokens(ctx, 0, 0, ""); err != nil || len(first) != 1 || first[0].Name != admin.DefaultTokenName {
+		t.Fatalf("tokens at the start: %+v, %v", first, err)
+	}
+	for i := range 5 {
+		c, err := svc.CreateToken(ctx, admin.TokenParams{Name: fmt.Sprintf("t%d", i), Inboxes: []string{"retry-inbox"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if seen[c.AgentToken] {
+		if seen[c.Token] {
 			t.Fatal("a token was issued twice")
 		}
-		seen[c.AgentToken] = true
-		in, _ := real.GetInboxBySlug(t.Context(), "retry-inbox")
-		if !token.Equal(c.AgentToken, in.AgentTokenHash) {
-			t.Error("the issued token is not the stored one")
+		seen[c.Token] = true
+		ids = append(ids, c.Record.ID)
+		stored, err := real.GetTokenByHash(ctx, token.Hash(c.Token))
+		if err != nil || int64(stored.ID) != c.Record.ID {
+			t.Errorf("the issued token is not the stored one: %v", err)
+		}
+		if !reflect.DeepEqual(c.Record.Inboxes, []string{"retry-inbox"}) || c.Record.AllInboxes {
+			t.Errorf("record = %+v", c.Record)
+		}
+	}
+	all, err := svc.CreateToken(ctx, admin.TokenParams{Name: "everything", AllInboxes: true})
+	if err != nil || !all.Record.AllInboxes || len(all.Record.Inboxes) != 0 {
+		t.Fatalf("all-inboxes token: %+v, %v", all, err)
+	}
+
+	// Paging, and the filter by inbox.
+	page, next, err := svc.ListTokens(ctx, 0, 4, "")
+	if err != nil || len(page) != 4 || next == 0 {
+		t.Fatalf("first page: %d tokens, next %d, %v", len(page), next, err)
+	}
+	rest, next, err := svc.ListTokens(ctx, next, 4, "")
+	if err != nil || len(rest) != 3 || next != 0 {
+		t.Fatalf("second page: %d tokens, next %d, %v", len(rest), next, err)
+	}
+	if forInbox, _, err := svc.ListTokens(ctx, 0, 0, "retry-inbox"); err != nil || len(forInbox) != 7 {
+		t.Errorf("tokens for the inbox: %d, %v; want its 6 and the all-inboxes one", len(forInbox), err)
+	}
+	if _, _, err := svc.ListTokens(ctx, 0, 0, "no-such-inbox"); !errors.Is(err, inbox.ErrNotFound) {
+		t.Errorf("an unknown inbox: %v", err)
+	}
+
+	// Revoking one leaves the others.
+	if err := svc.RevokeToken(ctx, inbox.TokenID(ids[0])); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RevokeToken(ctx, inbox.TokenID(ids[0])); !errors.Is(err, inbox.ErrNotFound) {
+		t.Errorf("revoking twice: %v", err)
+	}
+	if left, _, _ := svc.ListTokens(ctx, 0, 0, ""); len(left) != 6 {
+		t.Errorf("%d tokens left, want 6", len(left))
+	}
+}
+
+func TestTokenRequestsAreChecked(t *testing.T) {
+	svc, _, _ := newService(t, 0)
+	many := make([]string, inbox.MaxTokenInboxes+1)
+	for i := range many {
+		many[i] = "retry-inbox"
+	}
+	for name, tc := range map[string]struct {
+		p    admin.TokenParams
+		want error
+	}{
+		"neither inboxes nor all": {admin.TokenParams{Name: "x"}, inbox.ErrInvalid},
+		"both inboxes and all":    {admin.TokenParams{Name: "x", Inboxes: []string{"retry-inbox"}, AllInboxes: true}, inbox.ErrInvalid},
+		"no name":                 {admin.TokenParams{Inboxes: []string{"retry-inbox"}}, inbox.ErrInvalid},
+		"a name that is too long": {admin.TokenParams{Name: strings.Repeat("n", 101), AllInboxes: true}, inbox.ErrInvalid},
+		"too many inboxes":        {admin.TokenParams{Name: "x", Inboxes: many}, inbox.ErrInvalid},
+		"an inbox twice":          {admin.TokenParams{Name: "x", Inboxes: []string{"retry-inbox", "retry-inbox"}}, inbox.ErrInvalid},
+		"an unknown inbox":        {admin.TokenParams{Name: "x", Inboxes: []string{"nope"}}, inbox.ErrNotFound},
+	} {
+		if _, err := svc.CreateToken(t.Context(), tc.p); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v, want %v", name, err, tc.want)
 		}
 	}
 }

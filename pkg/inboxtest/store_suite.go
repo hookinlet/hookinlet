@@ -42,7 +42,8 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"InboxSecretsAreRedacted", testInboxSecretsRedacted},
 		{"UpdateInbox", testUpdateInbox},
 		{"UpdateInboxVersioning", testUpdateVersioning},
-		{"TokenHashLookup", testTokenHashLookup},
+		{"Tokens", testTokens},
+		{"TokensOfADeletedInbox", testTokensOfADeletedInbox},
 		{"DeleteInbox", testDeleteInbox},
 		{"ListInboxes", testListInboxes},
 		{"Ping", testPing},
@@ -95,11 +96,10 @@ func tokenHash(label string) []byte {
 
 func mkInbox(slug string, mods ...func(*inbox.Inbox)) *inbox.Inbox {
 	in := &inbox.Inbox{
-		Slug:           slug,
-		IngestKey:      slug,
-		Name:           "Inbox " + slug,
-		Verifier:       "none",
-		AgentTokenHash: tokenHash("token-for-" + slug),
+		Slug:      slug,
+		IngestKey: slug,
+		Name:      "Inbox " + slug,
+		Verifier:  "none",
 	}
 	for _, m := range mods {
 		m(in)
@@ -224,7 +224,7 @@ func sameInbox(t *testing.T, what string, got, want *inbox.Inbox) {
 	ok := got.ID == want.ID && got.Slug == want.Slug && got.Name == want.Name && got.Version == want.Version &&
 		got.Verifier == want.Verifier && jsonEqual(got.VerifierConfig, want.VerifierConfig) &&
 		bytes.Equal(got.VerifierSecret, want.VerifierSecret) && got.OnVerifyFail == want.OnVerifyFail &&
-		bytes.Equal(got.AgentTokenHash, want.AgentTokenHash) && got.MaxBodyBytes == want.MaxBodyBytes &&
+		got.IngestKey == want.IngestKey && got.MaxBodyBytes == want.MaxBodyBytes &&
 		got.RetentionDays == want.RetentionDays && got.RetentionMaxCount == want.RetentionMaxCount &&
 		got.EventTypePointer == want.EventTypePointer && got.LastSeq == want.LastSeq &&
 		got.Disabled == want.Disabled && got.CreatedAt.Equal(want.CreatedAt) && got.UpdatedAt.Equal(want.UpdatedAt)
@@ -290,13 +290,9 @@ func testCreateInbox(t *testing.T, s inbox.Store, clk *Clock) {
 		t.Errorf("defaults not applied: %#v", *d)
 	}
 
-	// A taken slug or token hash conflicts, and distinct inboxes get distinct ids.
-	isErr(t, "duplicate slug", s.CreateInbox(ctx, mkInbox("alpha", func(in *inbox.Inbox) {
-		in.AgentTokenHash = tokenHash("different")
-	})), inbox.ErrConflict)
-	isErr(t, "duplicate token hash", s.CreateInbox(ctx, mkInbox("bravo", func(in *inbox.Inbox) {
-		in.AgentTokenHash = tokenHash("token-for-alpha")
-	})), inbox.ErrConflict)
+	// A taken slug conflicts, and distinct inboxes get distinct ids.
+	isErr(t, "duplicate slug", s.CreateInbox(ctx, mkInbox("alpha", func(in *inbox.Inbox) { in.IngestKey = "different-key" })), inbox.ErrConflict)
+	isErr(t, "duplicate ingest key", s.CreateInbox(ctx, mkInbox("bravo", func(in *inbox.Inbox) { in.IngestKey = "alpha" })), inbox.ErrConflict)
 	if _, err := s.GetInboxBySlug(ctx, "bravo"); !errors.Is(err, inbox.ErrNotFound) {
 		t.Errorf("a conflicting create left an inbox behind: %v", err)
 	}
@@ -382,7 +378,6 @@ func testCreateInboxValidation(t *testing.T, s inbox.Store, _ *Clock) {
 		"verifier uppercase":   func(in *inbox.Inbox) { in.Verifier = "Stripe" },
 		"verifier with space":  func(in *inbox.Inbox) { in.Verifier = "my verifier" },
 		"bad on_verify_fail":   func(in *inbox.Inbox) { in.OnVerifyFail = "ignore" },
-		"missing token hash":   func(in *inbox.Inbox) { in.AgentTokenHash = nil },
 		"config not json":      func(in *inbox.Inbox) { in.VerifierConfig = json.RawMessage(`{nope`) },
 		"config not object":    func(in *inbox.Inbox) { in.VerifierConfig = json.RawMessage(`[1,2]`) },
 		"config null":          func(in *inbox.Inbox) { in.VerifierConfig = json.RawMessage(`null`) },
@@ -419,19 +414,17 @@ func testInboxAliasing(t *testing.T, s inbox.Store, _ *Clock) {
 		in.VerifierSecret = []byte("secret")
 		in.VerifierConfig = json.RawMessage(`{"a":1}`)
 	})
-	hash := bytes.Clone(in.AgentTokenHash)
 	first, err := s.GetInbox(ctx, in.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	first.VerifierSecret[0] = 'X'
-	first.AgentTokenHash[0] ^= 0xff
 	first.VerifierConfig[0] = '['
 	second, err := s.GetInbox(ctx, in.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(second.VerifierSecret) != "secret" || !bytes.Equal(second.AgentTokenHash, hash) ||
+	if string(second.VerifierSecret) != "secret" ||
 		!jsonEqual(second.VerifierConfig, json.RawMessage(`{"a":1}`)) {
 		t.Error("mutating a returned inbox changed the stored one")
 	}
@@ -454,9 +447,9 @@ func testInboxSecretsRedacted(t *testing.T, s inbox.Store, _ *Clock) {
 		"%v":     fmt.Sprintf("%v", got),
 		"%+v":    fmt.Sprintf("%+v", *got),
 		"%#v":    fmt.Sprintf("%#v", *got),
-		"fields": fmt.Sprint(got.VerifierSecret, got.AgentTokenHash),
+		"fields": fmt.Sprint(got.VerifierSecret),
 	} {
-		if strings.Contains(out, "sealed-secret-marker") || strings.Contains(out, string(got.AgentTokenHash)) {
+		if strings.Contains(out, "sealed-secret-marker") {
 			t.Errorf("%s output leaks a secret: %s", what, out)
 		}
 		if strings.Contains(out, fmt.Sprintf("%d", []byte("sealed-secret-marker"))) {
@@ -468,7 +461,6 @@ func testInboxSecretsRedacted(t *testing.T, s inbox.Store, _ *Clock) {
 func testUpdateInbox(t *testing.T, s inbox.Store, clk *Clock) {
 	ctx := t.Context()
 	in := createInbox(t, s, "update-me")
-	other := createInbox(t, s, "other-inbox")
 	appendN(t, s, in.ID, 3, nil)
 	created := in.CreatedAt
 
@@ -482,7 +474,6 @@ func testUpdateInbox(t *testing.T, s inbox.Store, clk *Clock) {
 	upd.VerifierConfig = json.RawMessage(`{"header":"X-Hub"}`)
 	upd.VerifierSecret = []byte("new-sealed-secret")
 	upd.OnVerifyFail = inbox.OnVerifyFailStore
-	upd.AgentTokenHash = tokenHash("rotated")
 	upd.MaxBodyBytes = 2048
 	upd.RetentionDays = 30
 	upd.RetentionMaxCount = 500
@@ -506,7 +497,6 @@ func testUpdateInbox(t *testing.T, s inbox.Store, clk *Clock) {
 	if got.Name != "Renamed" || got.Verifier != "hmac" || string(got.VerifierSecret) != "new-sealed-secret" ||
 		got.OnVerifyFail != inbox.OnVerifyFailStore || got.MaxBodyBytes != 2048 || got.RetentionDays != 30 ||
 		got.RetentionMaxCount != 500 || got.EventTypePointer != "/event/type" || !got.Disabled ||
-		!bytes.Equal(got.AgentTokenHash, tokenHash("rotated")) ||
 		!jsonEqual(got.VerifierConfig, json.RawMessage(`{"header":"X-Hub"}`)) {
 		t.Errorf("mutable fields not updated: %#v", *got)
 	}
@@ -529,11 +519,6 @@ func testUpdateInbox(t *testing.T, s inbox.Store, clk *Clock) {
 		t.Errorf("rejected update changed the inbox: %#v", *after)
 	}
 
-	// Taking another inbox's token hash conflicts.
-	steal := *got
-	steal.AgentTokenHash = other.AgentTokenHash
-	isErr(t, "token hash taken", s.UpdateInbox(ctx, &steal), inbox.ErrConflict)
-
 	gone := *got
 	gone.ID += 1000
 	isErr(t, "update missing", s.UpdateInbox(ctx, &gone), inbox.ErrNotFound)
@@ -546,20 +531,20 @@ func testUpdateVersioning(t *testing.T, s inbox.Store, _ *Clock) {
 	// Two admins read the same version; the second to write must lose.
 	adminA, adminB := *in, *in
 	adminA.Name = "from admin A"
-	adminB.AgentTokenHash = tokenHash("rotated-by-B")
+	adminB.Name = "from admin B"
 	if err := s.UpdateInbox(ctx, &adminA); err != nil {
 		t.Fatal(err)
 	}
 	isErr(t, "stale update", s.UpdateInbox(ctx, &adminB), inbox.ErrConflict)
 
 	got, _ := s.GetInbox(ctx, in.ID)
-	if got.Name != "from admin A" || !bytes.Equal(got.AgentTokenHash, in.AgentTokenHash) || got.Version != 2 {
+	if got.Name != "from admin A" || got.Version != 2 {
 		t.Errorf("the losing update leaked through: %#v", *got)
 	}
 
 	// Re-reading and retrying succeeds, and versions keep counting.
 	adminB = *got
-	adminB.AgentTokenHash = tokenHash("rotated-by-B")
+	adminB.Name = "from admin B"
 	if err := s.UpdateInbox(ctx, &adminB); err != nil {
 		t.Fatal(err)
 	}
@@ -599,48 +584,6 @@ func testUpdateVersioning(t *testing.T, s inbox.Store, _ *Clock) {
 	if wins != 1 {
 		t.Errorf("%d concurrent updates from the same version succeeded, want exactly 1", wins)
 	}
-}
-
-func testTokenHashLookup(t *testing.T, s inbox.Store, _ *Clock) {
-	ctx := t.Context()
-	a := createInbox(t, s, "tok-a")
-	b := createInbox(t, s, "tok-b")
-
-	got, err := s.GetInboxByTokenHash(ctx, a.AgentTokenHash)
-	if err != nil || got.ID != a.ID {
-		t.Fatalf("lookup of a's hash: %v, %v", got, err)
-	}
-	if got, err := s.GetInboxByTokenHash(ctx, b.AgentTokenHash); err != nil || got.ID != b.ID {
-		t.Fatalf("lookup of b's hash: %v, %v", got, err)
-	}
-	for name, h := range map[string][]byte{
-		"unknown": tokenHash("nobody"),
-		"nil":     nil,
-		"empty":   {},
-		"prefix":  a.AgentTokenHash[:16],
-	} {
-		_, err := s.GetInboxByTokenHash(ctx, h)
-		isErr(t, name, err, inbox.ErrNotFound)
-	}
-
-	// After rotation the old hash stops working and the new one starts.
-	rotated := *a
-	rotated.AgentTokenHash = tokenHash("a-rotated")
-	if err := s.UpdateInbox(ctx, &rotated); err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.GetInboxByTokenHash(ctx, a.AgentTokenHash)
-	isErr(t, "old hash after rotation", err, inbox.ErrNotFound)
-	if got, err := s.GetInboxByTokenHash(ctx, tokenHash("a-rotated")); err != nil || got.ID != a.ID {
-		t.Errorf("new hash after rotation: %v, %v", got, err)
-	}
-
-	// Deleting the inbox frees the hash.
-	if err := s.DeleteInbox(ctx, b.ID); err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.GetInboxByTokenHash(ctx, b.AgentTokenHash)
-	isErr(t, "hash after delete", err, inbox.ErrNotFound)
 }
 
 func testDeleteInbox(t *testing.T, s inbox.Store, _ *Clock) {
@@ -1183,16 +1126,17 @@ func testCancelledContext(t *testing.T, s inbox.Store, _ *Clock) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := map[string]func() error{
-		"CreateInbox":         func() error { return s.CreateInbox(ctx, mkInbox("never-created")) },
-		"UpdateInbox":         func() error { u := *in; u.Name = "never"; return s.UpdateInbox(ctx, &u) },
-		"Append":              func() error { _, _, err := s.Append(ctx, in.ID, nm()); return err },
-		"Query":               func() error { _, err := s.Query(ctx, in.ID, inbox.Query{}); return err },
-		"Get":                 func() error { _, err := s.Get(ctx, in.ID, 1); return err },
-		"LatestSeq":           func() error { _, err := s.LatestSeq(ctx, in.ID); return err },
-		"Stats":               func() error { _, err := s.Stats(ctx, in.ID); return err },
-		"GetInboxByTokenHash": func() error { _, err := s.GetInboxByTokenHash(ctx, in.AgentTokenHash); return err },
-		"Prune":               func() error { _, err := s.Prune(ctx, baseTime); return err },
-		"Ping":                func() error { return s.Ping(ctx) },
+		"CreateInbox":    func() error { return s.CreateInbox(ctx, mkInbox("never-created")) },
+		"UpdateInbox":    func() error { u := *in; u.Name = "never"; return s.UpdateInbox(ctx, &u) },
+		"Append":         func() error { _, _, err := s.Append(ctx, in.ID, nm()); return err },
+		"Query":          func() error { _, err := s.Query(ctx, in.ID, inbox.Query{}); return err },
+		"Get":            func() error { _, err := s.Get(ctx, in.ID, 1); return err },
+		"LatestSeq":      func() error { _, err := s.LatestSeq(ctx, in.ID); return err },
+		"Stats":          func() error { _, err := s.Stats(ctx, in.ID); return err },
+		"GetTokenByHash": func() error { _, err := s.GetTokenByHash(ctx, tokenHash("x")); return err },
+		"ListTokens":     func() error { _, err := s.ListTokens(ctx, inbox.TokenListParams{}); return err },
+		"Prune":          func() error { _, err := s.Prune(ctx, baseTime); return err },
+		"Ping":           func() error { return s.Ping(ctx) },
 	}
 	for name, call := range calls {
 		isErr(t, name, call(), context.Canceled)
@@ -1206,5 +1150,119 @@ func testCancelledContext(t *testing.T, s inbox.Store, _ *Clock) {
 	}
 	if got, _ := s.GetInbox(t.Context(), in.ID); got.Name == "never" || got.Version != 1 {
 		t.Errorf("a cancelled UpdateInbox changed the inbox: %#v", *got)
+	}
+}
+
+func mkToken(label string, mods ...func(*inbox.Token)) *inbox.Token {
+	t := &inbox.Token{Name: label, Hash: tokenHash(label), AllInboxes: true}
+	for _, m := range mods {
+		m(t)
+	}
+	return t
+}
+
+func scoped(ids ...inbox.ID) func(*inbox.Token) {
+	return func(t *inbox.Token) { t.AllInboxes, t.InboxIDs = false, ids }
+}
+
+func testTokens(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	a := createInbox(t, s, "tok-a")
+	b := createInbox(t, s, "tok-b")
+
+	one := mkToken("one", scoped(a.ID))
+	multi := mkToken("multi", scoped(b.ID, a.ID))
+	every := mkToken("every")
+	for _, tk := range []*inbox.Token{one, multi, every} {
+		if err := s.CreateToken(ctx, tk); err != nil {
+			t.Fatalf("CreateToken %s: %v", tk.Name, err)
+		}
+		if tk.ID == 0 || tk.CreatedAt.IsZero() {
+			t.Errorf("CreateToken %s left id/created unset: %+v", tk.Name, tk)
+		}
+	}
+
+	got, err := s.GetTokenByHash(ctx, tokenHash("multi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != multi.ID || got.Name != "multi" || got.AllInboxes || len(got.InboxIDs) != 2 ||
+		got.InboxIDs[0] > got.InboxIDs[1] || !bytes.Equal(got.Hash, tokenHash("multi")) {
+		t.Errorf("GetTokenByHash(multi) = %+v", got)
+	}
+	if got, err := s.GetTokenByHash(ctx, tokenHash("every")); err != nil || !got.AllInboxes || len(got.InboxIDs) != 0 {
+		t.Errorf("GetTokenByHash(every) = %+v, %v", got, err)
+	}
+	_, err = s.GetTokenByHash(ctx, tokenHash("nobody"))
+	isErr(t, "unknown hash", err, inbox.ErrNotFound)
+
+	// Invalid tokens, an unknown inbox and a taken hash.
+	isErr(t, "invalid", s.CreateToken(ctx, mkToken("bad", func(t *inbox.Token) { t.Name = "" })), inbox.ErrInvalid)
+	isErr(t, "unknown inbox", s.CreateToken(ctx, mkToken("ghost", scoped(a.ID, 999999))), inbox.ErrNotFound)
+	isErr(t, "taken hash", s.CreateToken(ctx, mkToken("dup", func(t *inbox.Token) { t.Hash = tokenHash("one") })), inbox.ErrConflict)
+	if _, err := s.GetTokenByHash(ctx, tokenHash("ghost")); !errors.Is(err, inbox.ErrNotFound) {
+		t.Errorf("a refused token was stored: %v", err)
+	}
+
+	// Listing: by id, paged, and filtered to the tokens that can reach an inbox.
+	names := func(p inbox.TokenListParams) []string {
+		tks, err := s.ListTokens(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, tk := range tks {
+			out = append(out, tk.Name)
+		}
+		return out
+	}
+	if got := names(inbox.TokenListParams{}); !reflect.DeepEqual(got, []string{"one", "multi", "every"}) {
+		t.Errorf("ListTokens = %v", got)
+	}
+	if got := names(inbox.TokenListParams{AfterID: one.ID, Limit: 1}); !reflect.DeepEqual(got, []string{"multi"}) {
+		t.Errorf("ListTokens page = %v", got)
+	}
+	if got := names(inbox.TokenListParams{InboxID: a.ID}); !reflect.DeepEqual(got, []string{"one", "multi", "every"}) {
+		t.Errorf("ListTokens for a = %v", got)
+	}
+	if got := names(inbox.TokenListParams{InboxID: b.ID}); !reflect.DeepEqual(got, []string{"multi", "every"}) {
+		t.Errorf("ListTokens for b = %v", got)
+	}
+
+	// Deleting a token revokes it, and frees its hash.
+	if err := s.DeleteToken(ctx, one.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.GetTokenByHash(ctx, tokenHash("one"))
+	isErr(t, "revoked", err, inbox.ErrNotFound)
+	isErr(t, "second revoke", s.DeleteToken(ctx, one.ID), inbox.ErrNotFound)
+	if err := s.CreateToken(ctx, mkToken("one", scoped(b.ID))); err != nil {
+		t.Errorf("a revoked token's hash was not freed: %v", err)
+	}
+}
+
+func testTokensOfADeletedInbox(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	a := createInbox(t, s, "gone-a")
+	b := createInbox(t, s, "gone-b")
+	for _, tk := range []*inbox.Token{
+		mkToken("only-a", scoped(a.ID)),
+		mkToken("a-and-b", scoped(a.ID, b.ID)),
+		mkToken("everything"),
+	} {
+		if err := s.CreateToken(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteInbox(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.GetTokenByHash(ctx, tokenHash("only-a"))
+	isErr(t, "token scoped to the deleted inbox only", err, inbox.ErrNotFound)
+	if got, err := s.GetTokenByHash(ctx, tokenHash("a-and-b")); err != nil || got.AllInboxes || len(got.InboxIDs) != 1 || got.InboxIDs[0] != b.ID {
+		t.Errorf("a-and-b = %+v, %v; want it narrowed to b", got, err)
+	}
+	if got, err := s.GetTokenByHash(ctx, tokenHash("everything")); err != nil || !got.AllInboxes {
+		t.Errorf("an all-inboxes token was disturbed: %+v, %v", got, err)
 	}
 }

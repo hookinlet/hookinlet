@@ -23,7 +23,7 @@ func newStore(t *testing.T) (*sqlite.Store, *inbox.Inbox) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	in := &inbox.Inbox{Slug: "wire-test", IngestKey: "wire-test", Name: "wire", Verifier: "github", AgentTokenHash: []byte("hash-for-wire-test")}
+	in := &inbox.Inbox{Slug: "wire-test", IngestKey: "wire-test", Name: "wire", Verifier: "github"}
 	if err := s.CreateInbox(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}

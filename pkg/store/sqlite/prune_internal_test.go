@@ -21,7 +21,7 @@ func internalStore(t *testing.T) (*Store, *inbox.Inbox) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	in := &inbox.Inbox{Slug: "batching", IngestKey: "batching", Name: "b", Verifier: "none", AgentTokenHash: []byte("hash-batching-0123")}
+	in := &inbox.Inbox{Slug: "batching", IngestKey: "batching", Name: "b", Verifier: "none"}
 	if err := s.CreateInbox(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +107,9 @@ func TestAHugeRetentionInTheDatabaseDeletesNothing(t *testing.T) {
 
 func TestAnInboxIsClosedToAgentsAndIngestBeforeItsMessagesGo(t *testing.T) {
 	s, in := internalStore(t)
+	if err := s.CreateToken(t.Context(), &inbox.Token{Name: "t", Hash: bytes.Repeat([]byte{7}, 32), InboxIDs: []inbox.ID{in.ID}}); err != nil {
+		t.Fatal(err)
+	}
 	for range 600 {
 		if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("x"), Verified: true}); err != nil {
 			t.Fatal(err)
@@ -127,12 +130,19 @@ func TestAnInboxIsClosedToAgentsAndIngestBeforeItsMessagesGo(t *testing.T) {
 
 	// Run the first step alone, as an interrupted delete would leave things.
 	if err := s.writeTx(t.Context(), func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(t.Context(), `UPDATE inboxes SET disabled = 1, agent_token_hash = randomblob(32) WHERE id = ?`, int64(in.ID))
+		_, err := tx.ExecContext(t.Context(), `UPDATE inboxes SET disabled = 1 WHERE id = ?`, int64(in.ID))
+		if err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(t.Context(), `DELETE FROM token_inboxes WHERE inbox_id = ?`, int64(in.ID)); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(t.Context(), `DELETE FROM tokens WHERE all_inboxes = 0 AND id NOT IN (SELECT token_id FROM token_inboxes)`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetInboxByTokenHash(t.Context(), in.AgentTokenHash); err == nil {
+	if _, err := s.GetTokenByHash(t.Context(), bytes.Repeat([]byte{7}, 32)); err == nil {
 		t.Error("the old token still resolves once the inbox is closed")
 	}
 	// Deleting again finishes the job.
@@ -148,5 +158,28 @@ func TestAnInboxIsClosedToAgentsAndIngestBeforeItsMessagesGo(t *testing.T) {
 	}
 	if err := s.DeleteInbox(t.Context(), in.ID); err == nil {
 		t.Error("deleting a deleted inbox succeeded")
+	}
+}
+
+// A token issued while a delete is between its steps (the inbox row is still
+// there) must not outlive the inbox as a token that reads nothing.
+func TestATokenIssuedMidDeleteDoesNotOutliveTheInbox(t *testing.T) {
+	s, in := internalStore(t)
+	// The first step alone, as an interrupted delete leaves things.
+	if err := s.writeTx(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(t.Context(), `UPDATE inboxes SET disabled = 1 WHERE id = ?`, int64(in.ID))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hash := bytes.Repeat([]byte{9}, 32)
+	if err := s.CreateToken(t.Context(), &inbox.Token{Name: "late", Hash: hash, InboxIDs: []inbox.ID{in.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteInbox(t.Context(), in.ID); err != nil {
+		t.Fatal(err)
+	}
+	if tk, err := s.GetTokenByHash(t.Context(), hash); err == nil {
+		t.Errorf("a token with no inbox survived: %+v", tk)
 	}
 }

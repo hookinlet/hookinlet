@@ -18,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
 )
@@ -613,7 +614,7 @@ func TestShutdownReleasesPendingWaits(t *testing.T) {
 	}
 }
 
-func TestWaitEndsWhenTheTokenIsRotated(t *testing.T) {
+func TestWaitEndsWhenTheTokenIsRevoked(t *testing.T) {
 	ae, base, _ := mcpEnv(t, func(o *Options) { o.StreamRevalidateInterval = 200 * time.Millisecond })
 	cs := connectMCP(t, base, ae.tokenA)
 	done := make(chan toolOut, 1)
@@ -621,7 +622,13 @@ func TestWaitEndsWhenTheTokenIsRotated(t *testing.T) {
 		done <- callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 0, "timeout_seconds": 60})
 	}()
 	time.Sleep(300 * time.Millisecond)
-	ae.tokenFor(ae.a) // the old token no longer works
+	rec, err := ae.store.GetTokenByHash(t.Context(), token.Hash(ae.tokenA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ae.store.DeleteToken(t.Context(), rec.ID); err != nil { // the token no longer works
+		t.Fatal(err)
+	}
 	select {
 	case o := <-done:
 		if o.err != "not found" {

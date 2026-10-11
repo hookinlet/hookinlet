@@ -19,7 +19,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `SecretBox` | Seals and opens verifier secrets. | `pkg/secretbox` | `SecretBoxSuite` |
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /admin/backup`. | the SQLite store | `BackupperSuite` |
-| `SingleInboxPrincipal` (optional) | A `Principal` that can read exactly one inbox, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
+| `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they

@@ -440,6 +440,18 @@ type CreateInbox struct {
 // CreateInboxOnVerifyFail defines model for CreateInbox.OnVerifyFail.
 type CreateInboxOnVerifyFail string
 
+// CreateToken defines model for CreateToken.
+type CreateToken struct {
+	// AllInboxes Read every inbox. Give this or `inboxes`.
+	AllInboxes *bool `json:"all_inboxes,omitempty"`
+
+	// Inboxes Slugs of the inboxes the token may read. Give this or `all_inboxes`.
+	Inboxes *[]string `json:"inboxes,omitempty"`
+
+	// Name For people to tell tokens apart by. Not a secret and not unique.
+	Name string `json:"name"`
+}
+
 // Created defines model for Created.
 type Created struct {
 	// AgentToken Shown once. It cannot be recovered.
@@ -842,11 +854,40 @@ type Status struct {
 	Status string `json:"status"`
 }
 
+// Token defines model for Token.
+type Token struct {
+	// AllInboxes The token reads every inbox, those made later included.
+	AllInboxes bool      `json:"all_inboxes"`
+	CreatedAt  time.Time `json:"created_at"`
+	Id         int       `json:"id"`
+
+	// Inboxes The slugs of the inboxes it reads. Empty when `all_inboxes` is true.
+	Inboxes []string `json:"inboxes"`
+	Name    string   `json:"name"`
+}
+
+// TokenCreated defines model for TokenCreated.
+type TokenCreated struct {
+	Record Token `json:"record"`
+
+	// Token Shown once. It cannot be recovered.
+	Token string `json:"token"`
+}
+
+// TokenList defines model for TokenList.
+type TokenList struct {
+	Next   *string `json:"next"`
+	Tokens []Token `json:"tokens"`
+}
+
 // Seq defines model for Seq.
 type Seq = int
 
 // Slug defines model for Slug.
 type Slug = string
+
+// TokenId defines model for TokenId.
+type TokenId = int
 
 // BadRequest defines model for BadRequest.
 type BadRequest = ErrorBadRequest
@@ -888,6 +929,18 @@ type ListInboxesParams struct {
 
 	// Limit Page size. Above 1000 is clamped to 1000.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListTokensParams defines parameters for ListTokens.
+type ListTokensParams struct {
+	// After Return tokens with an ID greater than this.
+	After *int `form:"after,omitempty" json:"after,omitempty"`
+
+	// Limit Page size. Above 1000 is clamped to 1000.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Inbox Only the tokens that can read this inbox, by slug: those scoped to it and those for all inboxes. An unknown slug is a 404.
+	Inbox *string `form:"inbox,omitempty" json:"inbox,omitempty"`
 }
 
 // ListMessagesParams defines parameters for ListMessages.
@@ -980,6 +1033,9 @@ type UpdateInboxJSONRequestBody = PatchInbox
 // SetVerifierSecretJSONRequestBody defines body for SetVerifierSecret for application/json ContentType.
 type SetVerifierSecretJSONRequestBody = SetSecret
 
+// CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
+type CreateTokenJSONRequestBody = CreateToken
+
 // McpJSONRequestBody defines body for Mcp for application/json ContentType.
 type McpJSONRequestBody = JsonRpcRequest
 
@@ -1006,15 +1062,21 @@ type ServerInterface interface {
 	// RotateIngestKey Issue a new ingest key
 	// (POST /admin/inboxes/{slug}/rotate-ingest-key)
 	RotateIngestKey(w http.ResponseWriter, r *http.Request, slug Slug)
-	// RotateAgentToken Issue a new agent token
-	// (POST /admin/inboxes/{slug}/rotate-token)
-	RotateAgentToken(w http.ResponseWriter, r *http.Request, slug Slug)
 	// SetVerifierSecret Set or replace the verifier secret
 	// (PUT /admin/inboxes/{slug}/secret)
 	SetVerifierSecret(w http.ResponseWriter, r *http.Request, slug Slug)
 	// RunRetention Apply retention now
 	// (POST /admin/retention/run)
 	RunRetention(w http.ResponseWriter, r *http.Request)
+	// ListTokens List tokens
+	// (GET /admin/tokens)
+	ListTokens(w http.ResponseWriter, r *http.Request, params ListTokensParams)
+	// CreateToken Issue a token
+	// (POST /admin/tokens)
+	CreateToken(w http.ResponseWriter, r *http.Request)
+	// RevokeToken Revoke a token
+	// (DELETE /admin/tokens/{id})
+	RevokeToken(w http.ResponseWriter, r *http.Request, id TokenId)
 	// Healthz Liveness
 	// (GET /healthz)
 	Healthz(w http.ResponseWriter, r *http.Request)
@@ -1258,32 +1320,6 @@ func (siw *ServerInterfaceWrapper) RotateIngestKey(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// RotateAgentToken operation middleware
-func (siw *ServerInterfaceWrapper) RotateAgentToken(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "slug" -------------
-	var slug Slug
-
-	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RotateAgentToken(w, r, slug)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // SetVerifierSecret operation middleware
 func (siw *ServerInterfaceWrapper) SetVerifierSecret(w http.ResponseWriter, r *http.Request) {
 
@@ -1315,6 +1351,105 @@ func (siw *ServerInterfaceWrapper) RunRetention(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RunRetention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListTokens(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTokensParams
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "inbox" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "inbox", r.URL.Query(), &params.Inbox, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "inbox"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "inbox", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTokens(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeToken operation middleware
+func (siw *ServerInterfaceWrapper) RevokeToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TokenId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeToken(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2216,9 +2351,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/inboxes/{slug}", wrapper.ShowInbox)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/inboxes/{slug}", wrapper.UpdateInbox)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/inboxes/{slug}/rotate-ingest-key", wrapper.RotateIngestKey)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/inboxes/{slug}/rotate-token", wrapper.RotateAgentToken)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/admin/inboxes/{slug}/secret", wrapper.SetVerifierSecret)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/retention/run", wrapper.RunRetention)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/tokens", wrapper.ListTokens)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/tokens", wrapper.CreateToken)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/admin/tokens/{id}", wrapper.RevokeToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.Healthz)
 	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/healthz", wrapper.HeadHealthz)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/in/{key}", wrapper.Ingest)
@@ -3666,195 +3803,6 @@ func (response RotateIngestKeydefaultTextResponse) VisitRotateIngestKeyResponse(
 	return err
 }
 
-type RotateAgentTokenRequestObject struct {
-	Slug Slug `json:"slug"`
-}
-
-type RotateAgentTokenResponseObject interface {
-	VisitRotateAgentTokenResponse(w http.ResponseWriter) error
-}
-
-type RotateAgentToken200ResponseHeaders struct {
-	XRequestId string
-}
-
-type RotateAgentToken200JSONResponse struct {
-	Body    Created
-	Headers RotateAgentToken200ResponseHeaders
-}
-
-func (response RotateAgentToken200JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentToken400JSONResponse struct{ BadRequestJSONResponse }
-
-func (response RotateAgentToken400JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentToken401JSONResponse struct{ UnauthenticatedJSONResponse }
-
-func (response RotateAgentToken401JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentToken403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response RotateAgentToken403JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentToken404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response RotateAgentToken404JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentToken405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response RotateAgentToken405JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentToken409JSONResponse struct{ ConflictJSONResponse }
-
-func (response RotateAgentToken409JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentToken500JSONResponse struct{ InternalJSONResponse }
-
-func (response RotateAgentToken500JSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentTokendefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type RotateAgentTokendefaultJSONResponse struct {
-	Body       Error
-	Headers    RotateAgentTokendefaultResponseHeaders
-	StatusCode int
-}
-
-func (response RotateAgentTokendefaultJSONResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RotateAgentTokendefaultTextResponse struct {
-	Body       string
-	Headers    RotateAgentTokendefaultResponseHeaders
-	StatusCode int
-}
-
-func (response RotateAgentTokendefaultTextResponse) VisitRotateAgentTokenResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
 type SetVerifierSecretRequestObject struct {
 	Slug Slug `json:"slug"`
 	Body *SetVerifierSecretJSONRequestBody
@@ -4254,6 +4202,550 @@ type RunRetentiondefaultTextResponse struct {
 }
 
 func (response RunRetentiondefaultTextResponse) VisitRunRetentionResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type ListTokensRequestObject struct {
+	Params ListTokensParams
+}
+
+type ListTokensResponseObject interface {
+	VisitListTokensResponse(w http.ResponseWriter) error
+}
+
+type ListTokens200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListTokens200JSONResponse struct {
+	Body    TokenList
+	Headers ListTokens200ResponseHeaders
+}
+
+func (response ListTokens200JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListTokens400JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListTokens401JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListTokens403JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListTokens404JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response ListTokens405JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListTokens500JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokensdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListTokensdefaultJSONResponse struct {
+	Body       Error
+	Headers    ListTokensdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response ListTokensdefaultJSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokensdefaultTextResponse struct {
+	Body       string
+	Headers    ListTokensdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response ListTokensdefaultTextResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type CreateTokenRequestObject struct {
+	Body *CreateTokenJSONRequestBody
+}
+
+type CreateTokenResponseObject interface {
+	VisitCreateTokenResponse(w http.ResponseWriter) error
+}
+
+type CreateToken201ResponseHeaders struct {
+	Location   string
+	XRequestId string
+}
+
+type CreateToken201JSONResponse struct {
+	Body    TokenCreated
+	Headers CreateToken201ResponseHeaders
+}
+
+func (response CreateToken201JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Location", fmt.Sprint(response.Headers.Location))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateToken400JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateToken401JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateToken403JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateToken404JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response CreateToken405JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken413JSONResponse struct{ TooLargeJSONResponse }
+
+func (response CreateToken413JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken415JSONResponse struct{ UnsupportedJSONResponse }
+
+func (response CreateToken415JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(415)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateToken500JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTokendefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type CreateTokendefaultJSONResponse struct {
+	Body       Error
+	Headers    CreateTokendefaultResponseHeaders
+	StatusCode int
+}
+
+func (response CreateTokendefaultJSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTokendefaultTextResponse struct {
+	Body       string
+	Headers    CreateTokendefaultResponseHeaders
+	StatusCode int
+}
+
+func (response CreateTokendefaultTextResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type RevokeTokenRequestObject struct {
+	Id TokenId `json:"id"`
+}
+
+type RevokeTokenResponseObject interface {
+	VisitRevokeTokenResponse(w http.ResponseWriter) error
+}
+
+type RevokeToken204ResponseHeaders struct {
+	XRequestId string
+}
+
+type RevokeToken204Response struct {
+	Headers RevokeToken204ResponseHeaders
+}
+
+func (response RevokeToken204Response) VisitRevokeTokenResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeToken400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RevokeToken400JSONResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeToken401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeToken401JSONResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeToken403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RevokeToken403JSONResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeToken404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeToken404JSONResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeToken405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response RevokeToken405JSONResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeToken500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeToken500JSONResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeTokendefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type RevokeTokendefaultJSONResponse struct {
+	Body       Error
+	Headers    RevokeTokendefaultResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeTokendefaultJSONResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeTokendefaultTextResponse struct {
+	Body       string
+	Headers    RevokeTokendefaultResponseHeaders
+	StatusCode int
+}
+
+func (response RevokeTokendefaultTextResponse) VisitRevokeTokenResponse(w http.ResponseWriter) error {
 
 	w.Header().Set("Content-Type", "text/plain")
 	if response.Headers.XRequestId != nil {
@@ -7521,15 +8013,21 @@ type StrictServerInterface interface {
 	// RotateIngestKey Issue a new ingest key
 	// (POST /admin/inboxes/{slug}/rotate-ingest-key)
 	RotateIngestKey(ctx context.Context, request RotateIngestKeyRequestObject) (RotateIngestKeyResponseObject, error)
-	// RotateAgentToken Issue a new agent token
-	// (POST /admin/inboxes/{slug}/rotate-token)
-	RotateAgentToken(ctx context.Context, request RotateAgentTokenRequestObject) (RotateAgentTokenResponseObject, error)
 	// SetVerifierSecret Set or replace the verifier secret
 	// (PUT /admin/inboxes/{slug}/secret)
 	SetVerifierSecret(ctx context.Context, request SetVerifierSecretRequestObject) (SetVerifierSecretResponseObject, error)
 	// RunRetention Apply retention now
 	// (POST /admin/retention/run)
 	RunRetention(ctx context.Context, request RunRetentionRequestObject) (RunRetentionResponseObject, error)
+	// ListTokens List tokens
+	// (GET /admin/tokens)
+	ListTokens(ctx context.Context, request ListTokensRequestObject) (ListTokensResponseObject, error)
+	// CreateToken Issue a token
+	// (POST /admin/tokens)
+	CreateToken(ctx context.Context, request CreateTokenRequestObject) (CreateTokenResponseObject, error)
+	// RevokeToken Revoke a token
+	// (DELETE /admin/tokens/{id})
+	RevokeToken(ctx context.Context, request RevokeTokenRequestObject) (RevokeTokenResponseObject, error)
 	// Healthz Liveness
 	// (GET /healthz)
 	Healthz(ctx context.Context, request HealthzRequestObject) (HealthzResponseObject, error)
@@ -7817,32 +8315,6 @@ func (sh *strictHandler) RotateIngestKey(w http.ResponseWriter, r *http.Request,
 	}
 }
 
-// RotateAgentToken operation middleware
-func (sh *strictHandler) RotateAgentToken(w http.ResponseWriter, r *http.Request, slug Slug) {
-	var request RotateAgentTokenRequestObject
-
-	request.Slug = slug
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.RotateAgentToken(ctx, request.(RotateAgentTokenRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "RotateAgentToken")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(RotateAgentTokenResponseObject); ok {
-		if err := validResponse.VisitRotateAgentTokenResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // SetVerifierSecret operation middleware
 func (sh *strictHandler) SetVerifierSecret(w http.ResponseWriter, r *http.Request, slug Slug) {
 	var request SetVerifierSecretRequestObject
@@ -7893,6 +8365,89 @@ func (sh *strictHandler) RunRetention(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RunRetentionResponseObject); ok {
 		if err := validResponse.VisitRunRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListTokens operation middleware
+func (sh *strictHandler) ListTokens(w http.ResponseWriter, r *http.Request, params ListTokensParams) {
+	var request ListTokensRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTokens(ctx, request.(ListTokensRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTokens")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTokensResponseObject); ok {
+		if err := validResponse.VisitListTokensResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateToken operation middleware
+func (sh *strictHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
+	var request CreateTokenRequestObject
+
+	var body CreateTokenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateToken(ctx, request.(CreateTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateTokenResponseObject); ok {
+		if err := validResponse.VisitCreateTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeToken operation middleware
+func (sh *strictHandler) RevokeToken(w http.ResponseWriter, r *http.Request, id TokenId) {
+	var request RevokeTokenRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeToken(ctx, request.(RevokeTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeTokenResponseObject); ok {
+		if err := validResponse.VisitRevokeTokenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

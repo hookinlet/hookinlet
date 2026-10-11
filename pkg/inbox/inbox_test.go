@@ -19,7 +19,7 @@ import (
 )
 
 func validInbox() *inbox.Inbox {
-	in := &inbox.Inbox{Slug: "valid-slug", IngestKey: "valid-ingest-key", Name: "Valid", Verifier: "none", AgentTokenHash: []byte{1}}
+	in := &inbox.Inbox{Slug: "valid-slug", IngestKey: "valid-ingest-key", Name: "Valid", Verifier: "none"}
 	in.ApplyDefaults()
 	return in
 }
@@ -54,7 +54,6 @@ func TestInboxValidate(t *testing.T) {
 		"verifier uppercase":  func(in *inbox.Inbox) { in.Verifier = "HMAC" },
 		"verifier too long":   func(in *inbox.Inbox) { in.Verifier = strings.Repeat("a", 33) },
 		"on_verify_fail":      func(in *inbox.Inbox) { in.OnVerifyFail = "maybe" },
-		"no token hash":       func(in *inbox.Inbox) { in.AgentTokenHash = nil },
 		"body limit zero":     func(in *inbox.Inbox) { in.MaxBodyBytes = 0 },
 		"body limit too high": func(in *inbox.Inbox) { in.MaxBodyBytes = inbox.MaxBodyBytesCeiling + 1 },
 		"negative days":       func(in *inbox.Inbox) { in.RetentionDays = -1 },
@@ -94,7 +93,6 @@ func TestInboxValidate(t *testing.T) {
 func TestSecretsNeverFormat(t *testing.T) {
 	in := validInbox()
 	in.VerifierSecret = []byte("sealed-marker-123")
-	in.AgentTokenHash = []byte("hash-marker-456")
 
 	js, err := json.Marshal(in)
 	if err != nil {
@@ -106,13 +104,10 @@ func TestSecretsNeverFormat(t *testing.T) {
 	outputs := map[string]string{
 		"json": string(js), "log": log.String(),
 		"%v": fmt.Sprintf("%v", in), "%+v": fmt.Sprintf("%+v", *in), "%#v": fmt.Sprintf("%#v", *in),
-		"%s": fmt.Sprintf("%s", in.VerifierSecret), //nolint:staticcheck // deliberately exercising the %s verb "%x-hex": fmt.Sprintf("%x", in.AgentTokenHash),
+		"%s": fmt.Sprintf("%s", in.VerifierSecret), //nolint:staticcheck // deliberately exercising the %s verb
 	}
 	for name, out := range outputs {
-		if name == "%x-hex" {
-			continue // explicit hex of the raw bytes is a deliberate act, not a leak
-		}
-		if strings.Contains(out, "sealed-marker-123") || strings.Contains(out, "hash-marker-456") {
+		if strings.Contains(out, "sealed-marker-123") {
 			t.Errorf("%s leaks a secret: %s", name, out)
 		}
 	}
@@ -120,7 +115,7 @@ func TestSecretsNeverFormat(t *testing.T) {
 		t.Errorf("json output should carry the redaction marker: %s", js)
 	}
 	// The raw bytes are still reachable for code that needs them.
-	if string(in.VerifierSecret) != "sealed-marker-123" || !bytes.Equal(in.AgentTokenHash, []byte("hash-marker-456")) {
+	if string(in.VerifierSecret) != "sealed-marker-123" {
 		t.Error("SecretBytes lost its content")
 	}
 }

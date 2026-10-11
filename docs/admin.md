@@ -1,7 +1,7 @@
 # Administration
 
 Everything that sets hookinlet up or looks after it: creating inboxes, changing
-their settings, rotating tokens, retention, and backups. There are two ways in
+their settings, issuing and revoking tokens, retention, and backups. There are two ways in
 and they do the same things:
 
 - the **admin API**, on a running server, with the admin token;
@@ -14,28 +14,50 @@ The admin API accepts only the admin token (`HOOKINLET_ADMIN_TOKEN`, set when th
 server starts). An agent token gets `403`, a missing or wrong token gets `401`,
 and neither can tell what is behind the path. The admin token can read every
 inbox and change everything, so treat it like a root password: keep it in the
-environment, never in a flag, and use TLS in front of the server.
+environment, never in a flag, and use TLS in front of the server. The server
+will not start with one shorter than 32 characters or one that is mostly
+repetition; `openssl rand -base64 32` makes a good one.
+
+Every admin action is logged (`"msg":"admin"`) with what was done and the
+caller's address (`client_ip`; behind a proxy, set `--trusted-proxies` so that
+it is the caller and not the proxy). Tokens and secrets are never logged.
+
+### Keeping the admin API off the public address
+
+The admin API is on the same address as ingest by default. Two settings take it
+off the internet:
+
+- `--admin-listen-addr 127.0.0.1:9090` serves it on its own address and nowhere
+  else; the public address answers `404` for `/admin/...`, and the admin address
+  answers `404` for everything that is not admin. This moves the *admin API*; the
+  admin token still reads every inbox through the read API and MCP on the public
+  address, so keep it as secret as before and give agents their own tokens. Reach it over an SSH tunnel, a
+  private network, or a proxy that you control. (In a container, bind it to an
+  address the container publishes only where you mean to.)
+- `--admin-enabled=false` turns it off altogether. Inboxes and tokens are then
+  managed with the command line, which works in the data directory.
 
 Responses are JSON, never cached (`Cache-Control: no-store`), and errors use the
 same shape as the rest of the API: `{"error": {"code": "…", "message": "…"}}`.
 
 Nothing here ever returns a verifier secret, the sealed form of one, or a token
 hash. An inbox shows only `has_verifier_secret: true`. The one thing that is
-shown exactly once is a new agent token, in the response that creates it or
-rotates it.
+shown exactly once is a new agent token, in the response that creates it.
 
 ## The API
 
 | Method and path | Purpose |
 |---|---|
-| `POST /admin/inboxes` | Create an inbox. Returns the agent token once. |
+| `POST /admin/inboxes` | Create an inbox. Returns its first agent token (named `default`) once. |
 | `GET /admin/inboxes` | List inboxes, 100 at a time by default and at most 1000 (`?limit=`; follow `next`). |
 | `GET /admin/inboxes/{slug}` | Show one, with its message count. |
 | `PATCH /admin/inboxes/{slug}` | Change settings. |
 | `PUT /admin/inboxes/{slug}/secret` | Set or replace the verifier secret. |
 | `POST /admin/inboxes/{slug}/rotate-ingest-key` | A new random ingest key. The old URL stops working at once; give senders the new one. |
-| `POST /admin/inboxes/{slug}/rotate-token` | New agent token, returned once. The old one stops working at once. |
-| `DELETE /admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). It is closed to deliveries and agents first, and its messages go in small batches so that other inboxes keep receiving; if it is interrupted, run it again. |
+| `DELETE /admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). It is closed to deliveries and to tokens scoped to it first (the admin token and tokens for all inboxes can still read it until it is gone), and its messages go in small batches so that other inboxes keep receiving; if it is interrupted, run it again. |
+| `POST /admin/tokens` | Issue an agent token for some inboxes (`inboxes`: a list of slugs) or all of them (`all_inboxes`). Returns the token once. |
+| `GET /admin/tokens` | List tokens, never their secrets (`?inbox=slug` for those that can read an inbox; `?limit=`; follow `next`). |
+| `DELETE /admin/tokens/{id}` | Revoke a token (`204`). It stops working at once. |
 | `POST /admin/retention/run` | Apply retention now. Returns `{"deleted": N}`. |
 | `GET /admin/backup` | Download a consistent copy of the database. |
 
@@ -116,9 +138,34 @@ setting the last one wins. A conflict that cannot be settled is a `409` to retry
 `PUT …/secret` takes `{"secret": "…"}`. The secret is sealed with the master key
 before it is stored (see `HOOKINLET_MASTER_KEY`) and cannot be read back.
 
-`POST …/rotate-token` issues a new agent token and invalidates the old one
-immediately. Open SSE streams and MCP waits that used the old token end within
-about 30 seconds.
+### Tokens
+
+An agent token is a name, a secret that is shown once, and what it may read: a
+list of inboxes (up to 100) or all of them, those created later included. An
+inbox can have any number of tokens. Creating an inbox issues its first, named
+`default`.
+
+To replace a token, issue the new one, give it to the agent, and then revoke the
+old one. Both work in between, so the agent never has a moment with none.
+Revoking is also the remedy for a leaked token: the revoked token is refused at
+once, and open SSE streams and MCP waits that used it end within about 30
+seconds. Deleting an inbox revokes the tokens that read only that inbox and
+leaves the rest.
+
+<!-- exercise -->
+```sh
+curl -s -X POST "$BASE/admin/tokens" \
+  -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "billing-agent", "inboxes": ["stripe-api"]}'
+# → {"record": {"id": 2, "name": "billing-agent", "all_inboxes": false, "inboxes": ["stripe-api"], …}, "token": "hki_…"}
+```
+
+A token for several inboxes names each slug, and one that reads everything says
+`"all_inboxes": true` instead. Naming neither, or both, is a `400`; so is
+naming an inbox that does not exist (`404`). The name is for people: it need not
+be unique and is not a secret.
+
+An agent token can never use the admin API, however many inboxes it reads.
 
 ### Why the ingest URL is not the slug
 
@@ -158,11 +205,19 @@ hookinlet inbox list
 hookinlet inbox show stripe-prod
 hookinlet inbox update stripe-prod --retention-days 30 --disabled=false
 echo whsec_example | hookinlet inbox set-secret stripe-prod --secret-stdin
-hookinlet inbox rotate-token stripe-prod
+hookinlet token create --name billing-agent --inbox stripe-prod
+hookinlet token list --inbox stripe-prod
 hookinlet inbox rotate-ingest-key stripe-prod
 hookinlet inbox delete stripe-prod --yes
 hookinlet retention run
 hookinlet backup --out hookinlet-backup.db
+```
+
+To retire a token, look up its ID and revoke it:
+
+```sh
+hookinlet token list --inbox stripe-prod
+hookinlet token revoke 2
 ```
 
 Without a server, straight in the data directory (also for first-time setup). If `HOOKINLET_URL` is set in

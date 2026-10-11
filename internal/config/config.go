@@ -33,6 +33,19 @@ const masterKeyLen = 32
 // random source is 192 bits or more; it rules out anything a person would type.
 const minAdminTokenLen = 32
 
+// minAdminTokenDistinct is how many different characters an admin token must
+// use. A random 32-character token has about 28; this only turns away values
+// such as a long run of one letter or a repeated word.
+const minAdminTokenDistinct = 10
+
+func distinctRunes(s string) int {
+	seen := map[rune]struct{}{}
+	for _, r := range s {
+		seen[r] = struct{}{}
+	}
+	return len(seen)
+}
+
 // ErrUsage is returned (wrapped) when flag parsing failed. The flag package has
 // already written the problem and the usage text to the output writer, so
 // callers should not print it again.
@@ -70,6 +83,8 @@ type Config struct {
 	SSEHeartbeat       time.Duration
 	SSERecheckInterval time.Duration
 	MCPEnabled         bool
+	AdminEnabled       bool
+	AdminListenAddr    string
 	MCPInlineBodyBytes int
 	RetentionInterval  time.Duration
 	ShutdownTimeout    time.Duration
@@ -91,6 +106,8 @@ func (c *Config) LogValue() slog.Value {
 		slog.Duration("sse_heartbeat", c.SSEHeartbeat),
 		slog.Duration("sse_recheck_interval", c.SSERecheckInterval),
 		slog.Bool("mcp_enabled", c.MCPEnabled),
+		slog.Bool("admin_enabled", c.AdminEnabled),
+		slog.String("admin_listen_addr", c.AdminListenAddr),
 		slog.Int("mcp_inline_body_bytes", c.MCPInlineBodyBytes),
 		slog.Duration("retention_interval", c.RetentionInterval),
 		slog.Duration("shutdown_timeout", c.ShutdownTimeout),
@@ -117,6 +134,8 @@ var specs = []spec{
 	{name: "max-streams-per-inbox", def: "0", usage: "most SSE streams that may follow one inbox; 0 means half of max-streams"},
 	{name: "sse-heartbeat", def: "15s", usage: "interval between SSE heartbeat comments"},
 	{name: "sse-recheck-interval", def: "0", usage: "re-read the store on this interval even without a notifier signal; 0 disables"},
+	{name: "admin-enabled", def: "true", usage: "serve the admin API under /admin; false leaves inboxes and tokens to the command line, which works in the data directory"},
+	{name: "admin-listen-addr", usage: "serve the admin API on its own address (such as 127.0.0.1:9090) and not on --listen-addr; empty serves it on --listen-addr"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
 	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},
 	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps, at least 1s; \"off\" turns the schedule off (sweeps still run on request)"},
@@ -280,6 +299,8 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 			collect(fieldErr("admin-token", "must be at least %d characters; generate one with: openssl rand -base64 32", minAdminTokenLen))
 		case strings.IndexFunc(v, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0:
 			collect(fieldErr("admin-token", "must not contain whitespace or control characters"))
+		case distinctRunes(v) < minAdminTokenDistinct:
+			collect(fieldErr("admin-token", "is too repetitive to be random; generate one with: openssl rand -base64 32"))
 		}
 	}
 	if c.ListenAddr == "" {
@@ -335,6 +356,16 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 	}
 	if c.MCPEnabled, err = strconv.ParseBool(vals["mcp-enabled"]); err != nil {
 		collect(fieldErr("mcp-enabled", "must be true or false"))
+	}
+	if c.AdminEnabled, err = strconv.ParseBool(vals["admin-enabled"]); err != nil {
+		collect(fieldErr("admin-enabled", "must be true or false"))
+	}
+	c.AdminListenAddr = vals["admin-listen-addr"]
+	switch {
+	case c.AdminListenAddr != "" && !c.AdminEnabled:
+		collect(fieldErr("admin-listen-addr", "is set but --admin-enabled is false"))
+	case c.AdminListenAddr != "" && c.AdminListenAddr == c.ListenAddr:
+		collect(fieldErr("admin-listen-addr", "is the same as --listen-addr; leave it empty to serve both there"))
 	}
 	if c.MaxStreams, err = strconv.Atoi(vals["max-streams"]); err != nil || c.MaxStreams < 1 {
 		collect(fieldErr("max-streams", "must be a positive integer"))

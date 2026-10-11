@@ -16,7 +16,7 @@ import (
 )
 
 const inboxCols = `id, slug, ingest_key, name, version, verifier, verifier_config, verifier_secret, on_verify_fail,
-	agent_token_hash, max_body_bytes, retention_days, retention_max_count, event_type_pointer,
+	max_body_bytes, retention_days, retention_max_count, event_type_pointer,
 	last_seq, disabled, created_at, updated_at`
 
 // rowScanner is satisfied by *sql.Row and *sql.Rows.
@@ -27,18 +27,16 @@ func scanInbox(row rowScanner) (*inbox.Inbox, error) {
 		in                   inbox.Inbox
 		config               string
 		secret               []byte
-		hash                 []byte
 		disabled             int
 		createdAt, updatedAt string
 	)
 	if err := row.Scan(&in.ID, &in.Slug, &in.IngestKey, &in.Name, &in.Version, &in.Verifier, &config, &secret, &in.OnVerifyFail,
-		&hash, &in.MaxBodyBytes, &in.RetentionDays, &in.RetentionMaxCount, &in.EventTypePointer,
+		&in.MaxBodyBytes, &in.RetentionDays, &in.RetentionMaxCount, &in.EventTypePointer,
 		&in.LastSeq, &disabled, &createdAt, &updatedAt); err != nil {
 		return nil, err
 	}
 	in.VerifierConfig = json.RawMessage(config)
 	in.VerifierSecret = secret
-	in.AgentTokenHash = hash
 	in.Disabled = disabled != 0
 	var err error
 	if in.CreatedAt, err = parseTime(createdAt); err != nil {
@@ -82,17 +80,6 @@ func (s *Store) GetInboxBySlug(ctx context.Context, slug string) (*inbox.Inbox, 
 // ResolveIngestKey implements inbox.Store.
 func (s *Store) ResolveIngestKey(ctx context.Context, key string) (*inbox.Inbox, error) {
 	return s.getInboxWhere(ctx, `ingest_key = ?`, key, "ingest key")
-}
-
-// GetInboxByTokenHash implements inbox.Store.
-func (s *Store) GetInboxByTokenHash(ctx context.Context, hash []byte) (*inbox.Inbox, error) {
-	if len(hash) == 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%w: token", inbox.ErrNotFound)
-	}
-	return s.getInboxWhere(ctx, `agent_token_hash = ?`, hash, "token")
 }
 
 // ListInboxes implements inbox.Store.
@@ -156,19 +143,13 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 		case !errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("sqlite: check ingest key: %w", err)
 		}
-		switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE agent_token_hash = ?`, []byte(cp.AgentTokenHash)).Scan(&one); {
-		case err == nil:
-			return fmt.Errorf("%w: agent token hash is already in use", inbox.ErrConflict)
-		case !errors.Is(err, sql.ErrNoRows):
-			return fmt.Errorf("sqlite: check token hash: %w", err)
-		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO inboxes (
 				slug, ingest_key, name, version, verifier, verifier_config, verifier_secret, on_verify_fail, agent_token_hash,
 				max_body_bytes, retention_days, retention_max_count, event_type_pointer, last_seq, disabled,
 				created_at, updated_at)
-			VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+			VALUES (?, ?, ?, 1, ?, ?, ?, ?, randomblob(32), ?, ?, ?, ?, 0, ?, ?, ?)`,
 			cp.Slug, cp.IngestKey, cp.Name, cp.Verifier, string(cp.VerifierConfig), secretArg(cp.VerifierSecret), cp.OnVerifyFail,
-			[]byte(cp.AgentTokenHash), cp.MaxBodyBytes, cp.RetentionDays, cp.RetentionMaxCount, cp.EventTypePointer,
+			cp.MaxBodyBytes, cp.RetentionDays, cp.RetentionMaxCount, cp.EventTypePointer,
 			boolInt(cp.Disabled), formatTime(now), formatTime(now))
 		if err != nil {
 			return fmt.Errorf("sqlite: insert inbox: %w", err)
@@ -209,15 +190,6 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 		if stored != cp.Version {
 			return fmt.Errorf("%w: inbox was modified concurrently (have version %d, stored is %d)", inbox.ErrConflict, cp.Version, stored)
 		}
-		var other int64
-		switch err := tx.QueryRowContext(ctx, `SELECT id FROM inboxes WHERE agent_token_hash = ? AND id <> ?`,
-			[]byte(cp.AgentTokenHash), int64(cp.ID)).Scan(&other); {
-		case err == nil:
-			return fmt.Errorf("%w: agent token hash is already in use", inbox.ErrConflict)
-		case !errors.Is(err, sql.ErrNoRows):
-			return fmt.Errorf("sqlite: check token hash: %w", err)
-		}
-
 		var otherKey int64
 		switch err := tx.QueryRowContext(ctx, `SELECT id FROM inboxes WHERE ingest_key = ? AND id <> ?`,
 			cp.IngestKey, int64(cp.ID)).Scan(&otherKey); {
@@ -230,11 +202,11 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 		// last_seq, slug, and created_at are deliberately not in this list.
 		if _, err := tx.ExecContext(ctx, `UPDATE inboxes SET
 				ingest_key = ?, name = ?, version = version + 1, verifier = ?, verifier_config = ?, verifier_secret = ?,
-				on_verify_fail = ?, agent_token_hash = ?, max_body_bytes = ?, retention_days = ?,
+				on_verify_fail = ?, max_body_bytes = ?, retention_days = ?,
 				retention_max_count = ?, event_type_pointer = ?, disabled = ?, updated_at = ?
 			WHERE id = ?`,
 			cp.IngestKey, cp.Name, cp.Verifier, string(cp.VerifierConfig), secretArg(cp.VerifierSecret), cp.OnVerifyFail,
-			[]byte(cp.AgentTokenHash), cp.MaxBodyBytes, cp.RetentionDays, cp.RetentionMaxCount, cp.EventTypePointer,
+			cp.MaxBodyBytes, cp.RetentionDays, cp.RetentionMaxCount, cp.EventTypePointer,
 			boolInt(cp.Disabled), formatTime(now), int64(cp.ID)); err != nil {
 			return fmt.Errorf("sqlite: update inbox: %w", err)
 		}
@@ -254,21 +226,27 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 // Deleting the inbox row would take its messages with it in one transaction
 // (ON DELETE CASCADE), which for a large inbox holds the single writer for
 // seconds, and every delivery to every inbox waits. So the inbox is first
-// closed to ingest and to agents (disabled, with its token hash replaced by
-// random bytes nobody holds), then its messages are deleted a batch at a time
+// closed to ingest and to agents (disabled, and its tokens revoked), then its messages are deleted a batch at a time
 // like retention does, and only then the row. If the process stops part way, the
 // inbox is left disabled and partly emptied, and deleting it again finishes the
 // job.
 func (s *Store) DeleteInbox(ctx context.Context, id inbox.ID) error {
 	err := s.writeTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			`UPDATE inboxes SET disabled = 1, agent_token_hash = randomblob(32), version = version + 1, updated_at = ? WHERE id = ?`,
+			`UPDATE inboxes SET disabled = 1, version = version + 1, updated_at = ? WHERE id = ?`,
 			formatTime(s.now()), int64(id))
 		if err != nil {
 			return fmt.Errorf("sqlite: close inbox for deletion: %w", err)
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return fmt.Errorf("%w: inbox", inbox.ErrNotFound)
+		}
+		// Tokens stop reading it, and a token that read only this inbox goes.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM token_inboxes WHERE inbox_id = ?`, int64(id)); err != nil {
+			return fmt.Errorf("sqlite: revoke tokens of inbox: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tokens WHERE all_inboxes = 0 AND id NOT IN (SELECT token_id FROM token_inboxes)`); err != nil {
+			return fmt.Errorf("sqlite: remove tokens left with no inbox: %w", err)
 		}
 		return nil
 	})
@@ -286,6 +264,11 @@ func (s *Store) DeleteInbox(ctx context.Context, id inbox.ID) error {
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return fmt.Errorf("%w: inbox", inbox.ErrNotFound)
+		}
+		// A token issued while the batches ran was scoped to this inbox, and the
+		// cascade has just taken that away.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tokens WHERE all_inboxes = 0 AND id NOT IN (SELECT token_id FROM token_inboxes)`); err != nil {
+			return fmt.Errorf("sqlite: delete inbox tokens: %w", err)
 		}
 		return nil
 	})

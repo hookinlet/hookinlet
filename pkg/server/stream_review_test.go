@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
 )
@@ -104,9 +105,9 @@ func TestAStalledStreamClientCannotBlockShutdown(t *testing.T) {
 	}
 }
 
-// Rotating a token is the remedy for a leaked one. A stream opened with the old
+// Revoking a token is the remedy for a leaked one. A stream opened with the old
 // token must not go on receiving every future message.
-func TestRotatingATokenEndsStreamsOpenedWithTheOldOne(t *testing.T) {
+func TestRevokingATokenEndsStreamsOpenedWithIt(t *testing.T) {
 	ae, base, _ := streamEnv(t, func(o *Options) { o.StreamRevalidateInterval = 100 * time.Millisecond })
 	old := openStream(t, ae.streamURL(base, "agent-a", ""), ae.tokenA, nil)
 	admin := openStream(t, ae.streamURL(base, "agent-a", ""), testAdminToken, nil)
@@ -115,9 +116,17 @@ func TestRotatingATokenEndsStreamsOpenedWithTheOldOne(t *testing.T) {
 	admin.next(time.Second)
 	other.next(time.Second)
 
-	newToken := ae.tokenFor(ae.a) // rotates: the old token no longer works
+	// Replace the token without a gap: issue the new one, then revoke the old.
+	newToken := ae.tokenFor(ae.a)
+	rec, err := ae.store.GetTokenByHash(t.Context(), token.Hash(ae.tokenA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ae.store.DeleteToken(t.Context(), rec.ID); err != nil {
+		t.Fatal(err)
+	}
 	if !old.ended(3 * time.Second) {
-		t.Fatal("a stream opened with a rotated-out token is still open")
+		t.Fatal("a stream opened with a revoked token is still open")
 	}
 	fresh := openStream(t, ae.streamURL(base, "agent-a", ""), newToken, nil)
 	if fresh.status != 200 {
@@ -182,11 +191,11 @@ func (f *flaky) GetInbox(ctx context.Context, id inbox.ID) (*inbox.Inbox, error)
 	return f.Store.GetInbox(ctx, id)
 }
 
-func (f *flaky) GetInboxByTokenHash(ctx context.Context, h []byte) (*inbox.Inbox, error) {
+func (f *flaky) GetTokenByHash(ctx context.Context, h []byte) (*inbox.Token, error) {
 	if f.failTokens.Load() {
 		return nil, errFlaky
 	}
-	return f.Store.GetInboxByTokenHash(ctx, h)
+	return f.Store.GetTokenByHash(ctx, h)
 }
 
 // Not being able to check is not the same as being told no. A passing database

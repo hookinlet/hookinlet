@@ -45,8 +45,7 @@ func Seed(ctx context.Context, dir, slug string, rows int) (*inbox.Inbox, error)
 	}
 	in := &inbox.Inbox{
 		Slug: slug, IngestKey: slug, Name: slug, Verifier: "none",
-		AgentTokenHash: []byte("benchseed-token-hash-" + slug),
-		MaxBodyBytes:   inbox.DefaultMaxBodyBytes,
+		MaxBodyBytes: inbox.DefaultMaxBodyBytes,
 	}
 	if err := store.CreateInbox(ctx, in); err != nil {
 		_ = store.Close()

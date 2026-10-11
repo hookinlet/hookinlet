@@ -280,21 +280,23 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 		return nil
 	}
 
-	// A caller limited to one inbox goes straight to it. Searching for it would
-	// cost time in proportion to everyone else's inboxes, might not find it, and
-	// could not report that it had searched them all without saying how many
-	// there are.
-	if single, ok := t.caller.principal.(inbox.SingleInboxPrincipal); ok {
-		in, err := st.GetInbox(ctx, single.InboxID())
-		switch {
-		case errors.Is(err, inbox.ErrNotFound):
-			return result(out)
-		case err != nil:
-			return nil, nil, t.fail(ctx, "list inboxes", err)
-		}
-		if t.caller.principal.CanReadInbox(in) {
-			if err := add(in); err != nil {
+	// A caller limited to some inboxes goes straight to them. Searching for them
+	// would cost time in proportion to everyone else's inboxes, might not find
+	// them, and could not report that it had searched them all without saying how
+	// many there are.
+	if scopedTo, ok := t.caller.principal.(inbox.ScopedPrincipal); ok {
+		for _, id := range scopedTo.InboxIDs() {
+			in, err := st.GetInbox(ctx, id)
+			switch {
+			case errors.Is(err, inbox.ErrNotFound):
+				continue
+			case err != nil:
 				return nil, nil, t.fail(ctx, "list inboxes", err)
+			}
+			if t.caller.principal.CanReadInbox(in) {
+				if err := add(in); err != nil {
+					return nil, nil, t.fail(ctx, "list inboxes", err)
+				}
 			}
 		}
 		return result(out)

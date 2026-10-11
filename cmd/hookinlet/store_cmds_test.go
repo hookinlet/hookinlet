@@ -118,11 +118,8 @@ func TestInboxCreate(t *testing.T) {
 		in.RetentionMaxCount != 5000 || in.MaxBodyBytes != 65536 || in.EventTypePointer != "/type" {
 		t.Errorf("inbox fields not applied: %#v", *in)
 	}
-	if !token.Equal(agentToken, in.AgentTokenHash) {
-		t.Error("the printed token does not match the stored hash")
-	}
-	if byHash, err := s.GetInboxByTokenHash(t.Context(), token.Hash(agentToken)); err != nil || byHash.ID != in.ID {
-		t.Errorf("token hash lookup: %v, %v", byHash, err)
+	if rec, err := s.GetTokenByHash(t.Context(), token.Hash(agentToken)); err != nil || rec.AllInboxes || len(rec.InboxIDs) != 1 || rec.InboxIDs[0] != in.ID {
+		t.Errorf("the printed token does not match a stored hash for this inbox: %+v, %v", rec, err)
 	}
 	raw := readDB(t, dir)
 	if bytes.Contains(raw, []byte(agentToken)) {

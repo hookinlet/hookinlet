@@ -36,8 +36,10 @@ GET /v1/inboxes/{slug}/messages/{seq}/raw    the exact bytes that were received
 
 Send `Authorization: Bearer <token>`. Two kinds of token work:
 
-- an inbox's **agent token**, shown once when the inbox is created or its token
-  rotated, which reads that inbox and nothing else;
+- an **agent token**, shown once when it is issued (creating an inbox issues the
+  first one; see [Administration](admin.md#tokens) for more), which reads the
+  inboxes it was issued for, one or several or all, and nothing else. It never
+  gets the admin API;
 - the **admin token** from `HOOKINLET_ADMIN_TOKEN`, which reads every inbox. It must be at least 32 characters with no whitespace; `openssl rand -base64 32` makes a good one.
 
 Tokens in URLs are not accepted, because URLs end up in logs.

@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/secretbox"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
@@ -171,11 +170,7 @@ func newEnv(t *testing.T, mods ...func(*Options)) *env {
 // newInbox creates an inbox. secret, if non-empty, is sealed with the env's box.
 func (e *env) newInbox(slug, verifier, secret string, mods ...func(*inbox.Inbox)) *inbox.Inbox {
 	e.t.Helper()
-	_, hash, err := token.Generate()
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: verifier, AgentTokenHash: hash}
+	in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: verifier}
 	if secret != "" {
 		sealed, err := e.box.Seal([]byte(secret))
 		if err != nil {

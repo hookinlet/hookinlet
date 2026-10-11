@@ -49,6 +49,8 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		return migrateCmd(args[1:], getenv, stdout, stderr)
 	case "inbox":
 		return inboxCmd(args[1:], getenv, stdout, stderr)
+	case "token":
+		return tokenCmd(args[1:], getenv, stdout, stderr)
 	case "retention":
 		return retentionCmd(args[1:], getenv, stdout, stderr)
 	case "apply":
@@ -74,7 +76,8 @@ func usage(w io.Writer) {
 Commands:
   serve     Run the HTTP server (see "hookinlet serve -h" for settings)
   migrate   Apply pending database migrations and report the schema version
-  inbox     Manage inboxes: create, list, show, update, set-secret, rotate-token, delete
+  inbox     Manage inboxes: create, list, show, update, set-secret, rotate-ingest-key, delete
+  token     Manage agent tokens: create, list, revoke
   retention Apply retention policies now (retention run)
   apply     Bring inboxes to the state a YAML file declares (apply -f FILE)
   backup    Write a consistent copy of the database (backup --out FILE)
@@ -84,7 +87,7 @@ Commands:
 Every setting is a flag and an environment variable: --listen-addr is also
 HOOKINLET_LISTEN_ADDR. Flags win over the environment.
 
-The inbox, apply, retention, and backup commands call a running server's admin API when
+The inbox, token, apply, retention, and backup commands call a running server's admin API when
 given --url (with the admin token in HOOKINLET_ADMIN_TOKEN), and otherwise work
 directly in the data directory (--data-dir).
 `)
@@ -154,6 +157,8 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		SSEHeartbeat:       cfg.SSEHeartbeat,
 		SSERecheckInterval: cfg.SSERecheckInterval,
 		DisableMCP:         !cfg.MCPEnabled,
+		DisableAdmin:       !cfg.AdminEnabled,
+		AdminAddr:          cfg.AdminListenAddr,
 		Version:            version,
 		PublicBaseURL:      cfg.PublicBaseURL,
 		RetentionInterval:  cfg.RetentionInterval,

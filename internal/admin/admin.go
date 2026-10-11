@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Pat Ramsey
 
-// Package admin is the management of inboxes: create, change, rotate a token,
-// delete, prune, back up. The admin HTTP API and the command line's direct mode
+// Package admin is the management of inboxes and tokens: create, change, issue
+// and revoke tokens, delete, prune, back up. The admin HTTP API and the command line's direct mode
 // are both thin layers over it, so the two cannot disagree about what is valid
 // or what is secret.
 //
-// Nothing here returns a secret except the one new agent token that Create and
-// RotateToken hand back, once. Views of an inbox never carry the verifier
+// Nothing here returns a secret except the one new token that Create and
+// CreateToken hand back, once. Views of an inbox never carry the verifier
 // secret, its sealed form, or any token hash.
 package admin
 
@@ -24,7 +24,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/verify"
 )
@@ -112,7 +111,8 @@ type View struct {
 	UpdatedAt string   `json:"updated_at"`
 }
 
-const timeLayout = "2006-01-02T15:04:05.000000Z"
+// TimeLayout is how times are written in views.
+const TimeLayout = "2006-01-02T15:04:05.000000Z"
 
 // ViewOf converts an inbox. It copies nothing secret.
 func ViewOf(in *inbox.Inbox) View {
@@ -127,7 +127,7 @@ func ViewOf(in *inbox.Inbox) View {
 		MaxBodyBytes: in.MaxBodyBytes, RetentionDays: in.RetentionDays, RetentionMaxCount: in.RetentionMaxCount,
 		EventTypePointer: in.EventTypePointer, Disabled: in.Disabled, LastSeq: in.LastSeq,
 		IngestPath: "/in/" + in.IngestKey,
-		CreatedAt:  in.CreatedAt.UTC().Format(timeLayout), UpdatedAt: in.UpdatedAt.UTC().Format(timeLayout),
+		CreatedAt:  in.CreatedAt.UTC().Format(TimeLayout), UpdatedAt: in.UpdatedAt.UTC().Format(TimeLayout),
 	}
 }
 
@@ -160,8 +160,8 @@ type CreateParams struct {
 	EventTypePointer  string          `json:"event_type_pointer,omitempty"`
 }
 
-// Created is the result of Create and RotateToken. AgentToken is the only copy
-// of the token there will ever be.
+// Created is the result of Create. AgentToken is the only copy of the inbox's
+// first token there will ever be; more are issued with CreateToken.
 type Created struct {
 	Inbox      View     `json:"inbox"`
 	AgentToken string   `json:"agent_token"`
@@ -195,20 +195,22 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 	if err != nil {
 		return nil, err
 	}
-	tok, hash, err := token.Generate()
-	if err != nil {
-		return nil, fmt.Errorf("admin: generate token: %w", err)
-	}
 	in := &inbox.Inbox{
 		Slug: p.Slug, IngestKey: p.IngestKey, Name: p.Name, Verifier: p.Verifier, VerifierConfig: p.VerifierConfig,
-		VerifierSecret: sealed, OnVerifyFail: p.OnVerifyFail, AgentTokenHash: hash,
+		VerifierSecret: sealed, OnVerifyFail: p.OnVerifyFail,
 		MaxBodyBytes: p.MaxBodyBytes, RetentionDays: p.RetentionDays, RetentionMaxCount: p.RetentionMaxCount,
 		EventTypePointer: p.EventTypePointer,
 	}
 	if err := s.Store.CreateInbox(ctx, in); err != nil {
 		return nil, err
 	}
-	return &Created{Inbox: ViewOf(in), AgentToken: tok, Warnings: warnings(in)}, nil
+	tok, err := s.issue(ctx, DefaultTokenName, []inbox.ID{in.ID}, false)
+	if err != nil {
+		// An inbox nobody can read is no use; undo it rather than leave it behind.
+		_ = s.Store.DeleteInbox(context.WithoutCancel(ctx), in.ID)
+		return nil, err
+	}
+	return &Created{Inbox: ViewOf(in), AgentToken: tok.Token, Warnings: warnings(in)}, nil
 }
 
 // newIngestKey makes a key for an ingest URL: 128 random bits, URL-safe.
@@ -430,32 +432,6 @@ func (s *Service) checkSecret(name string, config json.RawMessage, secret string
 // command line checking a file before it changes anything.
 func CheckSecret(verifier string, config json.RawMessage, secret string) error {
 	return new(Service).checkSecret(verifier, config, secret)
-}
-
-// RotateToken replaces the inbox's agent token. The old token stops working at
-// once; the new one is returned here and never again.
-func (s *Service) RotateToken(ctx context.Context, slug string) (*Created, error) {
-	tok, hash, err := token.Generate()
-	if err != nil {
-		return nil, fmt.Errorf("admin: generate token: %w", err)
-	}
-	s.editMu.Lock()
-	defer s.editMu.Unlock()
-	for attempt := 0; ; attempt++ {
-		in, err := s.Store.GetInboxBySlug(ctx, slug)
-		if err != nil {
-			return nil, err
-		}
-		in.AgentTokenHash = hash
-		err = s.Store.UpdateInbox(ctx, in)
-		if errors.Is(err, inbox.ErrConflict) && attempt < maxPatchRetries {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		return &Created{Inbox: ViewOf(in), AgentToken: tok}, nil
-	}
 }
 
 // Delete removes an inbox and all of its messages.

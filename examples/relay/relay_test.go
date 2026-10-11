@@ -64,8 +64,11 @@ func newHookinlet(t *testing.T) *hookinlet {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := &inbox.Inbox{Slug: "relayed", IngestKey: "relayed", Name: "relayed", Verifier: "token", VerifierSecret: sealed, AgentTokenHash: hash}
+	in := &inbox.Inbox{Slug: "relayed", IngestKey: "relayed", Name: "relayed", Verifier: "token", VerifierSecret: sealed}
 	if err := store.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateToken(t.Context(), &inbox.Token{Name: "test", Hash: hash, InboxIDs: []inbox.ID{in.ID}}); err != nil {
 		t.Fatal(err)
 	}
 	return &hookinlet{url: ts.URL, token: tok, store: store, in: in}

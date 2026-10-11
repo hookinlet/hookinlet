@@ -259,12 +259,9 @@ func (ae *agentEnv) tokenFor(in *inbox.Inbox) string {
 	if err != nil {
 		ae.t.Fatal(err)
 	}
-	upd := *in
-	upd.AgentTokenHash = hash
-	if err := ae.store.UpdateInbox(ae.t.Context(), &upd); err != nil {
+	if err := ae.store.CreateToken(ae.t.Context(), &inbox.Token{Name: "for " + in.Slug, Hash: hash, InboxIDs: []inbox.ID{in.ID}}); err != nil {
 		ae.t.Fatal(err)
 	}
-	*in = upd
 	return tok
 }
 

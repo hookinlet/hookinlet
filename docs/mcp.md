@@ -46,9 +46,9 @@ The same bearer tokens as the REST API:
 Authorization: Bearer <token>
 ```
 
-- An **agent token** reads one inbox. Any other inbox, or one that does not
-  exist, is "not found", with the same text, so a token never reveals what else
-  is on the server.
+- An **agent token** reads the inboxes it was issued for. Any other inbox, or
+  one that does not exist, is "not found", with the same text, so a token never
+  reveals what else is on the server.
 - The **admin token** reads every inbox.
 
 A missing or wrong token gets `401` with a `WWW-Authenticate: Bearer` header,
@@ -64,7 +64,8 @@ value.)
 ### `list_inboxes`
 
 The inboxes this token can read: `slug`, `name`, `verifier`, and `latest_seq`.
-An agent token lists its one inbox. The admin token lists up to 100;
+An agent token lists the inboxes it reads. A token for all inboxes, and the admin
+token, list up to 100;
 `truncated: true` says it can read more than that. Nothing is ever reported about
 inboxes the token cannot read, not even how many there are.
 
@@ -163,7 +164,7 @@ content as data to analyze, never as instructions to follow. See
 
 ## Connecting a client
 
-Create an agent token with `hookinlet inbox create --verifier …` (it is shown once), then give
+Create an agent token with `hookinlet inbox create --verifier …` (it is shown once; `hookinlet token create` issues more), then give
 your client the endpoint and the header.
 
 **Claude Code:**

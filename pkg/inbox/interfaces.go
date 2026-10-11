@@ -112,38 +112,49 @@ type Store interface {
 	// CreateInbox applies defaults, validates in (including that it has an
 	// IngestKey, which a Store does not make up), assigns ID, CreatedAt,
 	// UpdatedAt, and Version 1, sets LastSeq to 0, and stores it, updating
-	// *in. It returns ErrConflict if the slug or the agent token hash is
-	// already used by another inbox.
+	// *in. It returns ErrConflict if the slug or the ingest key is already used
+	// by another inbox. A new inbox has no tokens.
 	CreateInbox(ctx context.Context, in *Inbox) error
 
 	// UpdateInbox replaces the mutable fields of an existing inbox: Name,
-	// Verifier, VerifierConfig, VerifierSecret, OnVerifyFail, AgentTokenHash,
+	// Verifier, VerifierConfig, VerifierSecret, OnVerifyFail, IngestKey,
 	// MaxBodyBytes, RetentionDays, RetentionMaxCount, EventTypePointer, and
 	// Disabled. ID, Slug, LastSeq, and CreatedAt are never changed, and an
 	// update never disturbs sequence assignment for concurrent Appends.
 	//
 	// It is a compare-and-swap on Version: if in.Version is not the stored
 	// version, nothing changes and the error wraps ErrConflict, so two admins
-	// (or a PATCH racing a token rotation) cannot silently overwrite each
-	// other. Callers re-read and retry. On success the stored Version is
-	// incremented and *in is refreshed. It returns ErrConflict if the new
-	// agent token hash is already used by another inbox, and ErrNotFound if
-	// the inbox is gone.
+	// cannot silently overwrite each other. Callers re-read and retry. On
+	// success the stored Version is incremented and *in is refreshed. It returns
+	// ErrNotFound if the inbox is gone.
 	UpdateInbox(ctx context.Context, in *Inbox) error
 
 	// DeleteInbox removes the inbox and all of its messages. A Store may do it in
 	// steps so that a large inbox does not hold up everyone else's writes: it
-	// must first make the inbox unreachable (ingest answers not found and its
-	// agent token stops working), and if it is interrupted it leaves the inbox in
-	// that state, so that calling DeleteInbox again finishes the job.
+	// must first make the inbox unreachable (ingest answers not found, and the
+	// tokens scoped to it stop reading it: a token left with no inbox is
+	// deleted, including one issued while the delete was running), and if it is interrupted it leaves the inbox in that state, so that
+	// calling DeleteInbox again finishes the job.
 	DeleteInbox(ctx context.Context, id ID) error
 
 	GetInbox(ctx context.Context, id ID) (*Inbox, error)
 	GetInboxBySlug(ctx context.Context, slug string) (*Inbox, error)
-	// GetInboxByTokenHash finds the inbox whose agent token hashes to hash, or
-	// returns ErrNotFound. It must be an indexed lookup, not a scan.
-	GetInboxByTokenHash(ctx context.Context, hash []byte) (*Inbox, error)
 	ListInboxes(ctx context.Context, p ListParams) ([]*Inbox, error)
+
+	// CreateToken validates t, assigns ID and CreatedAt, and stores it, updating
+	// *t. Every inbox in t.InboxIDs must exist (ErrNotFound otherwise, and
+	// nothing is stored), and the hash must not belong to another token
+	// (ErrConflict).
+	CreateToken(ctx context.Context, t *Token) error
+	// GetTokenByHash finds the token with this hash, or returns ErrNotFound. It
+	// must be an indexed lookup, not a scan: the server calls it on every
+	// authenticated request.
+	GetTokenByHash(ctx context.Context, hash []byte) (*Token, error)
+	// ListTokens pages through tokens (see TokenListParams).
+	ListTokens(ctx context.Context, p TokenListParams) ([]*Token, error)
+	// DeleteToken removes a token, which stops working at once. It returns
+	// ErrNotFound if there is none.
+	DeleteToken(ctx context.Context, id TokenID) error
 
 	// Prune applies every inbox's retention policy as of now. A message is
 	// deleted if either rule selects it: it is strictly older than
@@ -245,19 +256,19 @@ type Principal interface {
 	CanAdmin() bool
 }
 
-// SingleInboxPrincipal is an optional capability of a Principal that can read
-// exactly one inbox and no other (an agent token). Anything that needs to list
-// the inboxes a caller can read uses it to go straight to that one, instead of
-// walking every inbox and asking CanReadInbox, which would cost time in
+// ScopedPrincipal is an optional capability of a Principal that can read a known,
+// finite list of inboxes (an agent token scoped to some of them). Anything that
+// needs to list the inboxes a caller can read uses it to go straight to those,
+// instead of walking every inbox and asking CanReadInbox, which would cost time in
 // proportion to the number of inboxes and could not tell a caller that its list
 // was complete without telling it how many others exist.
 //
-// InboxID must be the ID of the one inbox CanReadInbox accepts, and a Principal
-// that can read more than one inbox, or that can use the admin API, must not
+// InboxIDs must be exactly the IDs of the inboxes CanReadInbox accepts. A
+// Principal that can read an unbounded set, or that can use the admin API, must not
 // implement it.
-type SingleInboxPrincipal interface {
+type ScopedPrincipal interface {
 	Principal
-	InboxID() ID
+	InboxIDs() []ID
 }
 
 // Hooks lets an embedder observe and gate ingest. The open-source default does
