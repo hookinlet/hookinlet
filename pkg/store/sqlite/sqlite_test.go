@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -396,5 +397,103 @@ func TestManyInboxesManyReaders(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Error(err)
+	}
+}
+
+func TestBackupperSuite(t *testing.T) {
+	inboxtest.BackupperSuite(t,
+		func(t *testing.T) inbox.Store { return openAt(t, t.TempDir()) },
+		func(t *testing.T, snapshot []byte) inbox.Store {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, sqlite.DBFileName), snapshot, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return openAt(t, dir)
+		})
+}
+
+func TestBackupPassesAnIntegrityCheckAndLeavesNothingBehind(t *testing.T) {
+	dir := t.TempDir()
+	s := openAt(t, dir)
+	defer func() { _ = s.Close() }()
+	in := newInbox("integrity")
+	if err := s.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200; i++ {
+		if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte(strings.Repeat("x", 1000)), Verified: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rc, size, err := s.Backup(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := filepath.Join(t.TempDir(), "copy.db")
+	data, err := io.ReadAll(rc)
+	if err != nil || int64(len(data)) != size {
+		t.Fatalf("read %d of %d bytes: %v", len(data), size, err)
+	}
+	if err := rc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snap, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open("sqlite", "file:"+snap+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var result string
+	if err := db.QueryRowContext(t.Context(), `PRAGMA integrity_check`).Scan(&result); err != nil || result != "ok" {
+		t.Errorf("integrity_check = %q, %v", result, err)
+	}
+	var n int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM messages`).Scan(&n); err != nil || n != 200 {
+		t.Errorf("the copy holds %d messages, %v", n, err)
+	}
+
+	left, _ := filepath.Glob(filepath.Join(dir, "backup-*"))
+	if len(left) != 0 {
+		t.Errorf("closing the snapshot left %v behind", left)
+	}
+}
+
+func TestOpenRemovesOnlyOldLeftoverSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "backup-old.tmp")
+	fresh := filepath.Join(dir, "backup-fresh.tmp")
+	other := filepath.Join(dir, "notes.tmp")
+	for _, f := range []string{old, fresh, other} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(old, time.Now().Add(-2*time.Hour), time.Now().Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	s := openAt(t, dir)
+	_ = s.Close()
+	for f, wantGone := range map[string]bool{old: true, fresh: false, other: false} {
+		_, err := os.Stat(f)
+		if gone := os.IsNotExist(err); gone != wantGone {
+			t.Errorf("%s: removed = %v, want %v", filepath.Base(f), gone, wantGone)
+		}
+	}
+}
+
+func TestBackupHonorsACancelledContext(t *testing.T) {
+	dir := t.TempDir()
+	s := openAt(t, dir)
+	defer func() { _ = s.Close() }()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, _, err := s.Backup(ctx); err == nil {
+		t.Error("a cancelled backup succeeded")
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "backup-*")); len(left) != 0 {
+		t.Errorf("a cancelled backup left %v behind", left)
 	}
 }

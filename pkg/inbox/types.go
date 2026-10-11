@@ -29,6 +29,10 @@ type ID int64
 const (
 	// DefaultMaxBodyBytes is the per-inbox body limit when none is set.
 	DefaultMaxBodyBytes int64 = 1 << 20
+	// MaxRetentionDays is the longest retention_days allowed: a hundred years,
+	// which is "forever" for any practical purpose. Larger values are refused
+	// because a count of days that large overflows the duration it becomes.
+	MaxRetentionDays = 36500
 	// MaxBodyBytesCeiling is the largest per-inbox body limit allowed.
 	MaxBodyBytesCeiling int64 = 10 << 20
 
@@ -171,8 +175,8 @@ func (in *Inbox) Validate() error {
 		return Invalidf("agent token hash is required")
 	case in.MaxBodyBytes < 1 || in.MaxBodyBytes > MaxBodyBytesCeiling:
 		return Invalidf("max_body_bytes must be between 1 and %d", MaxBodyBytesCeiling)
-	case in.RetentionDays < 0:
-		return Invalidf("retention_days must not be negative")
+	case in.RetentionDays < 0 || in.RetentionDays > MaxRetentionDays:
+		return Invalidf("retention_days must be between 0 and %d", MaxRetentionDays)
 	case in.RetentionMaxCount < 0:
 		return Invalidf("retention_max_count must not be negative")
 	case in.EventTypePointer != "" && !validJSONPointer(in.EventTypePointer):

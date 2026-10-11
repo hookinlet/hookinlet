@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
@@ -234,8 +235,36 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 	return nil
 }
 
-// DeleteInbox implements inbox.Store. Messages go with it via ON DELETE CASCADE.
+// DeleteInbox implements inbox.Store.
+//
+// Deleting the inbox row would take its messages with it in one transaction
+// (ON DELETE CASCADE), which for a large inbox holds the single writer for
+// seconds, and every delivery to every inbox waits. So the inbox is first
+// closed to ingest and to agents (disabled, with its token hash replaced by
+// random bytes nobody holds), then its messages are deleted a batch at a time
+// like retention does, and only then the row. If the process stops part way, the
+// inbox is left disabled and partly emptied, and deleting it again finishes the
+// job.
 func (s *Store) DeleteInbox(ctx context.Context, id inbox.ID) error {
+	err := s.writeTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE inboxes SET disabled = 1, agent_token_hash = randomblob(32), version = version + 1, updated_at = ? WHERE id = ?`,
+			formatTime(s.now()), int64(id))
+		if err != nil {
+			return fmt.Errorf("sqlite: close inbox for deletion: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("%w: inbox", inbox.ErrNotFound)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := s.deleteUpTo(ctx, id, math.MaxInt64); err != nil {
+		return err
+	}
+	// Whatever arrived while the batches ran goes with the row.
 	return s.writeTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM inboxes WHERE id = ?`, int64(id))
 		if err != nil {

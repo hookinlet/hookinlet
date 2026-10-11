@@ -5,6 +5,7 @@ package inbox
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"time"
 )
@@ -128,7 +129,11 @@ type Store interface {
 	// the inbox is gone.
 	UpdateInbox(ctx context.Context, in *Inbox) error
 
-	// DeleteInbox removes the inbox and all of its messages.
+	// DeleteInbox removes the inbox and all of its messages. A Store may do it in
+	// steps so that a large inbox does not hold up everyone else's writes: it
+	// must first make the inbox unreachable (ingest answers not found and its
+	// agent token stops working), and if it is interrupted it leaves the inbox in
+	// that state, so that calling DeleteInbox again finishes the job.
 	DeleteInbox(ctx context.Context, id ID) error
 
 	GetInbox(ctx context.Context, id ID) (*Inbox, error)
@@ -153,6 +158,24 @@ type Store interface {
 
 	// Close releases resources. The Store must not be used afterward.
 	Close() error
+}
+
+// Backupper is an optional capability of a Store: a consistent copy of all its
+// data that can be saved elsewhere. It is optional because not every backend
+// can offer one (a hosted database is backed up by its operator). Callers find
+// it with a type assertion and answer 501 when it is absent; this is the one
+// documented exception to guardrail 8.
+type Backupper interface {
+	// Backup returns a snapshot of the Store as of a single moment: everything
+	// committed before the call is in it, and nothing in it is half-applied.
+	// size is the snapshot's length in bytes, and the reader yields exactly that
+	// many. The caller must Close the reader, which releases whatever the
+	// snapshot holds (a temporary file, for instance). Appends and reads continue
+	// while a backup is taken and while it is read.
+	//
+	// The snapshot is in the Store's own format. For secrets it holds only what
+	// the Store holds: verifier secrets still sealed, and token hashes.
+	Backup(ctx context.Context) (snapshot io.ReadCloser, size int64, err error)
 }
 
 // Notifier tells interested parties that an inbox may have new messages. It

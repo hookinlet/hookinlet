@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -40,28 +41,80 @@ func (s *Store) Prune(ctx context.Context, now time.Time) (int64, error) {
 		if err != nil {
 			return total, err
 		}
-		for bound > 0 {
-			var n int64
-			err := s.writeTx(ctx, func(tx *sql.Tx) error {
-				res, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE id IN (
-						SELECT id FROM messages WHERE inbox_id = ? AND seq <= ? ORDER BY seq LIMIT ?)`,
-					int64(p.inboxID), bound, pruneBatchRows)
-				if err != nil {
-					return fmt.Errorf("sqlite: prune: %w", err)
-				}
-				n, _ = res.RowsAffected()
-				return nil
-			})
-			total += n // report what was actually deleted, even on a partial failure
-			if err != nil {
-				return total, err
-			}
-			if n < pruneBatchRows {
-				break
-			}
+		n, err := s.deleteUpTo(ctx, p.inboxID, bound)
+		total += n // report what was actually deleted, even on a partial failure
+		if err != nil {
+			return total, err
 		}
 	}
 	return total, nil
+}
+
+// deleteUpTo deletes every message of the inbox with seq <= bound, a batch at a
+// time, so that appends can take their turn between batches. It returns how many
+// it deleted, which on an error is how many it got through.
+func (s *Store) deleteUpTo(ctx context.Context, id inbox.ID, bound int64) (int64, error) {
+	var total int64
+	for bound > 0 {
+		var n int64
+		err := s.writeTx(ctx, func(tx *sql.Tx) error {
+			var err error
+			n, err = deleteBatch(ctx, tx, id, bound)
+			return err
+		})
+		if err != nil {
+			return total, err
+		}
+		if n == 0 {
+			break
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// deleteBatch deletes the oldest messages of the inbox that are at or below
+// bound: at most pruneBatchRows of them, and fewer when their bodies add up to
+// pruneBatchBytes first (but always at least one). Appends wait for the writer,
+// so how long a batch takes is how long a delivery can be made to wait, and that
+// depends on bytes as much as on rows.
+func deleteBatch(ctx context.Context, tx *sql.Tx, id inbox.ID, bound int64) (int64, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id, size FROM messages WHERE inbox_id = ? AND seq <= ? ORDER BY seq LIMIT ?`,
+		int64(id), bound, pruneBatchRows)
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: select messages to delete: %w", err)
+	}
+	var ids []any
+	var bytes int64
+	for rows.Next() {
+		var rowID, size int64
+		if err := rows.Scan(&rowID, &size); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("sqlite: select messages to delete: %w", err)
+		}
+		if len(ids) > 0 && bytes+size > pruneBatchBytes {
+			break
+		}
+		ids = append(ids, rowID)
+		bytes += size
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("sqlite: select messages to delete: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("sqlite: select messages to delete: %w", err)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	// Only placeholders are concatenated; every value is a bound argument.
+	res, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, ids...) //nolint:gosec // placeholders only
+	if err != nil {
+		return 0, fmt.Errorf("sqlite: delete messages: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func (s *Store) retentionPolicies(ctx context.Context) ([]retentionPolicy, error) {
@@ -89,7 +142,11 @@ func (s *Store) pruneBound(ctx context.Context, p retentionPolicy, now time.Time
 	var bound int64
 
 	if p.days > 0 {
-		cutoff := ceilMicro(now.Add(-time.Duration(p.days) * 24 * time.Hour))
+		// Stored values are validated, but a database written by something else
+		// might hold more, and a duration that overflows would put the cutoff in
+		// the future and delete everything.
+		days := min(p.days, inbox.MaxRetentionDays)
+		cutoff := ceilMicro(now.Add(-time.Duration(days) * 24 * time.Hour))
 		var newestExpired sql.NullInt64
 		err := s.rdb.QueryRowContext(ctx,
 			`SELECT MAX(seq) FROM messages WHERE inbox_id = ? AND received_at < ?`,

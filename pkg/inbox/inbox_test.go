@@ -58,6 +58,8 @@ func TestInboxValidate(t *testing.T) {
 		"body limit zero":     func(in *inbox.Inbox) { in.MaxBodyBytes = 0 },
 		"body limit too high": func(in *inbox.Inbox) { in.MaxBodyBytes = inbox.MaxBodyBytesCeiling + 1 },
 		"negative days":       func(in *inbox.Inbox) { in.RetentionDays = -1 },
+		"days that overflow":  func(in *inbox.Inbox) { in.RetentionDays = 106752 },
+		"days over the limit": func(in *inbox.Inbox) { in.RetentionDays = inbox.MaxRetentionDays + 1 },
 		"negative count":      func(in *inbox.Inbox) { in.RetentionMaxCount = -1 },
 		"pointer no slash":    func(in *inbox.Inbox) { in.EventTypePointer = "type" },
 		"pointer bad escape":  func(in *inbox.Inbox) { in.EventTypePointer = "/a~2" },
