@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"net"
 	"net/http"
@@ -145,5 +146,63 @@ func TestServeFailsReadablyWhenTheDataDirectoryIsUnusable(t *testing.T) {
 	code, _, errOut := runCmd(t, env, "serve")
 	if code != exitRuntime || !strings.Contains(errOut, "server setup failed") {
 		t.Errorf("code %d, stderr %q", code, errOut)
+	}
+}
+
+// A master key that is not the one the secrets were sealed under stops the server
+// before it listens, says what to do, and `rekey` is what does it.
+func TestServeRefusesTheWrongMasterKeyAndRekeyFixesIt(t *testing.T) {
+	dir := t.TempDir()
+	oldKey := masterKey()
+	newKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
+	env := func(key string, more ...string) map[string]string { //nolint:gosec // fake values for a test
+		m := map[string]string{
+			"HOOKINLET_DATA_DIR":        dir,
+			"HOOKINLET_ADMIN_TOKEN":     "admin-token-for-the-rekey-test-0123456789",
+			"HOOKINLET_MASTER_KEY":      key,
+			"HOOKINLET_VERIFIER_SECRET": "a-shared-secret",
+			"HOOKINLET_LISTEN_ADDR":     "127.0.0.1:0",
+		}
+		for i := 0; i+1 < len(more); i += 2 {
+			m[more[i]] = more[i+1]
+		}
+		return m
+	}
+	if code, _, e := runCmd(t, env(oldKey), "inbox", "create", "--slug", "keyed", "--verifier", "token"); code != 0 {
+		t.Fatal(e)
+	}
+
+	var errOut bytes.Buffer
+	code := serve(nil, func(k string) string { return env(newKey)[k] }, &errOut)
+	if code != exitRuntime || !strings.Contains(errOut.String(), "hookinlet rekey") || !strings.Contains(errOut.String(), "keyed") {
+		t.Fatalf("serve with the wrong key: code %d\n%s", code, errOut.String())
+	}
+	if strings.Contains(errOut.String(), newKey) || strings.Contains(errOut.String(), oldKey) {
+		t.Error("a key was printed")
+	}
+
+	// A wrong old key changes nothing and says so.
+	wrongOld := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{43}, 32))
+	if code, _, e := runCmd(t, env(newKey, "HOOKINLET_OLD_MASTER_KEY", wrongOld), "rekey"); code != exitRuntime || !strings.Contains(e, "nothing was changed") {
+		t.Errorf("rekey with a wrong old key: %d %q", code, e)
+	}
+	if code, out, e := runCmd(t, env(newKey, "HOOKINLET_OLD_MASTER_KEY", oldKey), "rekey"); code != 0 || !strings.Contains(out, "sealed 1 secret") {
+		t.Fatalf("rekey: %d %q %q", code, out, e)
+	}
+	cfg, err := config.Load(nil, func(k string) string { return env(newKey)[k] }, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, closeStore, err := buildServer(t.Context(), cfg, newLogger(io.Discard, cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeStore()
+	if err := srv.CheckSecrets(t.Context()); err != nil {
+		t.Errorf("after rekeying: %v", err)
+	}
+	// And a bad old key is a usage error, not a crash.
+	if code, _, _ := runCmd(t, env(newKey, "HOOKINLET_OLD_MASTER_KEY", "not base64!"), "rekey"); code != exitUsage {
+		t.Errorf("a malformed old key: %d", code)
 	}
 }

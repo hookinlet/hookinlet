@@ -141,12 +141,15 @@ type Server struct {
 	adminHTTP    *http.Server
 	reads        chan struct{} // a slot per read request being served
 
-	spec      *specvalidate.Document // docs/openapi.json, which requests are held to
-	mux       *http.ServeMux
-	mcpSDK    http.Handler // the MCP SDK's handler, which the mcp operation hands calls to
-	adm       *admin.Service
-	backupMu  sync.Mutex     // one backup at a time
-	retention sync.WaitGroup // the scheduled sweep, so Serve can wait for it
+	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
+	mux        *http.ServeMux
+	mcpSDK     http.Handler // the MCP SDK's handler, which the mcp operation hands calls to
+	adm        *admin.Service
+	secretsMu  sync.Mutex // guards the next three: the last check of the stored secrets
+	secretsAt  time.Time
+	secretsErr error
+	backupMu   sync.Mutex     // one backup at a time
+	retention  sync.WaitGroup // the scheduled sweep, so Serve can wait for it
 
 	streams      chan struct{} // a slot per open SSE stream
 	streamMu     sync.Mutex
