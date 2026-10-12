@@ -3233,7 +3233,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Deleted. The inbox is closed to deliveries and to tokens scoped to it first and from then on it can no longer be read by anyone (a second DELETE answers 404); its messages go in small batches, and an interrupted delete is finished by the retention sweep.",
+            "description": "Deleted. The inbox is closed to deliveries and to tokens scoped to it first and from then on it can no longer be read by anyone (a second DELETE answers 404); its messages go in small batches, and an interrupted delete is finished by the retention sweep (or `POST /v1/admin/retention/run`).",
             "headers": {
               "X-Request-Id": {
                 "required": true,

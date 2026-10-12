@@ -56,7 +56,7 @@ func tokenCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 
 func tokenCreate(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet token create", flag.ContinueOnError)
-	usageWith(fs, "hookinlet token create --name NAME [flags]")
+	usageWith(fs, "hookinlet token create --name NAME (--inbox SLUG... | --all-inboxes) [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	name := fs.String("name", "", "a name for people to tell tokens apart by (required)")

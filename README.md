@@ -182,7 +182,7 @@ An agent needs the server's address, an inbox's agent token, and a cursor. Choos
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `list_inboxes` | none | slug, name, verifier, `latest_seq` |
+| `list_inboxes` | none | slug, name, verifier, `latest_seq`, `epoch` |
 | `query_messages` | `inbox`, `epoch`, `after` or `before`, `limit`, `types`, `since`, `until`, `verified`, `bodies` | messages (without bodies unless `bodies`), and `next_after` to keep as the cursor |
 | `get_message` | `inbox`, `epoch`, `seq` | one message with its full body |
 | `wait_for_messages` | `inbox`, `epoch`, `after`, `types`, `timeout_seconds`, `limit`, `bodies` | messages after `after`; waits up to 60 s for one |

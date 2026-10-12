@@ -163,6 +163,9 @@ func (in *Inbox) LogValue() slog.Value {
 // ApplyDefaults fills zero-valued optional fields. Every Store calls it before
 // validating on create and update so defaults are identical across backends.
 func (in *Inbox) ApplyDefaults() {
+	if in == nil {
+		return
+	}
 	if in.OnVerifyFail == "" {
 		in.OnVerifyFail = OnVerifyFailReject
 	}

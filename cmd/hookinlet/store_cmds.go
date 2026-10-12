@@ -69,7 +69,7 @@ func rekeyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 	usageWith(fs, "hookinlet rekey [flags]")
 	fs.SetOutput(stderr)
 	resolve := config.AddDataFlags(fs, getenv)
-	oldKey := fs.String("old-master-key", "", "the master key the secrets are sealed under now (prefer the environment variable "+config.EnvPrefix+"OLD_MASTER_KEY: flags are visible in process listings); default: the master key [env "+config.EnvPrefix+"OLD_MASTER_KEY]")
+	oldKey := fs.String("old-master-key", "", "the master key the secrets are sealed under now (prefer the environment variable: flags are visible in process listings); default: the master key [env "+config.EnvPrefix+"OLD_MASTER_KEY]")
 	if code, done := parseFlags(fs, args, stderr); done {
 		return code
 	}

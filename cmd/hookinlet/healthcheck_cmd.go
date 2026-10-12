@@ -33,6 +33,7 @@ func healthcheckCmd(args []string, getenv func(string) string, stdout, stderr io
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		fmt.Fprint(stderr, healthcheckUsage)
+		fmt.Fprintln(stderr)
 		fs.PrintDefaults()
 	}
 	base := fs.String("url", "", "address of the server, such as http://127.0.0.1:8080 (default: this machine, at "+config.EnvPrefix+"LISTEN_ADDR)")

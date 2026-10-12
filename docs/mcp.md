@@ -162,7 +162,7 @@ loop:
 ```
 
 A wait holds no database connection while it sleeps. It ends early if the server
-shuts down, or if the token is rotated or the inbox deleted (checked every 30
+shuts down, or if the token is revoked or the inbox deleted (checked every 30
 seconds), and an agent that hangs up releases it immediately.
 
 Waits count against the same limits as SSE streams (`HOOKINLET_MAX_STREAMS`

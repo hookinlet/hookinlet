@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -114,7 +115,7 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 			if err != nil {
 				t.Fatalf("token %q after restore: %v", want.Name, err)
 			}
-			if got.ID != want.ID || got.Name != want.Name || got.AllInboxes != want.AllInboxes || !reflect.DeepEqual(got.InboxIDs, want.InboxIDs) {
+			if got.ID != want.ID || got.Name != want.Name || got.AllInboxes != want.AllInboxes || !slices.Equal(got.InboxIDs, want.InboxIDs) {
 				t.Errorf("token %q differs after restore:\n got  %+v\n want %+v", want.Name, got, want)
 			}
 		}
