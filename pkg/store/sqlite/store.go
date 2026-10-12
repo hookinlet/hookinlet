@@ -137,7 +137,7 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
 		_ = wdb.Close()
 		return nil, fmt.Errorf("sqlite: open %s: %w", abs, err)
 	}
-	if s.applied, err = migrate(ctx, wdb); err != nil {
+	if s.applied, err = migrate(ctx, wdb, abs); err != nil {
 		_ = wdb.Close()
 		return nil, err
 	}

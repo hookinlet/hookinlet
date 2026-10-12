@@ -9,7 +9,9 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,7 +60,7 @@ func loadMigrations() ([]migration, error) {
 // the versions it applied. It refuses to run against a database that has
 // migrations this binary does not know, since that means the data was written
 // by a newer version.
-func migrate(ctx context.Context, db *sql.DB) ([]int, error) {
+func migrate(ctx context.Context, db *sql.DB, dbPath string) ([]int, error) {
 	migs, err := loadMigrations()
 	if err != nil {
 		return nil, err
@@ -78,6 +80,26 @@ func migrate(ctx context.Context, db *sql.DB) ([]int, error) {
 	}
 	if current > len(migs) {
 		return nil, fmt.Errorf("sqlite: database schema version %d is newer than this build supports (%d); upgrade hookinlet", current, len(migs))
+	}
+
+	// Migrations only move forward, so before changing a database that has data in
+	// it, keep a copy of it as it was: if an upgrade turns out badly, that copy and
+	// the previous release are the way back. A database that has never been migrated
+	// (a new one) has nothing to keep. An upgrade that was cut short leaves a marker
+	// behind, and the next start keeps the copy it already has: the database is by
+	// then partly upgraded, and a copy of that is no way back.
+	marker := filepath.Join(filepath.Dir(dbPath), migrationMarker)
+	if current > 0 && current < len(migs) {
+		_, markerErr := os.Stat(marker)
+		haveCopy, _ := filepath.Glob(filepath.Join(filepath.Dir(dbPath), MigrationSnapshotPrefix+"*.bak"))
+		if markerErr != nil || len(haveCopy) == 0 {
+			if err := snapshotBeforeMigrating(ctx, db, dbPath, current); err != nil {
+				return nil, err
+			}
+			if err := os.WriteFile(marker, []byte(strconv.Itoa(current)+"\n"), 0o600); err != nil {
+				return nil, fmt.Errorf("sqlite: %w", err)
+			}
+		}
 	}
 
 	var applied []int
@@ -100,6 +122,9 @@ func migrate(ctx context.Context, db *sql.DB) ([]int, error) {
 		}
 		applied = append(applied, m.version)
 	}
+	if len(applied) > 0 {
+		_ = os.Remove(marker) // the upgrade finished
+	}
 	return applied, nil
 }
 
@@ -111,4 +136,46 @@ func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
 		return 0, s.ctxErr(ctx, fmt.Errorf("sqlite: read schema version: %w", err))
 	}
 	return v, nil
+}
+
+// MigrationSnapshotPrefix begins the name of the copy of the database that is made
+// before a migration: hookinlet.db.before-migration-N.bak, where N is the schema
+// version it was at. Only the latest is kept; delete it once the upgrade is trusted.
+const MigrationSnapshotPrefix = DBFileName + ".before-migration-"
+
+// migrationMarker exists while an upgrade is under way (and after one that did not
+// finish), and holds the schema version it started from.
+const migrationMarker = DBFileName + ".migrating"
+
+// snapshotBeforeMigrating writes the copy, and only once it is complete does it
+// replace the copy of any earlier upgrade. A copy that fails to be made costs the
+// operator nothing they had.
+func snapshotBeforeMigrating(ctx context.Context, db *sql.DB, dbPath string, from int) error {
+	dir := filepath.Dir(dbPath)
+	name := filepath.Join(dir, MigrationSnapshotPrefix+strconv.Itoa(from)+".bak")
+	partial := name + ".partial"
+	_ = os.Remove(partial)
+	// VACUUM INTO accepts an empty file. Making it ourselves gives it its mode from
+	// the start; it is not created wider and narrowed afterwards.
+	f, err := os.OpenFile(partial, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // beside the database, in the data directory
+	if err != nil {
+		return fmt.Errorf("sqlite: could not keep a copy of the database before migrating it: %w", err)
+	}
+	_ = f.Close()
+	// One consistent copy, in one read transaction.
+	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, partial); err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("sqlite: could not keep a copy of the database before migrating it (is there room for a second copy in %s?); nothing was changed: %w", dir, err)
+	}
+	if err := os.Rename(partial, name); err != nil {
+		_ = os.Remove(partial)
+		return fmt.Errorf("sqlite: pre-migration copy: %w", err)
+	}
+	others, _ := filepath.Glob(filepath.Join(dir, MigrationSnapshotPrefix+"*.bak"))
+	for _, o := range others {
+		if o != name {
+			_ = os.Remove(o) // the copy of an earlier, finished upgrade
+		}
+	}
+	return nil
 }

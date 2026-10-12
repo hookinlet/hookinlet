@@ -6,6 +6,40 @@ applies.
 
 ## Unreleased
 
+### Phase 15: storage and startup (part 1)
+
+#### Added
+- **A copy of the database before a migration.** With migrations to apply to a database
+  that has data, the store writes `hookinlet.db.before-migration-N.bak` (mode 0600, the
+  latest only) first, and refuses to migrate if it cannot (`sqlite.MigrationSnapshotPrefix`).
+  A new copy replaces the old only once it is complete, and an upgrade that was cut short
+  keeps the copy it already has (a marker file, `hookinlet.db.migrating`, says it was).
+- **A wrong master key is found at start-up and in `/readyz`.** `serve` opens every stored
+  verifier secret before it listens and refuses to start, naming some inboxes and the
+  remedy; `/readyz` answers 503 (`not_ready`) if they stop opening. `Server.CheckSecrets`.
+- **`hookinlet rekey`** seals every secret again under a new master key
+  (`HOOKINLET_OLD_MASTER_KEY`). It opens every secret before it writes any, so a wrong old
+  key changes nothing; it leaves alone an inbox changed while it ran; and it can be run
+  again if it is interrupted. With no old key it brings secrets from earlier releases up to
+  the new format. `serve` warns while any secret is still in the old format.
+
+#### Changed
+- **`inbox.SecretBox.Seal` and `Open` take a context** (breaking). The default box now
+  writes version 2: a key id (a fingerprint of the key) and the context (the inbox's slug)
+  are authenticated with the value, so a wrong key is `secretbox.ErrWrongKey` and not
+  just `ErrOpen`, and a secret copied onto another inbox's row does not open
+  (`inbox.VerifierSecretContext`). Version 1 values still open, under any context, until
+  `hookinlet rekey` writes them again: the binding protects secrets sealed by this release
+  and those rekeyed (`secretbox.Legacy` reports the rest). `Box.KeyID`.
+- The message `body` column is now the last column of the row (migration 0007), so a read
+  that does not want bodies no longer follows the overflow pages of the ones it skips. The
+  table is rebuilt: it takes time and disk space in proportion to the database.
+
+#### Upgrading
+- Migrations 0007 rebuilds the messages table; the copy of the database taken first is
+  your way back (see docs/deploying.md). Verifier secrets sealed by an earlier release
+  keep working; run `hookinlet rekey` at some point to move them to the new format.
+
 ### Phase 14: cursor integrity
 
 #### Added

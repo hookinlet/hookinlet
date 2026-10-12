@@ -55,6 +55,8 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		return retentionCmd(args[1:], getenv, stdout, stderr)
 	case "apply":
 		return applyCmd(args[1:], getenv, stdout, stderr)
+	case "rekey":
+		return rekeyCmd(args[1:], getenv, stdout, stderr)
 	case "renew-epochs":
 		return renewEpochsCmd(args[1:], getenv, stdout, stderr)
 	case "backup":
@@ -82,6 +84,7 @@ Commands:
   token     Manage agent tokens: create, list, revoke
   retention Apply retention policies now (retention run)
   apply     Bring inboxes to the state a YAML file declares (apply -f FILE)
+  rekey     Seal the stored secrets under a new master key (server stopped)
   renew-epochs  Give every inbox a new epoch, after restoring from a copy (server stopped)
   backup    Write a consistent copy of the database (backup --out FILE)
   version   Print the version
@@ -118,6 +121,24 @@ func serve(args []string, getenv func(string) string, stderr io.Writer) int {
 		return exitRuntime
 	}
 	defer closeStore()
+
+	// A master key that is not the one the data was sealed under is found now, not by
+	// the first delivery that needs a secret.
+	if err := srv.CheckSecrets(context.Background()); err != nil {
+		log.Error("refusing to start", "err", err)
+		fmt.Fprintf(stderr, "hookinlet: %v\n\n"+
+			"The master key (HOOKINLET_MASTER_KEY) must be the one the secrets were sealed under.\n"+
+			"  - If this is the wrong key, start again with the right one.\n"+
+			"  - If the key was rotated on purpose, re-seal the secrets under the new one:\n"+
+			"      hookinlet rekey --old-master-key OLD   (new key in HOOKINLET_MASTER_KEY)\n"+
+			"  - If the old key is lost, set each affected secret again:\n"+
+			"      hookinlet inbox set-secret SLUG   (works in the data directory with the new key)\n", err)
+		return exitRuntime
+	}
+
+	if n := srv.LegacySecrets(context.Background()); n > 0 {
+		log.Warn("some verifier secrets are in the sealed format of an earlier release, which binds them to no inbox; run `hookinlet rekey` (server stopped) to bring them up to date", "secrets", n)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -109,3 +109,204 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 		t.Errorf("a repeat of an old delivery: %+v created %v err %v", dup, created, err)
 	}
 }
+
+// Before an existing database is migrated, a copy of it as it was is kept.
+func TestADatabaseIsCopiedBeforeItIsMigrated(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	checkCopy(t, dir)
+}
+
+func writeVersion2Database(t *testing.T, dir string) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"0001_init.sql", "0002_delivery_index.sql"} {
+		b, err := os.ReadFile(filepath.Join("migrations", name)) //nolint:gosec // this package's own migration files
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.ExecContext(t.Context(), string(b)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{
+		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`,
+		`INSERT INTO schema_migrations VALUES (1, 'then'), (2, 'then')`,
+		`INSERT INTO inboxes (slug, name, verifier, agent_token_hash, created_at, updated_at) VALUES ('kept', 'kept', 'none', x'01', '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z')`,
+	} {
+		if _, err := raw.ExecContext(t.Context(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = raw.Close()
+}
+
+func checkCopy(t *testing.T, dir string) {
+	t.Helper()
+	snap := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"2.bak")
+	info, err := os.Stat(snap)
+	if err != nil {
+		t.Fatalf("no copy was kept: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("the copy's mode is %v, want 0600", info.Mode().Perm())
+	}
+	old, err := sql.Open("sqlite", snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = old.Close() }()
+	var version, inboxes int
+	if err := old.QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 2 {
+		t.Errorf("the copy is at version %d (%v), want the version before the upgrade, 2", version, err)
+	}
+	if err := old.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM inboxes`).Scan(&inboxes); err != nil || inboxes != 1 {
+		t.Errorf("the copy holds %d inboxes (%v)", inboxes, err)
+	}
+
+	// Nothing pending, nothing copied: the same copy stays, and no other appears.
+	before, _ := os.Stat(snap)
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	after, _ := os.Stat(snap)
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("a start with nothing to migrate replaced the copy")
+	}
+	if all, _ := filepath.Glob(filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"*")); len(all) != 1 {
+		t.Errorf("copies: %v", all)
+	}
+}
+
+func TestANewDatabaseIsNotCopied(t *testing.T) {
+	dir := t.TempDir()
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	if all, _ := filepath.Glob(filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"*")); len(all) != 0 {
+		t.Errorf("a new database left %v", all)
+	}
+}
+
+// The body is the last column of a message, and the rebuild keeps every message,
+// its id, and its indexes.
+func TestTheBodyIsTheLastColumnAfterTheUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &inbox.Inbox{Slug: "body-last", IngestKey: "body-last", Name: "n", Verifier: "none"}
+	if err := s.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("kept"), Verified: true, DeliveryID: "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+
+	db, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	rows, err := db.QueryContext(t.Context(), `SELECT name FROM pragma_table_info('messages') ORDER BY cid`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cols []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		cols = append(cols, c)
+	}
+	_ = rows.Close()
+	if len(cols) == 0 || cols[len(cols)-1] != "body" {
+		t.Errorf("columns: %v; the body must come last", cols)
+	}
+	for _, idx := range []string{"messages_inbox_type", "messages_inbox_received", "messages_dedupe", "messages_inbox_delivery"} {
+		var n int
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, idx).Scan(&n); err != nil || n != 1 {
+			t.Errorf("index %s: %d (%v)", idx, n, err)
+		}
+	}
+}
+
+// An upgrade that was cut short leaves the copy of the version it started from; the
+// next start must not replace it with a copy of a half-upgraded database.
+func TestARetriedUpgradeKeepsTheCopyItAlreadyHas(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+	first := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"1.bak")
+	if err := os.WriteFile(first, []byte("the copy from before the first attempt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, sqlite.DBFileName+".migrating"), []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	b, err := os.ReadFile(first) //nolint:gosec // a path in this test's own temp directory
+	if err != nil || string(b) != "the copy from before the first attempt" {
+		t.Errorf("the earlier copy: %q, %v", b, err)
+	}
+	if all, _ := filepath.Glob(filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"*")); len(all) != 1 {
+		t.Errorf("copies: %v", all)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sqlite.DBFileName+".migrating")); err == nil {
+		t.Error("the marker outlived the upgrade")
+	}
+}
+
+// A copy that cannot be made takes nothing from the operator, and the database is
+// left as it was.
+func TestAFailedCopyLeavesTheEarlierOneAndTheDatabaseAlone(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+	earlier := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"1.bak")
+	if err := os.WriteFile(earlier, []byte("earlier"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Something in the way of the new copy that cannot be removed.
+	blocker := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"2.bak.partial")
+	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlite.Open(t.Context(), dir); err == nil {
+		t.Fatal("Open migrated without a copy")
+	}
+	b, err := os.ReadFile(earlier) //nolint:gosec // a path in this test's own temp directory
+	if err != nil || string(b) != "earlier" {
+		t.Errorf("the earlier copy: %q, %v", b, err)
+	}
+	if err := os.RemoveAll(blocker); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var v int
+	if err := db.QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migrations`).Scan(&v); err != nil || v != 2 {
+		t.Errorf("the database is at version %d (%v), want it untouched at 2", v, err)
+	}
+}

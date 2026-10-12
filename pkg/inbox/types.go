@@ -391,6 +391,14 @@ func (p ListParams) EffectiveLimit() int {
 	return p.Limit
 }
 
+// VerifierSecretContext is the context a verifier secret is sealed with
+// (SecretBox.Seal) and opened with: the inbox's slug, which never changes, under a
+// name that says what is being sealed, so the same box can seal other kinds of
+// value without one passing for another.
+func VerifierSecretContext(slug string) []byte {
+	return []byte("hookinlet/verifier-secret/" + slug)
+}
+
 // MaxTokenInboxes bounds how many inboxes one token can be scoped to.
 const MaxTokenInboxes = 100
 

@@ -84,7 +84,18 @@ notarized: one downloaded through a browser is quarantined, and
   `HOOKINLET_MASTER_KEY` (32 random bytes, base64) encrypts verifier secrets in
   the database. **Lose the master key and every stored verifier secret is
   unreadable**; keep it with your backups, and never in the data directory.
-  Prefer environment variables: flags show up in process listings.
+  Prefer environment variables: flags show up in process listings. Each secret is
+  sealed with a short id of the key and with its inbox's slug, so the server can tell a
+  wrong key from damage: **it refuses to start** when a stored secret does not open
+  with the key it was given (and says which inboxes, and what to do), and `/readyz`
+  fails if that becomes true later. To change the key on purpose, stop the server and
+  run `hookinlet rekey` with the old key in `HOOKINLET_OLD_MASTER_KEY` and the new one
+  in `HOOKINLET_MASTER_KEY`; it opens every secret before it writes any (so a wrong old key
+  changes nothing), seals them again under the new key, leaves alone any inbox that was
+  edited while it ran, and can be run again if interrupted.
+  (The same command with no old key brings secrets written by an older release up to
+  the current format; they work meanwhile.) A secret sealed under a key you no longer
+  have cannot be recovered: set it again with `hookinlet inbox set-secret`.
 - **SIGTERM or SIGINT to stop it.** It stops accepting connections, ends streams
   and waits, and lets deliveries that are being stored finish, for up to
   `HOOKINLET_SHUTDOWN_TIMEOUT` (10 seconds by default); anything still running
@@ -170,8 +181,25 @@ descriptor; the default of 1000 needs a limit comfortably above that.
 Start the new version on the same data directory. It applies any database
 migrations itself, once, before it listens (`hookinlet migrate` does only that,
 and reports the schema version). Migrations only move forward: a database whose schema is newer than
-a version knows (one that added a migration) is refused by that older version, so keep a [backup](admin.md#backups)
-before upgrading and roll back by restoring it. Changes that affect anyone
+a version knows (one that added a migration) is refused by that older version.
+
+**A copy is kept for you.** When there are migrations to apply to a database that
+already holds data, the server first writes a complete copy of it as it was to
+`hookinlet.db.before-migration-N.bak` in the data directory (`N` is the schema
+version it was at; mode 0600). If the upgrade goes badly, stop the server, put that
+file back as `hookinlet.db` (remove any `-wal` and `-shm` beside it), and start the
+previous release. If the copy cannot be made (no room for a second copy of the
+database), the server refuses to migrate and changes nothing. If an upgrade is cut
+short (killed, out of disk, a start timeout), the next start keeps the copy that was
+made before it began: the database is then partly upgraded, and the copy of that would
+be no way back. (A marker file, `hookinlet.db.migrating`, records that; it goes when
+an upgrade finishes.) Only the latest finished upgrade's copy is kept, and nothing
+deletes it, so remove it when you trust the upgrade. **Room:** the migration that
+moves the message body (0007) rebuilds the messages table, so allow for about three
+times the database's size free in the data directory (the copy, the new table, and the
+write-ahead log), and note that the file does not shrink afterwards. It is as
+sensitive as the database. Taking your own [backup](admin.md#backups) first is still
+sensible. Changes that affect anyone
 embedding the packages are listed in `CHANGELOG.md`; this is a pre-1.0 project
 and those may be breaking.
 

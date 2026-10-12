@@ -290,10 +290,13 @@ type Hooks interface {
 
 // SecretBox seals secrets for storage at rest.
 type SecretBox interface {
-	// Seal encrypts plaintext. Sealing the same plaintext twice yields
-	// different ciphertexts.
-	Seal(plaintext []byte) ([]byte, error)
-	// Open decrypts ciphertext produced by Seal. It returns an error if the
-	// ciphertext was tampered with, truncated, or sealed under another key.
-	Open(ciphertext []byte) ([]byte, error)
+	// Seal encrypts plaintext and binds it to context: the same context must be
+	// given to Open. The caller chooses what the value belongs to (the inbox's slug,
+	// for a verifier secret), so that a sealed value copied onto another row does not
+	// open there. Sealing the same plaintext twice yields different ciphertexts.
+	Seal(plaintext, context []byte) ([]byte, error)
+	// Open decrypts ciphertext produced by Seal, given the context it was sealed
+	// with. It returns an error if the ciphertext was tampered with, truncated,
+	// sealed under another key, or sealed for another context.
+	Open(ciphertext, context []byte) ([]byte, error)
 }

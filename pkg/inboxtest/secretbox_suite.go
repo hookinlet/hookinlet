@@ -21,6 +21,7 @@ import (
 // check that separate boxes interoperate.
 func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
 	t.Helper()
+	ctx1, ctx2 := []byte("inbox-one"), []byte("inbox-two")
 
 	t.Run("RoundTrip", func(t *testing.T) {
 		box := newBox(t)
@@ -32,11 +33,11 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
 			"large":    bytes.Repeat([]byte("0123456789abcdef"), 4096),
 			"all-byte": allBytes(),
 		} {
-			ct, err := box.Seal(pt)
+			ct, err := box.Seal(pt, ctx1)
 			if err != nil {
 				t.Fatalf("%s: Seal: %v", name, err)
 			}
-			got, err := box.Open(ct)
+			got, err := box.Open(ct, ctx1)
 			if err != nil {
 				t.Fatalf("%s: Open: %v", name, err)
 			}
@@ -49,7 +50,7 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
 	t.Run("CiphertextHidesPlaintext", func(t *testing.T) {
 		box := newBox(t)
 		pt := []byte("a-very-recognizable-plaintext-marker")
-		ct, err := box.Seal(pt)
+		ct, err := box.Seal(pt, ctx1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -60,34 +61,50 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
 
 	t.Run("SealIsRandomized", func(t *testing.T) {
 		box := newBox(t)
-		a, _ := box.Seal([]byte("same"))
-		b, _ := box.Seal([]byte("same"))
+		a, _ := box.Seal([]byte("same"), ctx1)
+		b, _ := box.Seal([]byte("same"), ctx1)
 		if bytes.Equal(a, b) {
 			t.Error("sealing the same plaintext twice gave identical ciphertexts")
 		}
 	})
 
 	t.Run("InteroperatesAcrossInstances", func(t *testing.T) {
-		ct, err := newBox(t).Seal([]byte("shared"))
+		ct, err := newBox(t).Seal([]byte("shared"), ctx1)
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := newBox(t).Open(ct)
+		got, err := newBox(t).Open(ct, ctx1)
 		if err != nil || string(got) != "shared" {
 			t.Errorf("second instance could not open: %q, %v", got, err)
 		}
 	})
 
+	t.Run("IsBoundToItsContext", func(t *testing.T) {
+		box := newBox(t)
+		ct, err := box.Seal([]byte("belongs to one"), ctx1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, ctx := range map[string][]byte{"another": ctx2, "none": nil, "a prefix": ctx1[:3], "an extension": append(bytes.Clone(ctx1), 'x')} {
+			if got, err := box.Open(ct, ctx); err == nil {
+				t.Errorf("a value sealed for one context opened with %s: %q", name, got)
+			}
+		}
+		if got, err := box.Open(ct, ctx1); err != nil || string(got) != "belongs to one" {
+			t.Errorf("the right context: %q, %v", got, err)
+		}
+	})
+
 	t.Run("TamperedCiphertextFails", func(t *testing.T) {
 		box := newBox(t)
-		ct, err := box.Seal([]byte("integrity matters"))
+		ct, err := box.Seal([]byte("integrity matters"), ctx1)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for i := range ct {
 			bad := bytes.Clone(ct)
 			bad[i] ^= 0x01
-			if _, err := box.Open(bad); err == nil {
+			if _, err := box.Open(bad, ctx1); err == nil {
 				t.Fatalf("flipping a bit at offset %d was not detected", i)
 			}
 		}
@@ -95,7 +112,7 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
 
 	t.Run("MalformedCiphertextFails", func(t *testing.T) {
 		box := newBox(t)
-		ct, _ := box.Seal([]byte("x"))
+		ct, _ := box.Seal([]byte("x"), ctx1)
 		for name, bad := range map[string][]byte{
 			"nil":       nil,
 			"empty":     {},
@@ -104,7 +121,7 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
 			"short":     ct[:len(ct)/2],
 			"extended":  append(bytes.Clone(ct), 0),
 		} {
-			if _, err := box.Open(bad); err == nil {
+			if _, err := box.Open(bad, ctx1); err == nil {
 				t.Errorf("%s: Open succeeded", name)
 			}
 		}
@@ -113,9 +130,9 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
 	t.Run("DoesNotAliasInput", func(t *testing.T) {
 		box := newBox(t)
 		pt := []byte("original")
-		ct, _ := box.Seal(pt)
+		ct, _ := box.Seal(pt, ctx1)
 		pt[0] = 'X'
-		got, err := box.Open(ct)
+		got, err := box.Open(ct, ctx1)
 		if err != nil || string(got) != "original" {
 			t.Errorf("Seal retained the caller's slice: %q, %v", got, err)
 		}

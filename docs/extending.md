@@ -16,7 +16,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Store` | Persists inboxes and messages; assigns each message its per-inbox `Seq`. | `pkg/store/sqlite` | `StoreSuite` |
 | `Notifier` | Tells readers an inbox may have new messages. Carries no payload. | `pkg/notify/local` (in process) | `NotifierSuite` |
 | `Authenticator`, `Principal` | Says who a request is and what it may read or administer. | `pkg/auth/token` | `AuthenticatorSuite` |
-| `SecretBox` | Seals and opens verifier secrets. | `pkg/secretbox` | `SecretBoxSuite` |
+| `SecretBox` | Seals and opens verifier secrets, bound to a context (the inbox's slug). | `pkg/secretbox` | `SecretBoxSuite` |
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /admin/backup`. | the SQLite store | `BackupperSuite` |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
