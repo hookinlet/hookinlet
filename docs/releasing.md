@@ -78,7 +78,8 @@ None of this is done by a workflow; each is a setting or a tag only a maintainer
 4. **Publish a history without working notes.** A public repository shows every commit. Working
    notes kept in the project folder (plans, instructions for tools) do not belong in it, and a file
    removed from the latest commit is still in earlier ones. Create the public repository from a copy of
-   the history with those files removed (`git filter-repo --invert-paths --path FILE ...`), and keep
+   the history with those files removed (`scripts/public-history.sh ../hookinlet-public` does it, and
+   checks that the result's tip is identical to `main`; it never pushes), and keep
    such notes out of the tree afterwards (add them to `.git/info/exclude`, which is not committed).
 5. **Read the README once from a clean clone**, in a new shell, as a stranger would.
 
