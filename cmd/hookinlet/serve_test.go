@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -204,5 +205,43 @@ func TestServeRefusesTheWrongMasterKeyAndRekeyFixesIt(t *testing.T) {
 	// And a bad old key is a usage error, not a crash.
 	if code, _, _ := runCmd(t, env(newKey, "HOOKINLET_OLD_MASTER_KEY", "not base64!"), "rekey"); code != exitUsage {
 		t.Errorf("a malformed old key: %d", code)
+	}
+}
+
+// A second server on a data directory that a server is using stops at once, and the
+// commands that need the server stopped refuse to run beside one.
+func TestASecondServerAndTheMaintenanceCommandsRefuseARunningDirectory(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{ //nolint:gosec // fake values for a test
+		"HOOKINLET_DATA_DIR":    dir,
+		"HOOKINLET_ADMIN_TOKEN": "admin-token-for-the-lock-test-0123456789",
+		"HOOKINLET_MASTER_KEY":  masterKey(),
+		"HOOKINLET_LISTEN_ADDR": "127.0.0.1:0",
+	}
+	cfg, err := config.Load(nil, func(k string) string { return env[k] }, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, closeStore, err := buildServer(t.Context(), cfg, newLogger(io.Discard, cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = buildServer(t.Context(), cfg, newLogger(io.Discard, cfg))
+	var locked *sqlite.LockedError
+	if !errors.As(err, &locked) {
+		t.Errorf("a second server: %v", err)
+	}
+	for _, args := range [][]string{{"rekey"}, {"renew-epochs"}} {
+		if code, _, e := runCmd(t, env, args...); code != exitRuntime || !strings.Contains(e, "holds the lock") {
+			t.Errorf("%v beside a server: %d %q", args, code, e)
+		}
+	}
+	// The ordinary commands work in the directory of a running server, as they did.
+	if code, _, e := runCmd(t, env, "inbox", "list"); code != 0 {
+		t.Errorf("inbox list beside a server: %d %q", code, e)
+	}
+	closeStore()
+	if code, _, e := runCmd(t, env, "renew-epochs"); code != 0 {
+		t.Errorf("renew-epochs after the server stopped: %d %q", code, e)
 	}
 }

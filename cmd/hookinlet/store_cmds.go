@@ -104,7 +104,7 @@ func rekeyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 		return exitRuntime
 	}
 	ctx := context.Background()
-	store, err := sqlite.Open(ctx, data.DataDir)
+	store, err := sqlite.Open(ctx, data.DataDir, sqlite.WithExclusiveLock())
 	if err != nil {
 		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
 		return exitRuntime
@@ -145,7 +145,7 @@ func renewEpochsCmd(args []string, getenv func(string) string, stdout, stderr io
 		return exitRuntime
 	}
 	ctx := context.Background()
-	store, err := sqlite.Open(ctx, data.DataDir)
+	store, err := sqlite.Open(ctx, data.DataDir, sqlite.WithExclusiveLock())
 	if err != nil {
 		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
 		return exitRuntime
