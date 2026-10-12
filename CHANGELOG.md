@@ -6,6 +6,34 @@ applies.
 
 ## Unreleased
 
+### Phase 15: storage and startup (part 1)
+
+#### Added
+- **A copy of the database before a migration.** With migrations to apply to a database
+  that has data, the store writes `hookinlet.db.before-migration-N.bak` (mode 0600, the
+  latest only) first, and refuses to migrate if it cannot (`sqlite.MigrationSnapshotPrefix`).
+- **A wrong master key is found at start-up and in `/readyz`.** `serve` opens every stored
+  verifier secret before it listens and refuses to start, naming some inboxes and the
+  remedy; `/readyz` answers 503 (`not_ready`) if they stop opening. `Server.CheckSecrets`.
+- **`hookinlet rekey`** seals every secret again under a new master key
+  (`HOOKINLET_OLD_MASTER_KEY`), all or nothing, and can be run again. With no old key it
+  brings secrets from earlier releases up to the new format.
+
+#### Changed
+- **`inbox.SecretBox.Seal` and `Open` take a context** (breaking). The default box now
+  writes version 2: a key id (a fingerprint of the key) and the context (the inbox's slug)
+  are authenticated with the value, so a wrong key is `secretbox.ErrWrongKey` and not
+  just `ErrOpen`, and a secret copied onto another inbox's row does not open. Version 1
+  values still open (`secretbox.Legacy` reports them). `Box.KeyID`.
+- The message `body` column is now the last column of the row (migration 0007), so a read
+  that does not want bodies no longer follows the overflow pages of the ones it skips. The
+  table is rebuilt: it takes time and disk space in proportion to the database.
+
+#### Upgrading
+- Migrations 0007 rebuilds the messages table; the copy of the database taken first is
+  your way back (see docs/deploying.md). Verifier secrets sealed by an earlier release
+  keep working; run `hookinlet rekey` at some point to move them to the new format.
+
 ### Phase 14: cursor integrity
 
 #### Added
