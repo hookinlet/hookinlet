@@ -51,6 +51,9 @@ changelog:
   disable: true
 
 release:
+  # So that re-running a release that failed after it was created (an attestation
+  # service outage, say) replaces the assets instead of stopping on "already exists".
+  replace_existing_artifacts: true
   # A tag with a suffix, such as v0.1.0-rc.1, is published as a pre-release.
   prerelease: auto
   draft: false

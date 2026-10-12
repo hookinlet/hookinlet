@@ -17,7 +17,7 @@ import (
 )
 
 // These measure how long Store.Append waits while a large delete runs, which is
-// the Phase 6 gate (p99 under 50 ms). They run only when asked for, because they
+// the prune-latency budget (p99 under 50 ms). They run only when asked for, because they
 // seed a lot of data:
 //
 //	HOOKINLET_BENCH=1 go test -run 'WhileA|WhileLarge' -v -timeout 20m ./pkg/store/sqlite/

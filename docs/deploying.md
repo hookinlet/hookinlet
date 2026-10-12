@@ -38,7 +38,7 @@ Three things people trip on:
   [Keeping the admin API off the public address](admin.md#keeping-the-admin-api-off-the-public-address)
   before you do that.
 
-If it does not come up, `docker logs hookinlet` says why in one line.
+If it does not come up, `docker logs hookinlet` says why.
 
 Create an inbox, send it a webhook, and read it back:
 
@@ -137,7 +137,11 @@ hookinlet needs the proxy to terminate TLS, to pass `Host` and `X-Forwarded-For`
 through, not to buffer streams, and to wait long enough on quiet connections. Both
 snippets below assume hookinlet listens on `127.0.0.1:8080`, so set
 `HOOKINLET_TRUSTED_PROXIES=127.0.0.1/32` and
-`HOOKINLET_PUBLIC_BASE_URL=https://hooks.example.com`. These are starting points written
+`HOOKINLET_PUBLIC_BASE_URL=https://hooks.example.com`. **With Docker,** hookinlet sees the proxy at the bridge gateway (often `172.17.0.1`), not at
+`127.0.0.1`, so set `HOOKINLET_TRUSTED_PROXIES` to that address (`docker network inspect bridge`
+shows it), and note that `HOOKINLET_ADMIN_LISTEN_ADDR=127.0.0.1:...` is the container's own
+loopback, which the host cannot reach: bind it to `0.0.0.0` inside and publish the port on the host's
+loopback (`-p 127.0.0.1:9090:9090`). These are starting points written
 from each proxy's documentation: the project's tests do not run them, so try yours with
 a test delivery and a stream.
 

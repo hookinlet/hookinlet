@@ -132,7 +132,7 @@ func startOnce(t *testing.T, bin, data string) (d time.Duration, stderr string, 
 	return 0, "", false
 }
 
-// The Phase 7 gate: with an existing database the server is ready in under
+// The start-up budget: with an existing database the server is ready in under
 // 500 ms, and makes no network calls on the way (it has none to make: every
 // setting is local). This runs the real binary and measures wall time from exec
 // to the first successful /readyz.

@@ -20,7 +20,7 @@ import (
 )
 
 // benchRows is how many messages the query benchmarks run against. The
-// Phase 3 gate is a p95 under 20 ms at one million rows; set
+// The read-latency budget is a p95 under 20 ms at one million rows; set
 // HOOKINLET_BENCH_ROWS to measure a different size.
 func benchRows() int {
 	if v, err := strconv.Atoi(os.Getenv("HOOKINLET_BENCH_ROWS")); err == nil && v > 0 {
