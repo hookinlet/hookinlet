@@ -137,8 +137,11 @@ type Store interface {
 	// calling DeleteInbox again finishes the job.
 	DeleteInbox(ctx context.Context, id ID) error
 
+	// GetInbox returns the inbox with that ID, or ErrNotFound.
 	GetInbox(ctx context.Context, id ID) (*Inbox, error)
+	// GetInboxBySlug returns the inbox with that slug, or ErrNotFound.
 	GetInboxBySlug(ctx context.Context, slug string) (*Inbox, error)
+	// ListInboxes pages through the inboxes in ID order (see ListParams).
 	ListInboxes(ctx context.Context, p ListParams) ([]*Inbox, error)
 
 	// CreateToken validates t, assigns ID and CreatedAt, and stores it, updating
@@ -211,7 +214,7 @@ type Notifier interface {
 	//
 	// An in-process notifier must not drop signals. A distributed notifier may
 	// (delivery is at-most-once), and must then be deployed with a positive
-	// SSE_RECHECK_INTERVAL so subscribers re-read the Store periodically.
+	// Options.SSERecheckInterval (HOOKINLET_SSE_RECHECK_INTERVAL) so subscribers re-read the Store periodically.
 	Publish(ctx context.Context, inboxID ID, seq int64)
 
 	// Subscribe returns a channel that receives a signal whenever the inbox may
@@ -270,6 +273,7 @@ type Principal interface {
 // implement it.
 type ScopedPrincipal interface {
 	Principal
+	// InboxIDs lists the inboxes the principal is limited to.
 	InboxIDs() []ID
 }
 

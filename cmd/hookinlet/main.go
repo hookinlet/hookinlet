@@ -88,22 +88,31 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	}
 }
 
+// usageWith gives a command that sets no usage of its own a synopsis above its flags,
+// written to wherever the flag set's output goes.
+func usageWith(fs *flag.FlagSet, synopsis string) {
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: %s\n\n", synopsis)
+		fs.PrintDefaults()
+	}
+}
+
 func usage(w io.Writer) {
 	fmt.Fprint(w, `Usage: hookinlet <command> [flags]
 
 Commands:
-  serve     Run the HTTP server (see "hookinlet serve -h" for settings)
-  migrate   Apply pending database migrations and report the schema version
-  inbox     Manage inboxes: create, list, show, update, set-secret, rotate-ingest-key, delete
-  token     Manage agent tokens: create, list, revoke
-  retention Apply retention policies now (retention run)
-  apply     Bring inboxes to the state a YAML file declares (apply -f FILE)
-  healthcheck  Ask a running server if it is ready (for a container HEALTHCHECK)
-  rekey     Seal the stored secrets under a new master key (server stopped)
+  serve         Run the HTTP server (see "hookinlet serve -h" for settings)
+  migrate       Apply pending database migrations and report the schema version
+  inbox         Manage inboxes: create, list, show, update, set-secret, rotate-ingest-key, delete
+  token         Manage agent tokens: create, list, revoke
+  retention     Apply retention policies now (retention run)
+  apply         Bring inboxes to the state a YAML file declares (apply -f FILE)
+  healthcheck   Ask a running server if it is ready (for a container HEALTHCHECK)
+  rekey         Seal the stored secrets under a new master key (server stopped)
   renew-epochs  Give every inbox a new epoch, after restoring from a copy (server stopped)
-  backup    Write a consistent copy of the database (backup --out FILE)
-  version   Print the version
-  help      Show this help
+  backup        Write a consistent copy of the database (backup --out FILE)
+  version       Print the version
+  help          Show this help
 
 Every setting is a flag and an environment variable: --listen-addr is also
 HOOKINLET_LISTEN_ADDR. Flags win over the environment.
@@ -111,9 +120,9 @@ The secrets (HOOKINLET_ADMIN_TOKEN, HOOKINLET_MASTER_KEY, HOOKINLET_OLD_MASTER_K
 HOOKINLET_VERIFIER_SECRET) can instead be read from a file named by the same variable
 with _FILE added, such as HOOKINLET_MASTER_KEY_FILE=/run/secrets/master_key.
 
-The inbox, token, apply, retention, and backup commands call a running server's admin API when
-given --url (with the admin token in HOOKINLET_ADMIN_TOKEN), and otherwise work
-directly in the data directory (--data-dir).
+The inbox, token, apply, retention, and backup commands call a running server's
+admin API when given --url (with the admin token in HOOKINLET_ADMIN_TOKEN), and
+otherwise work directly in the data directory (--data-dir).
 `)
 }
 

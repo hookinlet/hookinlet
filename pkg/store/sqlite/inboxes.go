@@ -121,6 +121,9 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if in == nil {
+		return inbox.Invalidf("inbox is required")
+	}
 	cp := *in
 	cp.ApplyDefaults()
 	if err := cp.Validate(); err != nil {
@@ -180,6 +183,9 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if in == nil {
+		return inbox.Invalidf("inbox is required")
 	}
 	cp := *in
 	cp.ApplyDefaults()

@@ -140,7 +140,15 @@ func WithReaders(n int) Option { return func(c *config) { c.readers = n } }
 func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error) {
 	cfg := config{now: time.Now, readers: defaultReaders, freeSpace: freeBytes, walLimit: DefaultWALLimit}
 	for _, o := range opts {
-		o(&cfg)
+		if o != nil {
+			o(&cfg)
+		}
+	}
+	if cfg.now == nil {
+		cfg.now = time.Now
+	}
+	if cfg.freeSpace == nil {
+		cfg.freeSpace = freeBytes
 	}
 	if cfg.log == nil {
 		cfg.log = slog.New(slog.DiscardHandler)

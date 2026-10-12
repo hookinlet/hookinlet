@@ -429,3 +429,28 @@ func TestARestartedUpgradeKeepsACopyOfUnchangedData(t *testing.T) {
 		t.Errorf("the copy was replaced: %q, %v", b, err)
 	}
 }
+
+// Nil arguments are errors, not panics.
+func TestNilArgumentsAreRefused(t *testing.T) {
+	s, err := sqlite.Open(t.Context(), t.TempDir(), nil, sqlite.WithClock(nil), sqlite.WithFreeSpace(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	ctx := t.Context()
+	if err := s.CreateInbox(ctx, nil); !errors.Is(err, inbox.ErrInvalid) {
+		t.Errorf("CreateInbox(nil): %v", err)
+	}
+	if err := s.UpdateInbox(ctx, nil); !errors.Is(err, inbox.ErrInvalid) {
+		t.Errorf("UpdateInbox(nil): %v", err)
+	}
+	if err := s.CreateToken(ctx, nil); !errors.Is(err, inbox.ErrInvalid) {
+		t.Errorf("CreateToken(nil): %v", err)
+	}
+	if _, _, err := s.Append(ctx, 1, nil); !errors.Is(err, inbox.ErrInvalid) {
+		t.Errorf("Append(nil): %v", err)
+	}
+	if err := s.Ping(ctx); err != nil {
+		t.Errorf("Ping with a nil free-space function: %v", err)
+	}
+}

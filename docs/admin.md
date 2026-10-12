@@ -66,7 +66,7 @@ Request bodies are JSON (`Content-Type: application/json`, else `415`), at most
 64 KiB (else `413`), and strict: an unknown field, or anything after the JSON
 value, is a `400` rather than being ignored.
 
-Other statuses: `404` for an inbox that does not exist, `409` when a slug is taken
+Other statuses: `404` for an inbox that does not exist, `409` when a slug or an `ingest_key` is taken
 or a change could not be settled (or a sweep or backup is already running),
 `501` when a verifier secret is given but no master key is configured, or the
 Store cannot make backups.

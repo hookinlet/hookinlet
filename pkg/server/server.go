@@ -119,7 +119,7 @@ type Options struct {
 	MaxStreamsPerInbox int
 	// StreamRevalidateInterval is how often an open stream is checked against
 	// the Authenticator and the Store again. A stream authorized once would
-	// otherwise keep running after its token was rotated or its inbox deleted.
+	// otherwise keep running after its token was revoked or its inbox deleted.
 	// Defaults to 30s.
 	StreamRevalidateInterval time.Duration
 	// SSEHeartbeat is how long a stream may be silent before a ping comment is
@@ -413,6 +413,13 @@ func (s *Server) ServeAdmin(ctx context.Context, ln, adminLn net.Listener) error
 }
 
 func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
+	if s.closeCtx.Err() != nil {
+		_ = ln.Close()
+		if adminLn != nil {
+			_ = adminLn.Close()
+		}
+		return errors.New("server: a Server cannot be started again once it has stopped; make a new one")
+	}
 	errCh := make(chan error, 2)
 	go func() { errCh <- s.http.Serve(ln) }()
 	s.log.Info("listening", "addr", ln.Addr().String())

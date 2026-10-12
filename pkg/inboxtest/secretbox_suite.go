@@ -19,7 +19,7 @@ import (
 // SecretBoxSuite runs the inbox.SecretBox conformance tests. newBox must
 // return a box under a fixed key each time it is called, so the suite can
 // check that separate boxes interoperate.
-func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
+func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox, otherKey ...func(t *testing.T) inbox.SecretBox) {
 	t.Helper()
 	ctx1, ctx2 := []byte("inbox-one"), []byte("inbox-two")
 
@@ -61,12 +61,27 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
 
 	t.Run("SealIsRandomized", func(t *testing.T) {
 		box := newBox(t)
-		a, _ := box.Seal([]byte("same"), ctx1)
-		b, _ := box.Seal([]byte("same"), ctx1)
+		a, errA := box.Seal([]byte("same"), ctx1)
+		b, errB := box.Seal([]byte("same"), ctx1)
+		if errA != nil || errB != nil {
+			t.Fatalf("Seal: %v, %v", errA, errB)
+		}
 		if bytes.Equal(a, b) {
 			t.Error("sealing the same plaintext twice gave identical ciphertexts")
 		}
 	})
+
+	if len(otherKey) > 0 {
+		t.Run("AValueSealedUnderAnotherKeyDoesNotOpen", func(t *testing.T) {
+			ct, err := newBox(t).Seal([]byte("secret"), ctx1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pt, err := otherKey[0](t).Open(ct, ctx1); err == nil {
+				t.Errorf("a box under a different key opened the value: %q", pt)
+			}
+		})
+	}
 
 	t.Run("InteroperatesAcrossInstances", func(t *testing.T) {
 		ct, err := newBox(t).Seal([]byte("shared"), ctx1)

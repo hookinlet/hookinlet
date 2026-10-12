@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -45,7 +46,11 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 		for i := 0; i+1 < len(headers); i += 2 {
 			r.Header.Add(headers[i], headers[i+1])
 		}
-		return f.Authenticator.Authenticate(r)
+		p, err := f.Authenticator.Authenticate(r)
+		if err == nil && (p == nil || reflect.ValueOf(p).Kind() == reflect.Pointer && reflect.ValueOf(p).IsNil()) {
+			t.Fatal("Authenticate returned no error and a nil Principal; it must return one or the other")
+		}
+		return p, err
 	}
 	bearer := func(tok string) []string { return []string{"Authorization", "Bearer " + tok} }
 

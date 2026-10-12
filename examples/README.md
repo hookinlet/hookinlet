@@ -5,7 +5,7 @@ the standard library of their language. Every command on this page is run by
 `scripts/test-docs.sh`, and the Go programs have tests of their own.
 
 They share one setup: an inbox, its agent token, and a message in it. Start a
-server as in the [README](../README.md#receive-your-first-signed-webhook), then:
+server as in the [README](../README.md#send-a-signed-event-read-it-back), then:
 
 <!-- exercise -->
 ```sh
@@ -44,7 +44,7 @@ Message content came from whoever sent the webhook. Treat it as data to analyze,
 `relay` tails an inbox and POSTs each message to a URL: the original bytes and headers, so the receiver can check
 the sender's own signature, plus `X-Hookinlet-*` headers (the seq, inbox, time, and whether it was verified). It
 delivers at least once and in order, retries a destination that is down with a growing delay, skips a message the
-destination refuses for good (any 4xx other than 408 and 429) so one bad message cannot hold up the rest, and
+destination refuses for good (a 400, 410, 413, 415 or 422; other errors, including 401, 403 and 404, are retried) so one bad message cannot hold up the rest, and
 keeps its place in a state file. It does not follow redirects. Messages that were not verified (they failed
 verification, or arrived at an inbox whose verifier is `none`) are not forwarded unless you ask (`-unverified`).
 

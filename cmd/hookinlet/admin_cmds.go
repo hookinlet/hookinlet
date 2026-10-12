@@ -357,6 +357,7 @@ func printCreated(w io.Writer, verb string, c *admin.Created) {
 
 func inboxList(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet inbox list", flag.ContinueOnError)
+	usageWith(fs, "hookinlet inbox list [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	if code, done := parseFlags(fs, args, stderr); done {
@@ -402,6 +403,7 @@ func inboxList(args []string, getenv func(string) string, stdout, stderr io.Writ
 
 func inboxShow(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet inbox show", flag.ContinueOnError)
+	usageWith(fs, "hookinlet inbox show SLUG [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	slug, code, done := parseSlugArgs(fs, args, stderr)
@@ -618,6 +620,7 @@ func inboxSetSecret(args []string, getenv func(string) string, in io.Reader, std
 
 func inboxRotateIngestKey(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet inbox rotate-ingest-key", flag.ContinueOnError)
+	usageWith(fs, "hookinlet inbox rotate-ingest-key SLUG [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	slug, code, done := parseSlugArgs(fs, args, stderr)
@@ -649,6 +652,7 @@ func inboxRotateIngestKey(args []string, getenv func(string) string, stdout, std
 
 func inboxDelete(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet inbox delete", flag.ContinueOnError)
+	usageWith(fs, "hookinlet inbox delete SLUG [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	yes := fs.Bool("yes", false, "confirm: delete the inbox and every message in it")
@@ -691,6 +695,7 @@ func retentionCmd(args []string, getenv func(string) string, stdout, stderr io.W
 		return exitUsage
 	}
 	fs := flag.NewFlagSet("hookinlet retention run", flag.ContinueOnError)
+	usageWith(fs, "hookinlet retention run [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	if code, done := parseFlags(fs, args[1:], stderr); done {

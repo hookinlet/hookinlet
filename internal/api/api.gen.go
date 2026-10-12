@@ -400,7 +400,7 @@ type Admin struct {
 	LastSeq      int     `json:"last_seq"`
 	MaxBodyBytes int     `json:"max_body_bytes"`
 
-	// MessageCount Present when a single inbox is shown, not in lists.
+	// MessageCount Present only in `GET /v1/admin/inboxes/{slug}`, not in lists or in the answers to changes.
 	MessageCount      *int                   `json:"message_count,omitempty"`
 	Name              string                 `json:"name"`
 	OnVerifyFail      AdminOnVerifyFail      `json:"on_verify_fail"`
@@ -485,7 +485,7 @@ type Deleted struct {
 	Deleted int `json:"deleted"`
 }
 
-// Error The shape of every error the server writes. Each status has its own schema (`Error400`, ...) that names the codes it uses.
+// Error The shape of every error the server writes. Each status has its own schema (`ErrorBadRequest`, `ErrorNotFound`, ...) that names the codes it uses.
 type Error struct {
 	Error struct {
 		// Code A stable, machine-readable code such as `not_found` or `invalid_parameter`.

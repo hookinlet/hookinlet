@@ -18,6 +18,9 @@ func (s *Store) CreateToken(ctx context.Context, t *inbox.Token) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if t == nil {
+		return inbox.Invalidf("token is required")
+	}
 	cp := *t
 	if err := cp.Validate(); err != nil {
 		return err

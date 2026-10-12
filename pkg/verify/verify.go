@@ -85,6 +85,7 @@ type SecretChecker interface {
 // request header. The ingest handler removes those headers before storing the
 // delivery.
 type HeaderRedactor interface {
+	// SecretHeaders names the request headers whose values must not be stored.
 	SecretHeaders() []string
 }
 

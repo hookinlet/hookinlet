@@ -42,11 +42,40 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 	drain := func(ch <-chan struct{}) (n int) {
 		for {
 			select {
-			case <-ch:
+			case _, ok := <-ch:
+				if !ok {
+					return n // closed: the signalled checks report it
+				}
 				n++
 			case <-time.After(quiet):
 				return n
 			}
+		}
+	}
+
+	// subscribe calls Subscribe, failing the test (rather than hanging it) if an
+	// implementation blocks. Subscribe must return at once, even when a backend is down.
+	subscribe := func(t *testing.T, n inbox.Notifier, ctx context.Context, id inbox.ID) (<-chan struct{}, func()) {
+		t.Helper()
+		type pair struct {
+			ch     <-chan struct{}
+			cancel func()
+		}
+		got := make(chan pair, 1)
+		go func() {
+			ch, cancel := n.Subscribe(ctx, id)
+			got <- pair{ch, cancel}
+		}()
+		select {
+		case p := <-got:
+			if p.ch == nil || p.cancel == nil {
+				t.Error("Subscribe returned a nil channel or cancel function")
+				return make(chan struct{}), func() {}
+			}
+			return p.ch, p.cancel
+		case <-time.After(2 * time.Second):
+			t.Error("Subscribe blocked for 2s; it must return at once, with a silent channel if its backend is unavailable")
+			return make(chan struct{}), func() {}
 		}
 	}
 
@@ -70,7 +99,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 
 	t.Run("PublishAfterSubscribeWakesTheSubscriber", func(t *testing.T) {
 		n := newNotifier(t)
-		ch, cancel := n.Subscribe(t.Context(), 1)
+		ch, cancel := subscribe(t, n, t.Context(), 1)
 		defer cancel()
 		publish(t, n, 1, 1)
 		if !signalled(ch, signalWait) {
@@ -85,7 +114,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 
 	t.Run("NothingSignalsWithoutAPublish", func(t *testing.T) {
 		n := newNotifier(t)
-		ch, cancel := n.Subscribe(t.Context(), 1)
+		ch, cancel := subscribe(t, n, t.Context(), 1)
 		defer cancel()
 		if signalled(ch, quiet) {
 			t.Error("a subscription signalled before anything was published")
@@ -99,7 +128,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 
 	t.Run("SeveralPublishesBeforeAReadCoalesce", func(t *testing.T) {
 		n := newNotifier(t)
-		ch, cancel := n.Subscribe(t.Context(), 1)
+		ch, cancel := subscribe(t, n, t.Context(), 1)
 		defer cancel()
 		publish(t, n, 1, 1000)
 		if !signalled(ch, signalWait) {
@@ -119,9 +148,9 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 
 	t.Run("AnInboxDoesNotSignalAnotherInboxsSubscribers", func(t *testing.T) {
 		n := newNotifier(t)
-		a, cancelA := n.Subscribe(t.Context(), 1)
+		a, cancelA := subscribe(t, n, t.Context(), 1)
 		defer cancelA()
-		b, cancelB := n.Subscribe(t.Context(), 2)
+		b, cancelB := subscribe(t, n, t.Context(), 2)
 		defer cancelB()
 		publish(t, n, 2, 1)
 		if !signalled(b, signalWait) {
@@ -136,7 +165,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 		n := newNotifier(t)
 		var chans []<-chan struct{}
 		for range 20 {
-			ch, cancel := n.Subscribe(t.Context(), 1)
+			ch, cancel := subscribe(t, n, t.Context(), 1)
 			defer cancel()
 			chans = append(chans, ch)
 		}
@@ -150,9 +179,9 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 
 	t.Run("CancellingOneLeavesTheOthers", func(t *testing.T) {
 		n := newNotifier(t)
-		keep, cancelKeep := n.Subscribe(t.Context(), 1)
+		keep, cancelKeep := subscribe(t, n, t.Context(), 1)
 		defer cancelKeep()
-		gone, cancelGone := n.Subscribe(t.Context(), 1)
+		gone, cancelGone := subscribe(t, n, t.Context(), 1)
 		cancelGone()
 		publish(t, n, 1, 1)
 		if !signalled(keep, signalWait) {
@@ -165,7 +194,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 
 	t.Run("CancelIsIdempotentAndTheChannelIsNeverClosed", func(t *testing.T) {
 		n := newNotifier(t)
-		ch, cancel := n.Subscribe(t.Context(), 1)
+		ch, cancel := subscribe(t, n, t.Context(), 1)
 		cancel()
 		cancel()
 		cancel()
@@ -183,7 +212,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 	t.Run("CancellingTheContextEndsTheSubscription", func(t *testing.T) {
 		n := newNotifier(t)
 		ctx, cancelCtx := context.WithCancel(t.Context())
-		ch, cancel := n.Subscribe(ctx, 1)
+		ch, cancel := subscribe(t, n, ctx, 1)
 		defer cancel()
 		cancelCtx()
 		time.Sleep(quiet) // the implementation may notice asynchronously
@@ -199,7 +228,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 		n := newNotifier(t)
 		ctx, cancelCtx := context.WithCancel(t.Context())
 		cancelCtx()
-		ch, cancel := n.Subscribe(ctx, 1)
+		ch, cancel := subscribe(t, n, ctx, 1)
 		defer cancel()
 		time.Sleep(quiet)
 		publish(t, n, 1, 1)
@@ -217,11 +246,11 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 		cancels := make([]func(), 0, 2000)
 		ctxs := make([]context.CancelFunc, 0, 1000)
 		for i := range 1000 {
-			_, cancel := n.Subscribe(t.Context(), inbox.ID(i%10))
+			_, cancel := subscribe(t, n, t.Context(), inbox.ID(i%10))
 			cancels = append(cancels, cancel)
 			ctx, stop := context.WithCancel(t.Context())
 			ctxs = append(ctxs, stop)
-			_, cancel = n.Subscribe(ctx, inbox.ID(i%10))
+			_, cancel = subscribe(t, n, ctx, inbox.ID(i%10))
 			cancels = append(cancels, cancel)
 		}
 		for _, c := range cancels[:1000] {
@@ -252,7 +281,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 	// go out, or a subscriber waits for the recheck interval for no reason.
 	t.Run("PublishWithACancelledContextStillSignals", func(t *testing.T) {
 		n := newNotifier(t)
-		ch, cancel := n.Subscribe(t.Context(), 1)
+		ch, cancel := subscribe(t, n, t.Context(), 1)
 		defer cancel()
 		ctx, stop := context.WithCancel(t.Context())
 		stop()
@@ -282,7 +311,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 		cycle := func(count int) {
 			for i := range count {
 				ctx, stop := context.WithCancel(t.Context())
-				_, cancel := n.Subscribe(ctx, inbox.ID(i%5000))
+				_, cancel := subscribe(t, n, ctx, inbox.ID(i%5000))
 				if i%2 == 0 {
 					cancel()
 				} else {
@@ -306,7 +335,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 	t.Run("PublishDoesNotWaitForSlowSubscribers", func(t *testing.T) {
 		n := newNotifier(t)
 		for range 5000 {
-			_, cancel := n.Subscribe(t.Context(), 1) // never read from
+			_, cancel := subscribe(t, n, t.Context(), 1) // never read from
 			defer cancel()
 		}
 		publish(t, n, 1, 100)
@@ -319,7 +348,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 			wg.Go(func() {
 				id := inbox.ID(g % 3)
 				for i := range 300 {
-					ch, cancel := n.Subscribe(t.Context(), id)
+					ch, cancel := subscribe(t, n, t.Context(), id)
 					n.Publish(t.Context(), id, int64(i))
 					select {
 					case <-ch:
