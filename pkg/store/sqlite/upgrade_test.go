@@ -409,7 +409,8 @@ func TestARestartedUpgradeKeepsACopyOfUnchangedData(t *testing.T) {
 	}
 	var stamp string
 	if err := raw.QueryRowContext(t.Context(), `SELECT (SELECT COALESCE(MAX(id),0) FROM messages) || '/' ||
-		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes)`).Scan(&stamp); err != nil {
+		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes) || '/' ||
+		(SELECT COALESCE(SUM(version),0) FROM inboxes) || '/' || (SELECT COALESCE(MAX(id),0) FROM inboxes)`).Scan(&stamp); err != nil {
 		t.Fatal(err)
 	}
 	_ = raw.Close()
@@ -453,4 +454,33 @@ func TestNilArgumentsAreRefused(t *testing.T) {
 	if err := s.Ping(ctx); err != nil {
 		t.Errorf("Ping with a nil free-space function: %v", err)
 	}
+}
+
+// A process with the database open that takes no lock (the previous release) is not
+// migrated underneath.
+func TestAMigrationRefusesWhileAnotherProcessHasTheDatabaseOpen(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+	other, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName)+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(200)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+	var n int
+	if err := other.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM inboxes`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock()); err == nil {
+		t.Fatal("migrated while another connection had the database open")
+	}
+	var v int
+	if err := other.QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migrations`).Scan(&v); err != nil || v != 2 {
+		t.Errorf("schema version %d, %v; want it left at 2", v, err)
+	}
+	_ = other.Close()
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
+	if err != nil {
+		t.Fatalf("once the other connection is gone: %v", err)
+	}
+	_ = s.Close()
 }

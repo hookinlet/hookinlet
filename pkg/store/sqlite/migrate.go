@@ -123,6 +123,26 @@ func migrate(ctx context.Context, db *sql.DB, dbPath string, mayMigrate bool, lo
 		}
 	}
 
+	// A process that does not take the lock (the previous release took none) may have the
+	// database open and be writing to it. Migrating under it would leave its counts and
+	// its rows wrong for good, so be the only connection to the file, or stop.
+	if current > 0 && current < len(migs) {
+		if _, err := db.ExecContext(ctx, `PRAGMA locking_mode = EXCLUSIVE`); err == nil {
+			_, err = db.ExecContext(ctx, `BEGIN EXCLUSIVE; COMMIT`)
+			defer func() {
+				// The mode only changes back, and the lock is only given up, at the next
+				// access to the file.
+				bg := context.WithoutCancel(ctx)
+				_, _ = db.ExecContext(bg, `PRAGMA locking_mode = NORMAL`)
+				var n int
+				_ = db.QueryRowContext(bg, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n)
+			}()
+			if err != nil {
+				return nil, fmt.Errorf("sqlite: another process has the database open, so it cannot be migrated safely; stop every other hookinlet (including an older release, which does not lock the data directory) and try again: %w", err)
+			}
+		}
+	}
+
 	var applied []int
 	for _, m := range migs[current:] {
 		tx, err := db.BeginTx(ctx, nil)
@@ -150,12 +170,13 @@ func migrate(ctx context.Context, db *sql.DB, dbPath string, mayMigrate bool, lo
 	return applied, nil
 }
 
-// fingerprint summarises what a delivery or an inbox change would alter, cheaply enough
+// fingerprint summarises what a delivery or an inbox change (which bumps its version) would alter, cheaply enough
 // to take on a large database.
 func fingerprint(ctx context.Context, db *sql.DB) (string, error) {
 	var s string
 	err := db.QueryRowContext(ctx, `SELECT (SELECT COALESCE(MAX(id),0) FROM messages) || '/' ||
-		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes)`).Scan(&s)
+		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes) || '/' ||
+		(SELECT COALESCE(SUM(version),0) FROM inboxes) || '/' || (SELECT COALESCE(MAX(id),0) FROM inboxes)`).Scan(&s)
 	if err != nil {
 		return "", fmt.Errorf("sqlite: fingerprint the database: %w", err)
 	}

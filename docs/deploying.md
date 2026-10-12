@@ -31,7 +31,7 @@ Three things people trip on:
   the shell.
 - **Use a named volume, or give a directory to uid 65532.** The image runs as a
   non-root user. `-v hookinlet-data:/data` (a Docker volume) just works;
-  `-v ./data:/data` fails with "permission denied" unless you first
+  `-v ./data:/data` fails with "permission denied" on Linux unless you first
   `chown 65532:65532 ./data`.
 - **`-p 127.0.0.1:8080:8080`** publishes the port on this machine only. Plain
   `-p 8080:8080` exposes the admin API to your network; read
@@ -221,6 +221,26 @@ lists them all.
 
 A bad setting is reported, all of them at once, and the server does not start.
 
+## Commands with the image
+
+The image holds one binary, `/hookinlet`, so the commands in these documents run through
+Docker. Against a running container:
+
+```bash
+docker exec hookinlet /hookinlet inbox list
+docker exec hookinlet /hookinlet backup --out /data/backup.db
+docker cp hookinlet:/data/backup.db ./backup.db     # or: curl .../v1/admin/backup -o backup.db
+```
+
+Commands that need the server stopped (`migrate`, `rekey`, `renew-epochs`) run in a
+throwaway container on the same volume, with the secrets they need in its environment:
+
+```bash
+docker stop hookinlet
+docker run --rm -v hookinlet-data:/data -e HOOKINLET_MASTER_KEY -e HOOKINLET_OLD_MASTER_KEY \
+  ghcr.io/hookinlet/hookinlet:latest rekey
+```
+
 ## Health checks
 
 - `GET /healthz` answers `200` while the process is up.
@@ -321,7 +341,7 @@ Start the new version on the same data directory. It applies any database
 migrations itself, once, before it listens, and logs each one. A large database can take
 minutes to migrate (the move of the message body, 0007, took about two and a half on
 a million rows), during which nothing listens, so a health check that restarts the process
-will restart the migration too: run `hookinlet migrate` as its own step first (it applies
+will restart the migration too: stop the old server (0.1.0-rc.1 takes no lock on the data directory, so nothing else stops a migration under it, and the migration refuses if it finds the database open), then run `hookinlet migrate` as its own step (it applies
 the migrations and reports the schema version) or give the health check a generous
 start period. Only the process that holds the data directory's lock migrates: a command
 such as `hookinlet inbox show` run against an old database refuses and tells you to stop

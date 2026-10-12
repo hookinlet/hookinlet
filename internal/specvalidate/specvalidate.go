@@ -587,7 +587,7 @@ func (d *Document) check(schema, v any, at string, opts Options) []Violation {
 			bad("must be valid UTF-8")
 		}
 		if p, ok := sm["pattern"].(string); ok && !d.patterns[p].MatchString(x) {
-			bad("is not in the required form")
+			bad("is not in the required form (pattern %s)", p)
 		}
 		if n, ok := sm["minLength"].(float64); ok && float64(len([]rune(x))) < n {
 			bad("must be at least %v character(s)", n)

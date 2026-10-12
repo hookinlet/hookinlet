@@ -57,7 +57,7 @@ export HOOKINLET_LISTEN_ADDR=127.0.0.1:8080
 export HOOKINLET_LOG_LEVEL=warn
 hookinlet serve &
 for i in $(seq 50); do curl -sf localhost:8080/readyz >/dev/null && break; sleep 0.2; done
-curl -sf localhost:8080/readyz      # {"status":"ready"}; if this fails, something else may be using port 8080
+curl -sf localhost:8080/readyz      # {"status":"ready"}; if this fails, something else may be using port 8080 (on IPv6 too: try 127.0.0.1:8080)
 ```
 
 Create an inbox that accepts only GitHub's signature, for a secret you choose. (This one is made up; a real one

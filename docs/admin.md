@@ -6,7 +6,7 @@ and they do the same things:
 
 - the **admin API**, on a running server, with the admin token;
 - the **command line**, which calls that API when you give it `--url`, and
-  otherwise works directly in the data directory with no server running.
+  otherwise works directly in the data directory.
 
 ## Who may do this
 

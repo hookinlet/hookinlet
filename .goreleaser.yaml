@@ -35,6 +35,11 @@ archives:
       - README.md
       - CHANGELOG.md
       - docs/*.md
+      - docs/openapi.json
+      - SECURITY.md
+      - CONTRIBUTING.md
+      - examples/README.md
+      - examples/**/*
 
 checksum:
   name_template: checksums.txt
