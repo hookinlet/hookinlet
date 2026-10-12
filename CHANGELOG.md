@@ -6,6 +6,39 @@ applies.
 
 ## Unreleased
 
+### Phase 15: storage and startup (part 2)
+
+#### Added
+- **One server per data directory.** `sqlite.WithExclusiveLock` takes an advisory lock
+  (`hookinlet.lock`) that `serve`, `rekey` and `renew-epochs` use; a second server stops
+  at once with `*sqlite.LockedError`. Other commands do not take it.
+- **A full disk is a 503.** A write that fails for lack of room is `inbox.ErrStorageFull`;
+  ingest answers `503 storage_full` with `Retry-After` and does not acknowledge; `Store.Ping`
+  (so `/readyz`) fails while the volume has under `sqlite.MinFreeBytes` (32 MiB) or the last
+  write failed for room. The ingest operations document `503`.
+- **An ingest memory budget.** `server.Options.IngestMemoryBudget` (`--ingest-memory-budget`,
+  256 MiB by default, 0 in the flag or negative in the option turns it off) bounds the body
+  bytes held by deliveries being received; one that would go over is answered `503
+  overloaded` with `Retry-After` before its body is read.
+- **The write-ahead log is cut back** to `sqlite.DefaultWALLimit` (64 MiB; `WithWALLimit`)
+  whenever it is reset, instead of staying as large as the biggest burst.
+- **`GET /metrics`** (admin token): Prometheus text, with no series labelled by anything a
+  client chooses.
+- **`hookinlet healthcheck`** and a `HEALTHCHECK` in the image (the image has no `curl`).
+- **Draining.** `server.Options.DrainDelay` (`--drain-delay`): after being told to stop,
+  `/readyz` answers 503 for that long while the server still serves.
+- **Secrets from files**: `HOOKINLET_ADMIN_TOKEN_FILE`, `..._MASTER_KEY_FILE`,
+  `..._OLD_MASTER_KEY_FILE`, `..._VERIFIER_SECRET_FILE`.
+
+#### Changed
+- **`inbox.Hooks.BeforeIngest` takes an `*inbox.IngestRequest`** (breaking): the inbox, size,
+  source address, method, path suffix, and request headers.
+- **`Backupper.Backup` may return size -1** for a snapshot it streams; the admin API then omits
+  `Content-Length` (it is optional in the document now) and `hookinlet backup` accepts it.
+- `ErrorOverloaded` has a second code, `storage_full`.
+- `go.mod` says `go 1.27` with `toolchain go1.27.2`, so embedders are not made to use the
+  patch release.
+
 ### Phase 15: storage and startup (part 1)
 
 #### Added

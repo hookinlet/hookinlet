@@ -60,6 +60,7 @@ shown exactly once is a new agent token, in the response that creates it.
 | `DELETE /admin/tokens/{id}` | Revoke a token (`204`). It stops working at once. |
 | `POST /admin/retention/run` | Apply retention now. Returns `{"deleted": N}`. |
 | `GET /admin/backup` | Download a consistent copy of the database. |
+| `GET /metrics` | Prometheus metrics (see [deploying](deploying.md#metrics)). |
 
 Request bodies are JSON (`Content-Type: application/json`, else `415`), at most
 64 KiB (else `413`), and strict: an unknown field, or anything after the JSON
