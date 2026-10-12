@@ -90,8 +90,9 @@ notarized: one downloaded through a browser is quarantined, and
   with the key it was given (and says which inboxes, and what to do), and `/readyz`
   fails if that becomes true later. To change the key on purpose, stop the server and
   run `hookinlet rekey` with the old key in `HOOKINLET_OLD_MASTER_KEY` and the new one
-  in `HOOKINLET_MASTER_KEY`; it seals every secret again under the new key, changes
-  nothing if any secret opens with neither, and can be run again if interrupted.
+  in `HOOKINLET_MASTER_KEY`; it opens every secret before it writes any (so a wrong old key
+  changes nothing), seals them again under the new key, leaves alone any inbox that was
+  edited while it ran, and can be run again if interrupted.
   (The same command with no old key brings secrets written by an older release up to
   the current format; they work meanwhile.) A secret sealed under a key you no longer
   have cannot be recovered: set it again with `hookinlet inbox set-secret`.
@@ -188,8 +189,15 @@ already holds data, the server first writes a complete copy of it as it was to
 version it was at; mode 0600). If the upgrade goes badly, stop the server, put that
 file back as `hookinlet.db` (remove any `-wal` and `-shm` beside it), and start the
 previous release. If the copy cannot be made (no room for a second copy of the
-database), the server refuses to migrate and changes nothing. Only the latest copy
-is kept, and nothing deletes it, so remove it when you trust the upgrade. It is as
+database), the server refuses to migrate and changes nothing. If an upgrade is cut
+short (killed, out of disk, a start timeout), the next start keeps the copy that was
+made before it began: the database is then partly upgraded, and the copy of that would
+be no way back. (A marker file, `hookinlet.db.migrating`, records that; it goes when
+an upgrade finishes.) Only the latest finished upgrade's copy is kept, and nothing
+deletes it, so remove it when you trust the upgrade. **Room:** the migration that
+moves the message body (0007) rebuilds the messages table, so allow for about three
+times the database's size free in the data directory (the copy, the new table, and the
+write-ahead log), and note that the file does not shrink afterwards. It is as
 sensitive as the database. Taking your own [backup](admin.md#backups) first is still
 sensible. Changes that affect anyone
 embedding the packages are listed in `CHANGELOG.md`; this is a pre-1.0 project

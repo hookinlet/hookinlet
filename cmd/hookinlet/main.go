@@ -136,6 +136,10 @@ func serve(args []string, getenv func(string) string, stderr io.Writer) int {
 		return exitRuntime
 	}
 
+	if n := srv.LegacySecrets(context.Background()); n > 0 {
+		log.Warn("some verifier secrets are in the sealed format of an earlier release, which binds them to no inbox; run `hookinlet rekey` (server stopped) to bring them up to date", "secrets", n)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := srv.Run(ctx); err != nil {

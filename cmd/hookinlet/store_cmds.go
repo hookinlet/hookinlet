@@ -116,6 +116,10 @@ func rekeyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 		return exitRuntime
 	}
 	fmt.Fprintf(stdout, "sealed %d secret(s) under key %s; %d already were\n", res.Resealed, newBox.KeyID(), res.Unchanged)
+	if res.Skipped > 0 {
+		fmt.Fprintf(stderr, "hookinlet: %d inbox(es) were changed while this ran and were left alone; stop the server and run rekey again\n", res.Skipped)
+		return exitRuntime
+	}
 	return 0
 }
 

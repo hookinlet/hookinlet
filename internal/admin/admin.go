@@ -483,7 +483,7 @@ func (s *Service) seal(slug, secret string) ([]byte, error) {
 	if s.Box == nil {
 		return nil, ErrNoSecretBox
 	}
-	return s.Box.Seal([]byte(secret), []byte(slug))
+	return s.Box.Seal([]byte(secret), inbox.VerifierSecretContext(slug))
 }
 
 // checkVerifier makes sure the verifier exists and accepts its configuration,

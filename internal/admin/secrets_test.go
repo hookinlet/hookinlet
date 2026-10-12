@@ -5,12 +5,14 @@ package admin_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"errors"
 	"testing"
 
 	"github.com/hookinlet/hookinlet/internal/admin"
+	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/secretbox"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
 )
@@ -95,10 +97,10 @@ func TestRekeyMovesEverySecretToTheNewKey(t *testing.T) {
 	}
 	for _, slug := range []string{"alpha", "bravo", "charlie"} {
 		in, _ := st.GetInboxBySlug(t.Context(), slug)
-		if pt, err := newBox.Open(in.VerifierSecret, []byte(slug)); err != nil || string(pt) != "secret-of-"+slug {
+		if pt, err := newBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(slug)); err != nil || string(pt) != "secret-of-"+slug {
 			t.Errorf("%s: %q, %v", slug, pt, err)
 		}
-		if _, err := oldBox.Open(in.VerifierSecret, []byte(slug)); err == nil {
+		if _, err := oldBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(slug)); err == nil {
 			t.Errorf("%s still opens with the old key", slug)
 		}
 	}
@@ -123,7 +125,7 @@ func TestRekeyWithTheWrongOldKeyChangesNothing(t *testing.T) {
 	// And an inbox sealed under neither key stops it before any other is touched.
 	bravo := mustSecret(t, st, "bravo")
 	other, _ := st.GetInboxBySlug(t.Context(), "alpha")
-	sealed, _ := boxOf(t, 4).Seal([]byte("x"), []byte("alpha"))
+	sealed, _ := boxOf(t, 4).Seal([]byte("x"), inbox.VerifierSecretContext("alpha"))
 	other.VerifierSecret = sealed
 	if err := st.UpdateInbox(t.Context(), other); err != nil {
 		t.Fatal(err)
@@ -173,7 +175,43 @@ func TestRekeyUpgradesAFirstReleaseSecret(t *testing.T) {
 	if secretbox.Legacy(mustSecret(t, st, "alpha")) {
 		t.Error("the secret is still in the first layout")
 	}
-	if _, err := svc.Box.Open(mustSecret(t, st, "alpha"), []byte("alpha")); err != nil {
+	if _, err := svc.Box.Open(mustSecret(t, st, "alpha"), inbox.VerifierSecretContext("alpha")); err != nil {
 		t.Errorf("after the upgrade: %v", err)
+	}
+}
+
+// storeThatChangesAnInboxBetweenThePlanAndTheWrite edits "alpha" the first time
+// Rekey fetches it to write, as another process would.
+type editsOnFetch struct {
+	inbox.Store
+	done bool
+}
+
+func (e *editsOnFetch) GetInboxBySlug(ctx context.Context, slug string) (*inbox.Inbox, error) {
+	if slug == "alpha" && !e.done {
+		e.done = true
+		in, err := e.Store.GetInboxBySlug(ctx, slug)
+		if err != nil {
+			return nil, err
+		}
+		in.VerifierSecret = nil // an admin changed the verifier, which drops its secret
+		in.Verifier = "none"
+		if err := e.UpdateInbox(ctx, in); err != nil {
+			return nil, err
+		}
+	}
+	return e.Store.GetInboxBySlug(ctx, slug)
+}
+
+func TestRekeyDoesNotOverwriteAnEditMadeWhileItRan(t *testing.T) {
+	_, st := secretService(t)
+	svc := &admin.Service{Store: &editsOnFetch{Store: st}, Box: boxOf(t, 2)}
+	res, err := svc.Rekey(t.Context(), boxOf(t, 1))
+	if err != nil || res.Skipped != 1 || res.Resealed != 2 {
+		t.Fatalf("rekey: %+v, %v", res, err)
+	}
+	in, _ := st.GetInboxBySlug(t.Context(), "alpha")
+	if in.Verifier != "none" || len(in.VerifierSecret) != 0 {
+		t.Errorf("the edit was overwritten: verifier %q, secret of %d bytes", in.Verifier, len(in.VerifierSecret))
 	}
 }

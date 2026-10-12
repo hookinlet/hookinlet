@@ -5,9 +5,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
+	"github.com/hookinlet/hookinlet/internal/admin"
 	"github.com/hookinlet/hookinlet/internal/api"
 )
 
@@ -59,24 +61,37 @@ func (s *Server) notReady(ctx context.Context) string {
 		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready", slog.String("err", err.Error()))
 		return "the store is not reachable"
 	}
-	if err := s.secretsOK(ctx); err != nil {
+	switch err := s.secretsOK(ctx); {
+	case err == nil:
+	case errors.Is(err, ErrUnreadableSecrets):
 		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready", slog.String("err", err.Error()))
 		return "stored verifier secrets cannot be opened with the master key; see the server log"
+	default:
+		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready: could not check the stored secrets", slog.String("err", err.Error()))
+		return "the store is not reachable"
 	}
 	return ""
 }
 
+// ErrUnreadableSecrets is what CheckSecrets returns, wrapped, when a stored
+// verifier secret does not open with the server's master key.
+var ErrUnreadableSecrets = admin.ErrUnreadableSecrets
+
 const (
-	secretsGood = 30 * time.Second // how long a clean check is believed
-	secretsBad  = 5 * time.Second  // and a failed one: it may have been fixed
+	secretsGood    = 30 * time.Second // how long a clean check is believed
+	secretsBad     = 5 * time.Second  // and one that found a wrong key: it may have been fixed
+	secretsTimeout = 20 * time.Second // how long the check may take, whatever the probe's patience
 )
 
 // secretsOK checks the stored secrets, at most once in a while, however often
-// readiness is asked.
+// readiness is asked. The check belongs to the server and not to the probe that
+// happened to start it: a probe that gives up does not make the secrets look
+// unreadable, and only an answer about the secrets is remembered, never a failure
+// to ask.
 func (s *Server) secretsOK(ctx context.Context) error {
 	s.secretsMu.Lock()
 	defer s.secretsMu.Unlock()
-	now := s.opts.Now()
+	now := time.Now()
 	if !s.secretsAt.IsZero() {
 		ttl := secretsGood
 		if s.secretsErr != nil {
@@ -86,14 +101,30 @@ func (s *Server) secretsOK(ctx context.Context) error {
 			return s.secretsErr
 		}
 	}
-	s.secretsErr = s.CheckSecrets(ctx)
-	s.secretsAt = now
-	return s.secretsErr
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), secretsTimeout)
+	defer cancel()
+	err := s.CheckSecrets(cctx)
+	if err != nil && !errors.Is(err, ErrUnreadableSecrets) {
+		return err // could not look: say so, and look again next time
+	}
+	s.secretsErr, s.secretsAt = err, now
+	return err
+}
+
+// LegacySecrets counts the stored verifier secrets that are still in the original
+// sealed layout (see secretbox.Legacy): they are bound to no inbox until
+// `hookinlet rekey` writes them again.
+func (s *Server) LegacySecrets(ctx context.Context) int {
+	r, err := s.adm.CheckSecrets(ctx)
+	if err != nil {
+		return 0
+	}
+	return r.Legacy
 }
 
 // CheckSecrets opens every stored verifier secret with the server's master key and
-// returns an error that wraps admin.ErrUnreadableSecrets, naming some of the
-// inboxes, if any does not open. cmd/hookinlet serve runs it before listening.
+// returns an error that wraps ErrUnreadableSecrets, naming some of the inboxes, if
+// any does not open. cmd/hookinlet serve runs it before listening.
 func (s *Server) CheckSecrets(ctx context.Context) error {
 	r, err := s.adm.CheckSecrets(ctx)
 	if err != nil {

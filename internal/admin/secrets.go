@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,6 +23,9 @@ var ErrUnreadableSecrets = errors.New("stored verifier secrets cannot be opened"
 type SecretReport struct {
 	// Checked is how many inboxes have a verifier secret.
 	Checked int
+	// Legacy is how many of them are in the original sealed layout, which binds them
+	// to nothing: they open for any inbox until Rekey writes them again.
+	Legacy int
 	// WrongKey lists the inboxes whose secret was sealed under a different master
 	// key. NoKey is true when there are secrets but no key at all.
 	WrongKey []string
@@ -80,7 +84,10 @@ func (s *Service) CheckSecrets(ctx context.Context) (SecretReport, error) {
 				r.NoKey = true
 				continue
 			}
-			pt, err := s.Box.Open(in.VerifierSecret, []byte(in.Slug))
+			if secretbox.Legacy(in.VerifierSecret) {
+				r.Legacy++
+			}
+			pt, err := s.Box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.Slug))
 			clear(pt)
 			switch {
 			case err == nil:
@@ -101,6 +108,10 @@ type RekeyResult struct {
 	// Resealed is how many secrets were written again, Unchanged how many already
 	// were in the current layout under the current key.
 	Resealed, Unchanged int
+	// Skipped is how many were left alone because the inbox was changed (its secret
+	// set again, its verifier changed, or it was deleted and made again) after Rekey
+	// planned them. Run it again to see to those.
+	Skipped int
 }
 
 // Rekey seals every stored verifier secret again under s.Box, opening each with
@@ -108,17 +119,19 @@ type RekeyResult struct {
 // the master key, to move the secrets to the new one; or with old the same as
 // s.Box, to bring secrets written by an earlier release up to the current layout.
 //
-// Nothing is written unless every secret can be opened with one of the two, so a
-// wrong "old" key changes nothing. A run that is interrupted can be run again: what
-// was done is not done twice.
+// Every secret is opened with one of the two keys before any is written, so a
+// wrong "old" key changes nothing. After that the secrets are written one at a time,
+// and one that was changed since it was read is left alone (Skipped). A run that
+// fails or is interrupted part way can be run again: what was done is not done twice.
 func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, error) {
 	var res RekeyResult
 	if s.Box == nil || old == nil {
 		return res, ErrNoSecretBox
 	}
 	type work struct {
-		slug   string
-		sealed []byte
+		slug     string
+		original []byte // what was read, which the write must still find
+		sealed   []byte
 	}
 	var todo []work
 	var after inbox.ID
@@ -132,7 +145,7 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 			if len(in.VerifierSecret) == 0 {
 				continue
 			}
-			ctxb := []byte(in.Slug)
+			ctxb := inbox.VerifierSecretContext(in.Slug)
 			if pt, err := s.Box.Open(in.VerifierSecret, ctxb); err == nil {
 				clear(pt)
 				if !secretbox.Legacy(in.VerifierSecret) {
@@ -154,7 +167,7 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 			if err != nil {
 				return res, err
 			}
-			todo = append(todo, work{in.Slug, sealed})
+			todo = append(todo, work{in.Slug, bytes.Clone(in.VerifierSecret), sealed})
 		}
 		if len(page) < inbox.MaxListLimit {
 			break
@@ -170,6 +183,10 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 			}
 			if err != nil {
 				return res, err
+			}
+			if !bytes.Equal(in.VerifierSecret, w.original) {
+				res.Skipped++ // changed since it was read: not ours to overwrite
+				break
 			}
 			in.VerifierSecret = w.sealed
 			err = s.Store.UpdateInbox(ctx, in)

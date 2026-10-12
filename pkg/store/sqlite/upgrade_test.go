@@ -113,6 +113,18 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 // Before an existing database is migrated, a copy of it as it was is kept.
 func TestADatabaseIsCopiedBeforeItIsMigrated(t *testing.T) {
 	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	checkCopy(t, dir)
+}
+
+func writeVersion2Database(t *testing.T, dir string) {
+	t.Helper()
 	raw, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
 	if err != nil {
 		t.Fatal(err)
@@ -136,13 +148,10 @@ func TestADatabaseIsCopiedBeforeItIsMigrated(t *testing.T) {
 		}
 	}
 	_ = raw.Close()
+}
 
-	s, err := sqlite.Open(t.Context(), dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = s.Close()
-
+func checkCopy(t *testing.T, dir string) {
+	t.Helper()
 	snap := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"2.bak")
 	info, err := os.Stat(snap)
 	if err != nil {
@@ -166,7 +175,7 @@ func TestADatabaseIsCopiedBeforeItIsMigrated(t *testing.T) {
 
 	// Nothing pending, nothing copied: the same copy stays, and no other appears.
 	before, _ := os.Stat(snap)
-	s, err = sqlite.Open(t.Context(), dir)
+	s, err := sqlite.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,5 +244,69 @@ func TestTheBodyIsTheLastColumnAfterTheUpgrade(t *testing.T) {
 		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, idx).Scan(&n); err != nil || n != 1 {
 			t.Errorf("index %s: %d (%v)", idx, n, err)
 		}
+	}
+}
+
+// An upgrade that was cut short leaves the copy of the version it started from; the
+// next start must not replace it with a copy of a half-upgraded database.
+func TestARetriedUpgradeKeepsTheCopyItAlreadyHas(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+	first := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"1.bak")
+	if err := os.WriteFile(first, []byte("the copy from before the first attempt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, sqlite.DBFileName+".migrating"), []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	b, err := os.ReadFile(first) //nolint:gosec // a path in this test's own temp directory
+	if err != nil || string(b) != "the copy from before the first attempt" {
+		t.Errorf("the earlier copy: %q, %v", b, err)
+	}
+	if all, _ := filepath.Glob(filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"*")); len(all) != 1 {
+		t.Errorf("copies: %v", all)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sqlite.DBFileName+".migrating")); err == nil {
+		t.Error("the marker outlived the upgrade")
+	}
+}
+
+// A copy that cannot be made takes nothing from the operator, and the database is
+// left as it was.
+func TestAFailedCopyLeavesTheEarlierOneAndTheDatabaseAlone(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+	earlier := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"1.bak")
+	if err := os.WriteFile(earlier, []byte("earlier"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Something in the way of the new copy that cannot be removed.
+	blocker := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"2.bak.partial")
+	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlite.Open(t.Context(), dir); err == nil {
+		t.Fatal("Open migrated without a copy")
+	}
+	b, err := os.ReadFile(earlier) //nolint:gosec // a path in this test's own temp directory
+	if err != nil || string(b) != "earlier" {
+		t.Errorf("the earlier copy: %q, %v", b, err)
+	}
+	if err := os.RemoveAll(blocker); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var v int
+	if err := db.QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migrations`).Scan(&v); err != nil || v != 2 {
+		t.Errorf("the database is at version %d (%v), want it untouched at 2", v, err)
 	}
 }

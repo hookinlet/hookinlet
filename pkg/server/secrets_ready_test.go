@@ -54,8 +54,7 @@ func TestReadyzFailsWhenTheMasterKeyIsNotTheOneTheSecretsWereSealedUnder(t *test
 
 // The check is not repeated on every probe, and a failure is rechecked soon.
 func TestReadyzDoesNotOpenEverySecretOnEveryProbe(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	e := newEnv(t, func(o *Options) { o.Now = func() time.Time { return now } })
+	e := newEnv(t)
 	e.newInbox("sealed", "github", "a-secret")
 	counter := &secretListCounter{Store: e.store}
 	e.server.opts.Store = counter
@@ -66,7 +65,9 @@ func TestReadyzDoesNotOpenEverySecretOnEveryProbe(t *testing.T) {
 	if counter.n != 1 {
 		t.Errorf("%d listings for five probes, want 1", counter.n)
 	}
-	now = now.Add(time.Minute)
+	e.server.secretsMu.Lock()
+	e.server.secretsAt = e.server.secretsAt.Add(-time.Minute) // a minute passes
+	e.server.secretsMu.Unlock()
 	e.do(req{method: http.MethodGet, path: "/readyz"})
 	if counter.n != 2 {
 		t.Errorf("%d listings a minute later, want 2", counter.n)
@@ -81,4 +82,39 @@ type secretListCounter struct {
 func (l *secretListCounter) ListInboxes(ctx2 context.Context, p inbox.ListParams) ([]*inbox.Inbox, error) {
 	l.n++
 	return l.Store.ListInboxes(ctx2, p)
+}
+
+// A probe that gives up does not make the secrets look unreadable, and the failure
+// to ask is not remembered as an answer.
+func TestAProbeThatGivesUpDoesNotPoisonTheReadinessCheck(t *testing.T) {
+	e := newEnv(t)
+	e.newInbox("sealed", "github", "a-secret")
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := e.server.secretsOK(cancelled); err != nil {
+		t.Fatalf("the check ran under the probe's context: %v", err)
+	}
+	if err := e.server.secretsOK(t.Context()); err != nil {
+		t.Errorf("a later probe: %v", err)
+	}
+
+	failing := newEnv(t)
+	failing.newInbox("sealed", "github", "a-secret")
+	failing.server.adm.Store = failingList{failing.store}
+	if err := failing.server.secretsOK(t.Context()); err == nil || errors.Is(err, ErrUnreadableSecrets) {
+		t.Fatalf("a store that cannot list: %v", err)
+	}
+	failing.server.adm.Store = failing.store
+	if err := failing.server.secretsOK(t.Context()); err != nil {
+		t.Errorf("after the store recovered: %v", err)
+	}
+	if rec := failing.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
+		t.Errorf("readyz: %d", rec.Code)
+	}
+}
+
+type failingList struct{ inbox.Store }
+
+func (failingList) ListInboxes(context.Context, inbox.ListParams) ([]*inbox.Inbox, error) {
+	return nil, errors.New("boom")
 }
