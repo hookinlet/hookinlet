@@ -56,6 +56,12 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 
 ### Release review fixes
 
+- **Upgrading from rc.1: stop the old server first.** rc.1 takes no lock on the data directory, so
+  a migration could run under it and leave message counts wrong. The migration now refuses when
+  another process has the database open.
+- **An MCP `wait_for_messages` holds no read slot while it waits.** Idle waits could use up every
+  slot and make reads answer 503; the slot is taken as the answer is returned.
+
 - **Changes to the public packages:** `sqlite.Open` applies migrations only when given
   `WithExclusiveLock()`; without it, a database that needs migrating fails with the new
   `*sqlite.NeedsMigrationError` (servers built on the package should pass the option, as

@@ -67,7 +67,7 @@ above); `the server is shutting down` (it was told to stop and is draining).
 | `401 verification_failed` | The signature did not check. The log says why (`reason`). | Check the secret on the inbox and at the sender; for Stripe and Slack, that the clocks agree within five minutes; that a proxy does not rewrite the body. |
 | `413` | The body is over the inbox's `max_body_bytes` (1 MiB default, 10 MiB most). | Raise it with `hookinlet inbox update SLUG --max-body-bytes N`. |
 | `503 overloaded` | Too many deliveries are being received at once. | The sender should retry (most do). Raise `HOOKINLET_INGEST_MEMORY_BUDGET` if it is routine. |
-| `503 storage_full` | No room to store it; not acknowledged. | Free disk, or set retention. The sender should retry. |
+| `503 storage_full` | No room to store it; not acknowledged. | Free disk, or set retention (run it with `hookinlet retention run`; if the volume is at 0 bytes free even that fails, so free some space outside hookinlet first). The sender should retry. |
 | `429`, `402`, `403` | A hook an embedder installed refused it. | Ask whoever runs the server. |
 
 A delivery to an inbox whose verifier is `none` is stored, but never marked `verified`.

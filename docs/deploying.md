@@ -341,7 +341,7 @@ Start the new version on the same data directory. It applies any database
 migrations itself, once, before it listens, and logs each one. A large database can take
 minutes to migrate (the move of the message body, 0007, took about two and a half on
 a million rows), during which nothing listens, so a health check that restarts the process
-will restart the migration too: run `hookinlet migrate` as its own step first (it applies
+will restart the migration too: stop the old server (0.1.0-rc.1 takes no lock on the data directory, so nothing else stops a migration under it, and the migration refuses if it finds the database open), then run `hookinlet migrate` as its own step (it applies
 the migrations and reports the schema version) or give the health check a generous
 start period. Only the process that holds the data directory's lock migrates: a command
 such as `hookinlet inbox show` run against an old database refuses and tells you to stop

@@ -94,7 +94,7 @@ type Options struct {
 	// answer from when the server starts building it, so a client must read at roughly
 	// 16 MiB per ResponseTimeout to take the largest page. Ingest, the admin API, streams
 	// and backups are not bound by it (streams and backups manage their own deadlines).
-	// Defaults to 2 minutes; it must exceed the longest MCP wait (1 minute).
+	// Defaults to 2 minutes.
 	ResponseTimeout time.Duration
 	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
 	// to the ingest endpoint. Defaults to 60s.
@@ -406,6 +406,7 @@ func (s *Server) ServeAdmin(ctx context.Context, ln, adminLn net.Listener) error
 		return errors.New("server: ServeAdmin needs a listener for each address")
 	}
 	if s.adminHTTP == nil {
+		_ = ln.Close()
 		_ = adminLn.Close()
 		return errors.New("server: ServeAdmin needs Options.AdminAddr")
 	}

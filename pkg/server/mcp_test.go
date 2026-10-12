@@ -1385,3 +1385,56 @@ func TestABackwardReadIsTrimmedToTheBudgetToo(t *testing.T) {
 		t.Errorf("next_before = %v, want the oldest message kept (%d)", p.NextBefore, oldest)
 	}
 }
+
+// A wait that has nothing to return holds no read slot while it waits, and the answer
+// it finally returns is not lost to a busy server when it wakes.
+func TestIdleMCPWaitsDoNotUseUpTheReadSlots(t *testing.T) {
+	ae := newAgentEnv2(t, func(o *Options) { o.MaxConcurrentReads = 2; o.ReadWaitTimeout = 300 * time.Millisecond; o.Notifier = local.New() })
+	ae.tokenA = ae.tokenFor(ae.a)
+	base := serveOn(t, ae.env)
+	cs := connectMCP(t, base, ae.tokenA)
+
+	results := make(chan toolOut, 3)
+	for range 3 {
+		go func() {
+			results <- callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 0, "timeout_seconds": 5})
+		}()
+	}
+	// Let the waits start, then read with the waits idle: every slot must be free.
+	time.Sleep(500 * time.Millisecond)
+	if got := len(ae.server.reads); got != 0 {
+		t.Errorf("%d read slots are held by idle waits", got)
+	}
+	if rr := ae.get("/v1/inboxes/agent-a/messages?after=0", ae.tokenA); rr.Code != http.StatusOK {
+		t.Errorf("a read beside idle waits: %d", rr.Code)
+	}
+	ae.post("/in/agent-a", "wake")
+	for range 3 {
+		select {
+		case o := <-results:
+			if o.err != "" {
+				t.Errorf("a woken wait: %s", o.err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a wait did not return")
+		}
+	}
+}
+
+// ResponseTimeout is for writing an answer, so a wait longer than it is not cut off.
+func TestAnMCPWaitCanOutlastTheResponseTimeout(t *testing.T) {
+	ae := newAgentEnv2(t, func(o *Options) { o.ResponseTimeout = 300 * time.Millisecond; o.Notifier = local.New() })
+	ae.tokenA = ae.tokenFor(ae.a)
+	base := serveOn(t, ae.env)
+	cs := connectMCP(t, base, ae.tokenA)
+	go func() {
+		time.Sleep(900 * time.Millisecond)
+		if rr := ae.post("/in/agent-a", "late"); rr.Code >= 300 {
+			t.Errorf("post: %d %s", rr.Code, rr.Body.String())
+		}
+	}()
+	o := callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 0, "timeout_seconds": 5})
+	if o.err != "" || len(o.page(t).Messages) != 1 {
+		t.Errorf("a wait that outlasted the response timeout: %q %s", o.err, o.text)
+	}
+}
