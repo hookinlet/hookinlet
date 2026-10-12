@@ -55,6 +55,12 @@ Everything below is the detail behind the summary above, phase by phase: what ch
 Go packages, the API, and the configuration, in the order it happened. The newest is first.
 
 ### Release review fixes
+
+- **Admin console, second part.** The console now has an overview (inbox count, messages received,
+  the last 24 hours, the last retention run, and an activity line per inbox), an inbox list with a
+  filter, and a Tokens page that issues tokens (shown once, with a ready curl line) and revokes them.
+  Light and dark themes, a layout that works on a phone, and self-hosted Inter and JetBrains Mono
+  (SIL OFL, listed in `THIRD_PARTY_LICENSES`).
 - **`hookinlet check`** verifies the database file (SQLite's integrity check, or `--quick`), for use after a
   crash, a disk problem or a restore. The server still does not scan the file at startup. New in `pkg/`:
   `sqlite.Store.Check`.

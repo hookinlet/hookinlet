@@ -5,7 +5,8 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const ALLOWED = new Set(['MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0'])
+// OFL-1.1 is the licence of the fonts, which ship as files, not as code.
+const ALLOWED = new Set(['MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', 'OFL-1.1'])
 // The build lists the packages whose code is in the bundle; the direct dependencies are
 // added to it, because a package that only re-exports (vue) leaves no module behind.
 const direct = Object.keys(JSON.parse(readFileSync('package.json', 'utf8')).dependencies ?? {})

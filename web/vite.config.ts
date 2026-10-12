@@ -7,10 +7,11 @@ import { defineConfig } from 'vitest/config'
 function bundledPackages() {
   return {
     name: 'bundled-packages',
-    generateBundle(_: unknown, bundle: Record<string, { modules?: Record<string, unknown> }>) {
+    generateBundle(_: unknown, bundle: Record<string, { modules?: Record<string, unknown>; originalFileNames?: string[] }>) {
       const names = new Set<string>()
       for (const chunk of Object.values(bundle)) {
-        for (const id of Object.keys(chunk.modules ?? {})) {
+        // Code (modules) and files such as fonts (originalFileNames) both come from packages.
+        for (const id of [...Object.keys(chunk.modules ?? {}), ...(chunk.originalFileNames ?? []).map((f) => '/' + f)]) {
           const m = /\/node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(id.replaceAll('\\', '/'))
           if (m?.[1]) names.add(m[1])
         }
