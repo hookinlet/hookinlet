@@ -155,6 +155,7 @@ type Server struct {
 	adminHTTP    *http.Server
 	reads        chan struct{} // a slot per read request being served
 
+	metrics      metrics
 	draining     atomic.Bool // set when the server is told to stop: /readyz fails
 	ingestBudget byteBudget  // body bytes held by deliveries being received
 
@@ -301,7 +302,7 @@ func (s *Server) build(surface surface) http.Handler {
 	// Outermost first. accessLog must see the same *http.Request the mux
 	// annotates with r.Pattern, so nothing between it and the mux may clone
 	// the request.
-	return requestID(accessLog(s.log, recoverer(s.log, protective(mux))))
+	return requestID(accessLog(s.log, recoverer(s.log, s.counting(protective(mux)))))
 }
 
 func (s *Server) newHTTP(h http.Handler) *http.Server {
@@ -461,6 +462,8 @@ func (s *Server) retentionLoop() {
 	sweep := func() {
 		start := time.Now()
 		n, err := s.adm.SweepRetention(s.closeCtx)
+		s.metrics.sweeps.Add(1)
+		s.metrics.retention.Add(n)
 		switch {
 		case err != nil && s.closeCtx.Err() != nil:
 			// Shutting down: the sweep stopped part way, and the next one resumes.

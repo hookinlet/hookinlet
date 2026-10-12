@@ -21,7 +21,9 @@ type ingestAPI struct {
 func (a *ingestAPI) run(ctx context.Context) ingestResult {
 	r, _ := ctx.Value(requestKey).(*http.Request)
 	w, _ := ctx.Value(writerKey).(http.ResponseWriter)
-	return a.s.ingest(ctx, w, r)
+	res := a.s.ingest(ctx, w, r)
+	a.s.metrics.delivery(deliveryResult(res))
+	return res
 }
 
 func (a *ingestAPI) Ingest(ctx context.Context, _ api.IngestRequestObject) (api.IngestResponseObject, error) {

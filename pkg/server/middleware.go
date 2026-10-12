@@ -111,6 +111,17 @@ func accessLog(log *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
+// counting records each finished request, by the route that served it, for
+// /metrics. It sits inside accessLog, whose statusWriter it reads the status from.
+func (s *Server) counting(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		if sw, ok := w.(*statusWriter); ok {
+			s.metrics.request(r.Pattern, sw.status)
+		}
+	})
+}
+
 // recoverer turns a handler panic into a JSON 500 and a logged stack trace.
 func recoverer(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

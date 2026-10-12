@@ -382,6 +382,13 @@ func (a *adminAPI) RevokeToken(ctx context.Context, req api.RevokeTokenRequestOb
 	return api.RevokeToken204Response{Headers: api.RevokeToken204ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
 }
 
+// Metrics serves the counters in the Prometheus text format.
+func (a *adminAPI) Metrics(ctx context.Context, _ api.MetricsRequestObject) (api.MetricsResponseObject, error) {
+	var b strings.Builder
+	_ = a.s.writeMetrics(&b) // writing to a Builder cannot fail
+	return api.Metrics200TextResponse{Body: b.String(), Headers: api.Metrics200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
+}
+
 func (a *adminAPI) RunRetention(ctx context.Context, _ api.RunRetentionRequestObject) (api.RunRetentionResponseObject, error) {
 	start := time.Now()
 	ctx, cancel := a.s.closingContext(ctx)

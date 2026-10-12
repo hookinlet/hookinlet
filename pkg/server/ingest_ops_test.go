@@ -230,3 +230,57 @@ func TestABackupThatStreamsHasNoContentLength(t *testing.T) {
 		t.Error("no filename")
 	}
 }
+
+func TestMetricsCountWhatHappened(t *testing.T) {
+	a := newAdminEnv(t)
+	a.newInbox("counted", "github", "a-secret")
+	a.newInbox("open-counted", "trusted", "")
+	a.post("/in/open-counted", "one")
+	a.post("/in/open-counted", "two")
+	a.post("/in/counted", "unsigned") // rejected: no signature
+	a.post("/in/nothing-here", "x")   // not found
+	a.get("/v1/inboxes/open-counted", a.tokenA)
+
+	status, _, body := a.call("GET", "/metrics", nil, testAdminToken)
+	text := string(body)
+	if status != http.StatusOK {
+		t.Fatalf("%d %s", status, text)
+	}
+	for _, want := range []string{
+		`hookinlet_deliveries_total{result="stored"} 2`,
+		`hookinlet_deliveries_total{result="verification_failed"} 1`,
+		`hookinlet_deliveries_total{result="not_found"} 1`,
+		`hookinlet_delivery_body_bytes_total `,
+		`hookinlet_http_requests_total{route="POST /in/{key}",status="200"} 2`,
+		`# TYPE hookinlet_streams_open gauge`,
+		`hookinlet_ingest_memory_used_bytes 0`,
+		`hookinlet_info{version="dev"} 1`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	// Nothing a client chooses becomes a label, and no secret is in the text.
+	for _, banned := range []string{"counted", "open-counted", "nothing-here", testAdminToken, "a-secret", "unsigned"} {
+		if strings.Contains(text, banned) {
+			t.Errorf("the metrics mention %q", banned)
+		}
+	}
+	// Unknown paths do not create series.
+	for i := range 20 {
+		a.get("/scan/"+strings.Repeat("x", i+1), "")
+	}
+	_, _, again := a.call("GET", "/metrics", nil, testAdminToken)
+	if strings.Count(string(again), "\n") > strings.Count(text, "\n")+4 {
+		t.Errorf("scanning added series:\n%s", again)
+	}
+	if !strings.Contains(string(again), `route="/",status="404"`) {
+		t.Error("requests that matched no route are not counted under the catch-all")
+	}
+	// Admin only.
+	for tok, want := range map[string]int{"": 401, a.tokenA: 403} {
+		if st, _, _ := a.call("GET", "/metrics", nil, tok); st != want {
+			t.Errorf("token %q: %d, want %d", tok, st, want)
+		}
+	}
+}

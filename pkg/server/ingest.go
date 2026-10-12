@@ -29,6 +29,7 @@ type ingestResult struct {
 	code, msg string
 	seq       int64
 	challenge []byte // set for a handshake answered instead of stored
+	duplicate bool   // a repeat of a delivery already stored
 }
 
 func refuse(status int, code, msg string) ingestResult {
@@ -94,6 +95,7 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	// deadline (such as a test recorder) just do without one.
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.opts.ReadBodyTimeout))
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, in.MaxBodyBytes))
+	s.metrics.bodyBytes.Add(int64(len(body)))
 	var tooLarge *http.MaxBytesError
 	switch {
 	case errors.As(err, &tooLarge):
@@ -201,7 +203,7 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery",
 		slog.String("slug", in.Slug), slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
 		slog.Bool("verified", verified), slog.Bool("duplicate", !created))
-	return ingestResult{status: http.StatusOK, seq: msg.Seq}
+	return ingestResult{status: http.StatusOK, seq: msg.Seq, duplicate: !created}
 }
 
 // dedupeKey is what a repeated delivery is recognised by. A delivery id that the

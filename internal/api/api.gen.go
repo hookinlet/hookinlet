@@ -1197,6 +1197,9 @@ type ServerInterface interface {
 	// Mcp Model Context Protocol (JSON-RPC)
 	// (POST /mcp)
 	Mcp(w http.ResponseWriter, r *http.Request)
+	// Metrics Prometheus metrics
+	// (GET /metrics)
+	Metrics(w http.ResponseWriter, r *http.Request)
 	// Readyz Readiness
 	// (GET /readyz)
 	Readyz(w http.ResponseWriter, r *http.Request)
@@ -1713,6 +1716,20 @@ func (siw *ServerInterfaceWrapper) Mcp(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Mcp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Metrics operation middleware
+func (siw *ServerInterfaceWrapper) Metrics(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Metrics(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2565,6 +2582,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/in/{key}/{rest}", wrapper.IngestWithPath)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/in/{key}/{rest}", wrapper.IngestPutWithPath)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/mcp", wrapper.Mcp)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/metrics", wrapper.Metrics)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/readyz", wrapper.Readyz)
 	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/readyz", wrapper.HeadReadyz)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/inboxes/{slug}", wrapper.GetInbox)
@@ -6510,6 +6528,142 @@ func (response McpdefaultTextResponse) VisitMcpResponse(w http.ResponseWriter) e
 	return err
 }
 
+type MetricsRequestObject struct {
+}
+
+type MetricsResponseObject interface {
+	VisitMetricsResponse(w http.ResponseWriter) error
+}
+
+type Metrics200ResponseHeaders struct {
+	XRequestId string
+}
+
+type Metrics200TextResponse struct {
+	Body    string
+	Headers Metrics200ResponseHeaders
+}
+
+func (response Metrics200TextResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type Metrics400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response Metrics400JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Metrics401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response Metrics401JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Metrics403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response Metrics403JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Metrics405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response Metrics405JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MetricsdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type MetricsdefaultJSONResponse struct {
+	Body       Error
+	Headers    MetricsdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response MetricsdefaultJSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MetricsdefaultTextResponse struct {
+	Body       string
+	Headers    MetricsdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response MetricsdefaultTextResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
 type ReadyzRequestObject struct {
 }
 
@@ -8440,6 +8594,9 @@ type StrictServerInterface interface {
 	// Mcp Model Context Protocol (JSON-RPC)
 	// (POST /mcp)
 	Mcp(ctx context.Context, request McpRequestObject) (McpResponseObject, error)
+	// Metrics Prometheus metrics
+	// (GET /metrics)
+	Metrics(ctx context.Context, request MetricsRequestObject) (MetricsResponseObject, error)
 	// Readyz Readiness
 	// (GET /readyz)
 	Readyz(ctx context.Context, request ReadyzRequestObject) (ReadyzResponseObject, error)
@@ -9036,6 +9193,30 @@ func (sh *strictHandler) Mcp(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(McpResponseObject); ok {
 		if err := validResponse.VisitMcpResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Metrics operation middleware
+func (sh *strictHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+	var request MetricsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Metrics(ctx, request.(MetricsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Metrics")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MetricsResponseObject); ok {
+		if err := validResponse.VisitMetricsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

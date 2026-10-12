@@ -179,6 +179,7 @@ func TestEveryAdminOperationRefusesAnUnknownQueryParameter(t *testing.T) {
 		{http.MethodPost, "/admin/inboxes/agent-a/rotate-ingest-key?x=1"},
 		{http.MethodPost, "/admin/retention/run?x=1"},
 		{http.MethodGet, "/admin/backup?x=1"},
+		{http.MethodGet, "/metrics?x=1"},
 	} {
 		// The response is also checked against the document, which has to list 400.
 		st, data := a.admin(tc.method, tc.path, nil)

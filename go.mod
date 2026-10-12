@@ -1,6 +1,8 @@
 module github.com/hookinlet/hookinlet
 
-go 1.27.2
+go 1.27
+
+toolchain go1.27.2
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
