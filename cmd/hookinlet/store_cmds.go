@@ -128,7 +128,7 @@ func rekeyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 // one snapshot is restored a second time): the restored server may hand out
 // sequence numbers that differ from the ones its predecessor handed out, and a new
 // epoch is how a client holding an old cursor finds out. Snapshots from `hookinlet
-// backup` and GET /admin/backup already have new epochs. Stop the server first.
+// backup` and GET /v1/admin/backup already have new epochs. Stop the server first.
 func renewEpochsCmd(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet renew-epochs", flag.ContinueOnError)
 	fs.SetOutput(stderr)

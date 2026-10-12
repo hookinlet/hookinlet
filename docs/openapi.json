@@ -2844,7 +2844,7 @@
         }
       }
     },
-    "/admin/inboxes": {
+    "/v1/admin/inboxes": {
       "post": {
         "operationId": "createInbox",
         "summary": "Create an inbox",
@@ -3043,7 +3043,7 @@
         ]
       }
     },
-    "/admin/inboxes/{slug}": {
+    "/v1/admin/inboxes/{slug}": {
       "get": {
         "operationId": "showInbox",
         "summary": "Show an inbox",
@@ -3298,7 +3298,7 @@
         ]
       }
     },
-    "/admin/inboxes/{slug}/secret": {
+    "/v1/admin/inboxes/{slug}/secret": {
       "put": {
         "operationId": "setVerifierSecret",
         "summary": "Set or replace the verifier secret",
@@ -3403,7 +3403,7 @@
         }
       }
     },
-    "/admin/retention/run": {
+    "/v1/admin/retention/run": {
       "post": {
         "operationId": "runRetention",
         "summary": "Apply retention now",
@@ -3480,7 +3480,7 @@
         ]
       }
     },
-    "/admin/backup": {
+    "/v1/admin/backup": {
       "get": {
         "operationId": "backup",
         "summary": "Download a consistent copy of the database",
@@ -3574,7 +3574,7 @@
         ]
       }
     },
-    "/admin/inboxes/{slug}/rotate-ingest-key": {
+    "/v1/admin/inboxes/{slug}/rotate-ingest-key": {
       "post": {
         "operationId": "rotateIngestKey",
         "summary": "Issue a new ingest key",
@@ -3660,7 +3660,7 @@
         "description": "Gives the inbox a new random ingest key. The old key stops working at once, so the sender has to be given the new URL (`ingest_url` in the answer)."
       }
     },
-    "/admin/tokens": {
+    "/v1/admin/tokens": {
       "post": {
         "operationId": "createToken",
         "summary": "Issue a token",
@@ -3869,7 +3869,7 @@
         "description": "Tokens in ID order. Neither the token nor its hash is ever returned."
       }
     },
-    "/admin/tokens/{id}": {
+    "/v1/admin/tokens/{id}": {
       "delete": {
         "operationId": "revokeToken",
         "summary": "Revoke a token",

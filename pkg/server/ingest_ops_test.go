@@ -233,7 +233,7 @@ func (streamingStore) Backup(context.Context) (io.ReadCloser, int64, error) {
 
 func TestABackupThatStreamsHasNoContentLength(t *testing.T) {
 	a := newAdminEnv(t, func(o *Options) { o.Store = streamingStore{o.Store} })
-	status, hdr, body := a.call("GET", "/admin/backup", nil, testAdminToken)
+	status, hdr, body := a.call("GET", "/v1/admin/backup", nil, testAdminToken)
 	if status != http.StatusOK || string(body) != strings.Repeat("a snapshot of a size nobody knew. ", 10000) {
 		t.Fatalf("%d, %d bytes", status, len(body))
 	}
@@ -315,7 +315,7 @@ func (failingReader) Read([]byte) (int, error) { return 0, errors.New("the store
 // status is already sent, and a clean end would be taken for the end of the file.
 func TestAStreamedBackupThatBreaksIsNotACleanEnd(t *testing.T) {
 	a := newAdminEnv(t, func(o *Options) { o.Store = breakingStore{o.Store} })
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, a.base+"/admin/backup", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, a.base+"/v1/admin/backup", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -75,7 +75,7 @@ func newApplyEnv(t *testing.T) *applyEnv {
 	var writes atomic.Int64
 	h := srv.Handler()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/admin") && r.Method != http.MethodGet {
+		if strings.HasPrefix(r.URL.Path, "/v1/admin") && r.Method != http.MethodGet {
 			writes.Add(1)
 		}
 		h.ServeHTTP(w, r)
@@ -94,7 +94,7 @@ func (e *applyEnv) env(extra map[string]string) map[string]string {
 
 func (e *applyEnv) views() map[string]admin.View {
 	e.t.Helper()
-	req, _ := http.NewRequestWithContext(e.t.Context(), http.MethodGet, e.url+"/admin/inboxes", nil)
+	req, _ := http.NewRequestWithContext(e.t.Context(), http.MethodGet, e.url+"/v1/admin/inboxes", nil)
 	req.Header.Set("Authorization", "Bearer "+cliAdminToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

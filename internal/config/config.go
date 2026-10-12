@@ -141,7 +141,7 @@ var specs = []spec{
 	{name: "max-streams-per-inbox", def: "0", usage: "most SSE streams that may follow one inbox; 0 means half of max-streams"},
 	{name: "sse-heartbeat", def: "15s", usage: "interval between SSE heartbeat comments"},
 	{name: "sse-recheck-interval", def: "0", usage: "re-read the store on this interval even without a notifier signal; 0 disables"},
-	{name: "admin-enabled", def: "true", usage: "serve the admin API under /admin; false leaves inboxes and tokens to the command line, which works in the data directory"},
+	{name: "admin-enabled", def: "true", usage: "serve the admin API under /v1/admin; false leaves inboxes and tokens to the command line, which works in the data directory"},
 	{name: "admin-listen-addr", usage: "serve the admin API on its own address (such as 127.0.0.1:9090) and not on --listen-addr; empty serves it on --listen-addr"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
 	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},

@@ -24,7 +24,7 @@ its own version tag.)
 Create an inbox, send it a webhook, and read it back:
 
 ```sh
-curl -s -X POST localhost:8080/admin/inboxes \
+curl -s -X POST localhost:8080/v1/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"slug": "demo", "verifier": "none"}'
 # → {"inbox": {…, "ingest_path": "/in/q3V9xR1hT0kYz2mP8uWb6A"}, "agent_token": "hki_…"}   (the token is shown once)
@@ -130,7 +130,7 @@ lists them all.
 | `HOOKINLET_MAX_STREAMS_PER_INBOX` | half of the above | Most streams or waits on one inbox. |
 | `HOOKINLET_SSE_HEARTBEAT` | `15s` | Ping interval on idle streams. |
 | `HOOKINLET_SSE_RECHECK_INTERVAL` | `0` (off) | Re-read the store this often even without a wake-up. Needed only by a notifier that can drop signals; the built-in one does not. |
-| `HOOKINLET_ADMIN_ENABLED` | `true` | Serve the admin API (`/admin/...`). `false` leaves inboxes and tokens to the command line. |
+| `HOOKINLET_ADMIN_ENABLED` | `true` | Serve the admin API (`/v1/admin/...`). `false` leaves inboxes and tokens to the command line. |
 | `HOOKINLET_ADMIN_LISTEN_ADDR` | none | Serve the admin API on this address instead of `HOOKINLET_LISTEN_ADDR`, and nothing else there. |
 | `HOOKINLET_MCP_ENABLED` | `true` | Serve `/mcp`. |
 | `HOOKINLET_MCP_INLINE_BODY_BYTES` | `16384` | Largest body MCP tools return inline (at most 65536). |
@@ -262,7 +262,7 @@ and those may be breaking.
 
 ## Backups
 
-`GET /admin/backup`, `hookinlet backup --out FILE`, or copying the data
+`GET /v1/admin/backup`, `hookinlet backup --out FILE`, or copying the data
 directory while the process is stopped. See [administration](admin.md#backups),
 including how to restore (after restoring from a copy of the data directory, run
 `hookinlet renew-epochs`, so that readers' old cursors are not trusted). Keep the master key with the backup, but apart from it.

@@ -68,7 +68,7 @@ again whenever you ask.)
 
 <!-- exercise -->
 ```sh
-curl -s -X POST localhost:8080/admin/inboxes \
+curl -s -X POST localhost:8080/v1/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- > created.json <<'EOF'
 {"slug": "github-demo", "verifier": "github", "verifier_secret": "my-webhook-secret"}
 EOF
@@ -137,7 +137,7 @@ account, so it is shown, not run by the tests):
 secret=$(stripe listen --print-secret)
 
 # create the inbox with that secret
-curl -s -X POST localhost:8080/admin/inboxes \
+curl -s -X POST localhost:8080/v1/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- > created.json <<EOF
 {"slug": "stripe", "verifier": "stripe", "verifier_secret": "$secret"}
 EOF

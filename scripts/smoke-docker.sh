@@ -214,9 +214,9 @@ admin() { # admin METHOD PATH [BODY] -> prints "<status> <body>"
   code=$(curl "${args[@]}")
   echo "$code $(cat "$tmp")"
 }
-expect "the admin API refuses an agent token" '403' "$(admin_tok=$agent_token admin GET /admin/inboxes | cut -d' ' -f1)"
-expect "and no token" '401' "$(curl -sS -o /dev/null -w '%{http_code}' "$base/admin/inboxes")"
-created=$(admin POST /admin/inboxes '{"slug":"made-by-api","ingest_key":"made-by-api","verifier":"hmac","verifier_config":{"header":"X-Signature","prefix":"sha256="},"verifier_secret":"api-secret"}')
+expect "the admin API refuses an agent token" '403' "$(admin_tok=$agent_token admin GET /v1/admin/inboxes | cut -d' ' -f1)"
+expect "and no token" '401' "$(curl -sS -o /dev/null -w '%{http_code}' "$base/v1/admin/inboxes")"
+created=$(admin POST /v1/admin/inboxes '{"slug":"made-by-api","ingest_key":"made-by-api","verifier":"hmac","verifier_config":{"header":"X-Signature","prefix":"sha256="},"verifier_secret":"api-secret"}')
 case $created in
   201*'"has_verifier_secret":true'*) ;;
   *) fail "unexpected create: $created" ;;
@@ -229,10 +229,10 @@ esac
 case $created in *api-secret*) fail "the create response shows the verifier secret" ;; esac
 api_body='{"via":"api"}'
 expect "the new inbox accepts a signed delivery" '200 {"seq":1}' "$(send POST /in/made-by-api "$api_body" "$(secret=api-secret sign_with "$api_body")")"
-case $(admin GET /admin/inboxes/made-by-api) in
+case $(admin GET /v1/admin/inboxes/made-by-api) in
   200*'"message_count":1'*) echo "ok   show reports the message" ;; *) fail "unexpected show" ;;
 esac
-expect "retention runs on demand" '200 {"deleted":0}' "$(admin POST /admin/retention/run)"
+expect "retention runs on demand" '200 {"deleted":0}' "$(admin POST /v1/admin/retention/run)"
 case $(admin GET /metrics) in
   200*'hookinlet_deliveries_total{result="stored"}'*) echo "ok   /metrics reports the deliveries" ;; *) fail "unexpected /metrics" ;;
 esac
@@ -255,7 +255,7 @@ expect "and the new one still does" '200' "$(read_api /v1/inboxes/made-by-api "$
 # A backup taken from the running server restores into a fresh volume.
 backup=$(mktemp)
 stream_files+=("$backup")
-code=$(curl -sS -o "$backup" -w '%{http_code}' "$base/admin/backup" -H "Authorization: Bearer $admin_token")
+code=$(curl -sS -o "$backup" -w '%{http_code}' "$base/v1/admin/backup" -H "Authorization: Bearer $admin_token")
 expect "the backup downloads" '200' "$code"
 [ "$(head -c 15 "$backup")" = "SQLite format 3" ] || fail "the backup is not a SQLite database"
 echo "ok   and it is a SQLite database ($(wc -c < "$backup" | tr -d ' ') bytes)"
@@ -277,7 +277,7 @@ docker volume create "$vol-quick" >/dev/null
 docker run -d --name "$name-quick" -p "$((port + 1)):8080" -v "$vol-quick:/data" \
   -e HOOKINLET_ADMIN_TOKEN="$admin_token" -e HOOKINLET_MASTER_KEY="$key" "$image" >/dev/null
 wait_ready
-quick=$(admin POST /admin/inboxes '{"slug": "demo", "verifier": "none"}')
+quick=$(admin POST /v1/admin/inboxes '{"slug": "demo", "verifier": "none"}')
 quick_path=$(printf '%s' "$quick" | sed -n 's/.*"ingest_path":"\([^"]*\)".*/\1/p')
 case $quick_path in /in/?*) [ "$quick_path" != /in/demo ] || fail "the ingest path is the slug: $quick_path" ;; *) fail "unexpected quick-start create: $quick" ;; esac
 case $quick in *'"agent_token":"hki_'*) echo "ok   an empty volume and two variables: an inbox is created through the API" ;; *) fail "unexpected quick-start create: $quick" ;; esac

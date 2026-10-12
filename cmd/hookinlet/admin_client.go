@@ -205,11 +205,11 @@ func (r *remoteAdmin) do(ctx context.Context, method, path string, body, out any
 	return nil
 }
 
-func slugPath(slug string) string { return "/admin/inboxes/" + url.PathEscape(slug) }
+func slugPath(slug string) string { return "/v1/admin/inboxes/" + url.PathEscape(slug) }
 
 func (r *remoteAdmin) Create(ctx context.Context, p admin.CreateParams) (*admin.Created, error) {
 	var out admin.Created
-	if err := r.do(ctx, http.MethodPost, "/admin/inboxes", p, &out); err != nil {
+	if err := r.do(ctx, http.MethodPost, "/v1/admin/inboxes", p, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -221,7 +221,7 @@ func (r *remoteAdmin) Get(ctx context.Context, slug string) (admin.View, error) 
 }
 func (r *remoteAdmin) List(ctx context.Context) ([]admin.View, error) {
 	var all []admin.View
-	path := "/admin/inboxes"
+	path := "/v1/admin/inboxes"
 	for pages := 0; path != "" && pages < 10_000; pages++ {
 		var page struct {
 			Inboxes []admin.View `json:"inboxes"`
@@ -234,7 +234,7 @@ func (r *remoteAdmin) List(ctx context.Context) ([]admin.View, error) {
 		path = ""
 		if page.Next != nil {
 			// Only ever follow the server's cursor on its own admin path.
-			if !strings.HasPrefix(*page.Next, "/admin/inboxes?") {
+			if !strings.HasPrefix(*page.Next, "/v1/admin/inboxes?") {
 				return nil, errors.New("the server sent a next link that was not understood")
 			}
 			path = *page.Next
@@ -254,14 +254,14 @@ func (r *remoteAdmin) SetSecret(ctx context.Context, slug, secret string) (admin
 }
 func (r *remoteAdmin) CreateToken(ctx context.Context, p admin.TokenParams) (*admin.TokenCreated, error) {
 	var out admin.TokenCreated
-	if err := r.do(ctx, http.MethodPost, "/admin/tokens", p, &out); err != nil {
+	if err := r.do(ctx, http.MethodPost, "/v1/admin/tokens", p, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 func (r *remoteAdmin) ListTokens(ctx context.Context, slug string) ([]admin.TokenView, error) {
 	var all []admin.TokenView
-	path := "/admin/tokens"
+	path := "/v1/admin/tokens"
 	if slug != "" {
 		path += "?" + url.Values{"inbox": {slug}}.Encode()
 	}
@@ -277,7 +277,7 @@ func (r *remoteAdmin) ListTokens(ctx context.Context, slug string) ([]admin.Toke
 		path = ""
 		if page.Next != nil {
 			// Only ever follow the server's cursor on its own admin path.
-			if !strings.HasPrefix(*page.Next, "/admin/tokens?") {
+			if !strings.HasPrefix(*page.Next, "/v1/admin/tokens?") {
 				return nil, errors.New("the server sent a next link that was not understood")
 			}
 			path = *page.Next
@@ -286,7 +286,7 @@ func (r *remoteAdmin) ListTokens(ctx context.Context, slug string) ([]admin.Toke
 	return all, nil
 }
 func (r *remoteAdmin) RevokeToken(ctx context.Context, id int64) error {
-	return r.do(ctx, http.MethodDelete, "/admin/tokens/"+strconv.FormatInt(id, 10), nil, nil)
+	return r.do(ctx, http.MethodDelete, "/v1/admin/tokens/"+strconv.FormatInt(id, 10), nil, nil)
 }
 func (r *remoteAdmin) RotateIngestKey(ctx context.Context, slug string) (admin.View, error) {
 	var v admin.View
@@ -300,11 +300,11 @@ func (r *remoteAdmin) RunRetention(ctx context.Context) (int64, error) {
 	var out struct {
 		Deleted int64 `json:"deleted"`
 	}
-	err := r.do(ctx, http.MethodPost, "/admin/retention/run", nil, &out)
+	err := r.do(ctx, http.MethodPost, "/v1/admin/retention/run", nil, &out)
 	return out.Deleted, err
 }
 func (r *remoteAdmin) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
-	resp, err := r.request(ctx, http.MethodGet, "/admin/backup", nil)
+	resp, err := r.request(ctx, http.MethodGet, "/v1/admin/backup", nil)
 	if err != nil {
 		return nil, 0, err
 	}

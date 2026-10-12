@@ -46,13 +46,13 @@ func TestTheAdminAPIOnItsOwnListenerIsNotOnThePublicOne(t *testing.T) {
 	})
 	pubURL, admURL := "http://"+pub.Addr().String(), "http://"+adm.Addr().String()
 
-	if status, body := do2(t, "GET", admURL+"/admin/inboxes", adminAuth(), ""); status != 200 || !strings.Contains(body, "surface") {
+	if status, body := do2(t, "GET", admURL+"/v1/admin/inboxes", adminAuth(), ""); status != 200 || !strings.Contains(body, "surface") {
 		t.Errorf("admin listener: %d %s", status, body)
 	}
-	if status, _ := do2(t, "GET", pubURL+"/admin/inboxes", adminAuth(), ""); status != 404 {
+	if status, _ := do2(t, "GET", pubURL+"/v1/admin/inboxes", adminAuth(), ""); status != 404 {
 		t.Errorf("the public listener serves the admin API: %d", status)
 	}
-	if status, _ := do2(t, "POST", pubURL+"/admin/tokens", adminAuth(), `{"name":"x","all_inboxes":true}`); status != 404 {
+	if status, _ := do2(t, "POST", pubURL+"/v1/admin/tokens", adminAuth(), `{"name":"x","all_inboxes":true}`); status != 404 {
 		t.Errorf("the public listener creates tokens: %d", status)
 	}
 	// And the admin listener serves nothing else.
@@ -77,7 +77,7 @@ func TestADisabledAdminAPIIsNotServed(t *testing.T) {
 	e.newInbox("noadmin", "trusted", "")
 	base := serveOn(t, e)
 	for _, tc := range []struct{ method, path string }{
-		{"GET", "/admin/inboxes"}, {"POST", "/admin/inboxes"}, {"GET", "/admin/tokens"}, {"GET", "/admin/backup"},
+		{"GET", "/v1/admin/inboxes"}, {"POST", "/v1/admin/inboxes"}, {"GET", "/v1/admin/tokens"}, {"GET", "/v1/admin/backup"},
 	} {
 		if status, _ := do2(t, tc.method, base+tc.path, adminAuth(), ""); status != 404 {
 			t.Errorf("%s %s: %d, want 404", tc.method, tc.path, status)
@@ -105,7 +105,7 @@ func TestContradictoryAdminOptionsAreRefused(t *testing.T) {
 // What an admin does is logged with where the request came from.
 func TestAdminActionsAreLoggedWithTheCallersAddress(t *testing.T) {
 	a := newAdminEnv(t)
-	a.mustAdmin("POST", "/admin/tokens", map[string]any{"name": "logged", "all_inboxes": true}, 201)
+	a.mustAdmin("POST", "/v1/admin/tokens", map[string]any{"name": "logged", "all_inboxes": true}, 201)
 	logs := a.logs.String()
 	var line string
 	for _, l := range strings.Split(logs, "\n") {

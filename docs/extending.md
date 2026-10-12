@@ -18,12 +18,12 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Authenticator`, `Principal` | Says who a request is and what it may read or administer. | `pkg/auth/token` | `AuthenticatorSuite` |
 | `SecretBox` | Seals and opens verifier secrets, bound to a context (the inbox's slug). | `pkg/secretbox` | `SecretBoxSuite` |
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
-| `Backupper` (optional) | A consistent snapshot of the Store, for `GET /admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
+| `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they
-are absent: no `Backupper` means `GET /admin/backup` answers `501`.
+are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`.
 
 ## Putting them together
 
@@ -57,7 +57,7 @@ a server of your own than call `Run`. `Run` and `Serve` do two things the handle
 alone does not: they start the retention schedule, and on shutdown they end open
 streams and MCP waits first. If you serve the handler yourself, call
 `srv.Shutdown(ctx)` to end the streams, and run retention yourself
-(`POST /admin/retention/run`, or `Store.Prune`) on whatever schedule you want.
+(`POST /v1/admin/retention/run`, or `Store.Prune`) on whatever schedule you want.
 
 ## Writing hooks
 

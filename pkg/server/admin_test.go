@@ -136,11 +136,11 @@ func unjson[T any](t *testing.T, data []byte) T {
 func TestAdminAPIRequiresTheAdminToken(t *testing.T) {
 	a := newAdminEnv(t)
 	routes := []struct{ method, path string }{
-		{"POST", "/admin/inboxes"}, {"GET", "/admin/inboxes"}, {"GET", "/admin/inboxes/agent-a"},
-		{"PATCH", "/admin/inboxes/agent-a"}, {"DELETE", "/admin/inboxes/agent-a"},
-		{"PUT", "/admin/inboxes/agent-a/secret"}, {"POST", "/admin/inboxes/agent-a/rotate-ingest-key"},
-		{"POST", "/admin/tokens"}, {"GET", "/admin/tokens"}, {"DELETE", "/admin/tokens/1"},
-		{"POST", "/admin/retention/run"}, {"GET", "/admin/backup"}, {"GET", "/metrics"},
+		{"POST", "/v1/admin/inboxes"}, {"GET", "/v1/admin/inboxes"}, {"GET", "/v1/admin/inboxes/agent-a"},
+		{"PATCH", "/v1/admin/inboxes/agent-a"}, {"DELETE", "/v1/admin/inboxes/agent-a"},
+		{"PUT", "/v1/admin/inboxes/agent-a/secret"}, {"POST", "/v1/admin/inboxes/agent-a/rotate-ingest-key"},
+		{"POST", "/v1/admin/tokens"}, {"GET", "/v1/admin/tokens"}, {"DELETE", "/v1/admin/tokens/1"},
+		{"POST", "/v1/admin/retention/run"}, {"GET", "/v1/admin/backup"}, {"GET", "/metrics"},
 	}
 	for _, r := range routes {
 		for name, tok := range map[string]string{"no token": "", "bad token": "nope", "an agent token": a.tokenA} {
@@ -169,8 +169,8 @@ func TestAdminAPIRequiresTheAdminToken(t *testing.T) {
 func TestAdminAPIWrongMethodIsJSON405(t *testing.T) {
 	a := newAdminEnv(t)
 	for path, allow := range map[string]string{
-		"/admin/inboxes": "GET, POST", "/admin/inboxes/agent-a": "DELETE, GET, PATCH", "/admin/inboxes/agent-a/secret": "PUT",
-		"/admin/inboxes/agent-a/rotate-ingest-key": "POST", "/admin/tokens": "GET, POST", "/admin/tokens/1": "DELETE", "/admin/retention/run": "POST", "/admin/backup": "GET", "/metrics": "GET",
+		"/v1/admin/inboxes": "GET, POST", "/v1/admin/inboxes/agent-a": "DELETE, GET, PATCH", "/v1/admin/inboxes/agent-a/secret": "PUT",
+		"/v1/admin/inboxes/agent-a/rotate-ingest-key": "POST", "/v1/admin/tokens": "GET, POST", "/v1/admin/tokens/1": "DELETE", "/v1/admin/retention/run": "POST", "/v1/admin/backup": "GET", "/metrics": "GET",
 	} {
 		status, hdr, body := a.call("OPTIONS", path, nil, testAdminToken)
 		if status != http.StatusMethodNotAllowed || hdr.Get("Allow") != allow || errorCodeOfBody(t, body) != "method_not_allowed" {
@@ -178,7 +178,7 @@ func TestAdminAPIWrongMethodIsJSON405(t *testing.T) {
 		}
 	}
 	// An agent token is refused before the method is looked at.
-	if status, _, _ := a.call("OPTIONS", "/admin/inboxes", nil, a.tokenA); status != http.StatusForbidden {
+	if status, _, _ := a.call("OPTIONS", "/v1/admin/inboxes", nil, a.tokenA); status != http.StatusForbidden {
 		t.Errorf("an agent token with a wrong method got %d", status)
 	}
 }
@@ -195,7 +195,7 @@ func errorCodeOfBody(t *testing.T, body []byte) string {
 func TestAdminAPIIsOffWithoutAnAuthenticator(t *testing.T) {
 	e := newEnv(t)
 	base := serveOn(t, e)
-	status, _ := do2(t, http.MethodGet, base+"/admin/inboxes", http.Header{"Authorization": {"Bearer " + testAdminToken}}, "")
+	status, _ := do2(t, http.MethodGet, base+"/v1/admin/inboxes", http.Header{"Authorization": {"Bearer " + testAdminToken}}, "")
 	if status != http.StatusNotFound {
 		t.Errorf("status %d without an Authenticator, want 404", status)
 	}
@@ -206,7 +206,7 @@ func TestAdminAPIIsOffWithoutAnAuthenticator(t *testing.T) {
 func TestCreateShowListUpdateDelete(t *testing.T) {
 	a := newAdminEnv(t, func(o *Options) { o.PublicBaseURL = "https://hooks.example.com/" })
 
-	status, hdr, body := a.call("POST", "/admin/inboxes", map[string]any{
+	status, hdr, body := a.call("POST", "/v1/admin/inboxes", map[string]any{
 		"slug": "billing", "name": "Billing", "verifier": "github", "verifier_secret": "gh-secret",
 		"retention_days": 30, "retention_max_count": 5000, "event_type_pointer": "/type", "max_body_bytes": 2048,
 	}, testAdminToken)
@@ -214,7 +214,7 @@ func TestCreateShowListUpdateDelete(t *testing.T) {
 		t.Fatalf("create: %d %s", status, body)
 	}
 	created := unjson[createdJSON](t, body)
-	if hdr.Get("Location") != "/admin/inboxes/billing" {
+	if hdr.Get("Location") != "/v1/admin/inboxes/billing" {
 		t.Errorf("Location = %q", hdr.Get("Location"))
 	}
 	v := created.Inbox
@@ -241,13 +241,13 @@ func TestCreateShowListUpdateDelete(t *testing.T) {
 	}
 
 	// Show.
-	shown := unjson[viewJSON](t, a.mustAdmin("GET", "/admin/inboxes/billing", nil, 200))
+	shown := unjson[viewJSON](t, a.mustAdmin("GET", "/v1/admin/inboxes/billing", nil, 200))
 	if shown.MessageCount == nil || *shown.MessageCount != 1 || shown.LastSeq != 1 || shown.IngestURL != v.IngestURL {
 		t.Errorf("shown = %+v", shown)
 	}
 
 	// Update.
-	patched := unjson[viewJSON](t, a.mustAdmin("PATCH", "/admin/inboxes/billing", map[string]any{
+	patched := unjson[viewJSON](t, a.mustAdmin("PATCH", "/v1/admin/inboxes/billing", map[string]any{
 		"name": "Billing events", "retention_days": 0, "disabled": true, "on_verify_fail": "store",
 	}, 200))
 	if patched.Name != "Billing events" || patched.RetentionDays != 0 || !patched.Disabled || patched.OnVerifyFail != "store" ||
@@ -257,14 +257,14 @@ func TestCreateShowListUpdateDelete(t *testing.T) {
 	if status, _ := do2(t, "POST", ingest, http.Header{"X-Hub-Signature-256": {githubSig("gh-secret", payload)}}, payload); status != 404 {
 		t.Errorf("a disabled inbox accepted a delivery: %d", status)
 	}
-	a.mustAdmin("PATCH", "/admin/inboxes/billing", map[string]any{"disabled": false}, 200)
+	a.mustAdmin("PATCH", "/v1/admin/inboxes/billing", map[string]any{"disabled": false}, 200)
 
 	// List, in pages.
 	for _, slug := range []string{"second-inbox", "third-inbox", "fourth-inbox"} {
-		a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": slug, "verifier": "none"}, 201)
+		a.mustAdmin("POST", "/v1/admin/inboxes", map[string]any{"slug": slug, "verifier": "none"}, 201)
 	}
 	var seen []string
-	path := "/admin/inboxes?limit=2"
+	path := "/v1/admin/inboxes?limit=2"
 	for pages := 0; path != "" && pages < 10; pages++ {
 		page := unjson[struct {
 			Inboxes []viewJSON `json:"inboxes"`
@@ -283,11 +283,11 @@ func TestCreateShowListUpdateDelete(t *testing.T) {
 	}
 
 	// Delete.
-	if status, body := a.admin("DELETE", "/admin/inboxes/billing", nil); status != http.StatusNoContent || len(body) != 0 {
+	if status, body := a.admin("DELETE", "/v1/admin/inboxes/billing", nil); status != http.StatusNoContent || len(body) != 0 {
 		t.Errorf("delete: %d %q", status, body)
 	}
-	a.mustAdmin("GET", "/admin/inboxes/billing", nil, 404)
-	a.mustAdmin("DELETE", "/admin/inboxes/billing", nil, 404)
+	a.mustAdmin("GET", "/v1/admin/inboxes/billing", nil, 404)
+	a.mustAdmin("DELETE", "/v1/admin/inboxes/billing", nil, 404)
 	if status, _ := do2(t, "POST", a.base+"/in/billing", http.Header{}, payload); status != 404 {
 		t.Errorf("a deleted inbox accepted a delivery: %d", status)
 	}
@@ -316,7 +316,7 @@ func TestCreateValidatesBeforeStoring(t *testing.T) {
 		"not an object":           {`["x"]`, "request body"},
 		"trailing data":           {`{"slug":"val-j"} {"slug":"val-k"}`, "single JSON value"},
 	} {
-		status, body := a.admin("POST", "/admin/inboxes", c.body)
+		status, body := a.admin("POST", "/v1/admin/inboxes", c.body)
 		if status != http.StatusBadRequest || !strings.Contains(string(body), c.want) {
 			t.Errorf("%s: status %d, %s (want a 400 mentioning %q)", name, status, body, c.want)
 		}
@@ -328,8 +328,8 @@ func TestCreateValidatesBeforeStoring(t *testing.T) {
 		t.Errorf("a rejected create left %d inboxes behind", len(list)-1)
 	}
 
-	a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": "dup-inbox", "verifier": "none"}, 201)
-	status, body := a.admin("POST", "/admin/inboxes", map[string]any{"slug": "dup-inbox", "verifier": "none"})
+	a.mustAdmin("POST", "/v1/admin/inboxes", map[string]any{"slug": "dup-inbox", "verifier": "none"}, 201)
+	status, body := a.admin("POST", "/v1/admin/inboxes", map[string]any{"slug": "dup-inbox", "verifier": "none"})
 	if status != http.StatusConflict || errorCodeOfBody(t, body) != "conflict" {
 		t.Errorf("a duplicate slug: %d %s", status, body)
 	}
@@ -337,11 +337,11 @@ func TestCreateValidatesBeforeStoring(t *testing.T) {
 
 func TestRequestBodiesAreChecked(t *testing.T) {
 	a := newAdminEnv(t)
-	status, _, body := a.call("POST", "/admin/inboxes", "slug=x", testAdminToken) // JSON content type, form body
+	status, _, body := a.call("POST", "/v1/admin/inboxes", "slug=x", testAdminToken) // JSON content type, form body
 	if status != http.StatusBadRequest {
 		t.Errorf("a non-JSON body: %d %s", status, body)
 	}
-	req, _ := http.NewRequestWithContext(t.Context(), "POST", a.base+"/admin/inboxes", strings.NewReader(`{"slug":"abc-def"}`))
+	req, _ := http.NewRequestWithContext(t.Context(), "POST", a.base+"/v1/admin/inboxes", strings.NewReader(`{"slug":"abc-def"}`))
 	req.Header.Set("Authorization", "Bearer "+testAdminToken)
 	req.Header.Set("Content-Type", "text/plain")
 	resp, err := http.DefaultClient.Do(req)
@@ -352,7 +352,7 @@ func TestRequestBodiesAreChecked(t *testing.T) {
 	if resp.StatusCode != http.StatusUnsupportedMediaType {
 		t.Errorf("wrong content type: %d", resp.StatusCode)
 	}
-	status, _ = a.admin("POST", "/admin/inboxes", `{"slug":"abc-def","name":"`+strings.Repeat("n", 100<<10)+`"}`)
+	status, _ = a.admin("POST", "/v1/admin/inboxes", `{"slug":"abc-def","name":"`+strings.Repeat("n", 100<<10)+`"}`)
 	if status != http.StatusRequestEntityTooLarge {
 		t.Errorf("a 100 KiB body: %d", status)
 	}
@@ -360,7 +360,7 @@ func TestRequestBodiesAreChecked(t *testing.T) {
 
 func TestAWarningSaysWhenAVerifierHasNoSecret(t *testing.T) {
 	a := newAdminEnv(t)
-	c := unjson[createdJSON](t, a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": "needs-secret", "verifier": "github"}, 201))
+	c := unjson[createdJSON](t, a.mustAdmin("POST", "/v1/admin/inboxes", map[string]any{"slug": "needs-secret", "verifier": "github"}, 201))
 	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "needs a secret") || c.Inbox.HasVerifierSecret {
 		t.Errorf("warnings %v, has secret %v", c.Warnings, c.Inbox.HasVerifierSecret)
 	}
@@ -371,7 +371,7 @@ func TestAWarningSaysWhenAVerifierHasNoSecret(t *testing.T) {
 	if status, _ := do2(t, "POST", ingest, hdr, payload); status == 200 {
 		t.Error("a delivery was accepted before any secret was set")
 	}
-	v := unjson[viewJSON](t, a.mustAdmin("PUT", "/admin/inboxes/needs-secret/secret", map[string]any{"secret": "late-secret"}, 200))
+	v := unjson[viewJSON](t, a.mustAdmin("PUT", "/v1/admin/inboxes/needs-secret/secret", map[string]any{"secret": "late-secret"}, 200))
 	if !v.HasVerifierSecret {
 		t.Error("the inbox does not say it has a secret")
 	}
@@ -379,21 +379,21 @@ func TestAWarningSaysWhenAVerifierHasNoSecret(t *testing.T) {
 		t.Errorf("a signed delivery after setting the secret: %d %s", status, body)
 	}
 	// Rotating the secret replaces it.
-	a.mustAdmin("PUT", "/admin/inboxes/needs-secret/secret", map[string]any{"secret": "newer-secret"}, 200)
+	a.mustAdmin("PUT", "/v1/admin/inboxes/needs-secret/secret", map[string]any{"secret": "newer-secret"}, 200)
 	if status, _ := do2(t, "POST", ingest, http.Header{"X-Hub-Signature-256": {githubSig("late-secret", payload+" ")}}, payload+" "); status == 200 {
 		t.Error("the old secret still verifies")
 	}
-	if status, _ := a.admin("PUT", "/admin/inboxes/needs-secret/secret", map[string]any{"secret": ""}); status != 400 {
+	if status, _ := a.admin("PUT", "/v1/admin/inboxes/needs-secret/secret", map[string]any{"secret": ""}); status != 400 {
 		t.Errorf("an empty secret: %d", status)
 	}
-	if status, _ := a.admin("PUT", "/admin/inboxes/no-such-inbox/secret", map[string]any{"secret": "x"}); status != 404 {
+	if status, _ := a.admin("PUT", "/v1/admin/inboxes/no-such-inbox/secret", map[string]any{"secret": "x"}); status != 404 {
 		t.Errorf("a secret for a missing inbox: %d", status)
 	}
 }
 
 func TestPatchValidatesTheResultingVerifier(t *testing.T) {
 	a := newAdminEnv(t)
-	a.mustAdmin("PATCH", "/admin/inboxes/agent-a", map[string]any{"verifier": "token"}, 200) // one that checks its configuration
+	a.mustAdmin("PATCH", "/v1/admin/inboxes/agent-a", map[string]any{"verifier": "token"}, 200) // one that checks its configuration
 	for name, p := range map[string]map[string]any{
 		"unknown verifier":  {"verifier": "nope"},
 		"hmac needs header": {"verifier": "hmac"},
@@ -403,12 +403,12 @@ func TestPatchValidatesTheResultingVerifier(t *testing.T) {
 		"token hash":        {"agent_token_hash": "x"},
 		"bad retention":     {"retention_max_count": -3},
 	} {
-		if status, body := a.admin("PATCH", "/admin/inboxes/agent-a", p); status != http.StatusBadRequest {
+		if status, body := a.admin("PATCH", "/v1/admin/inboxes/agent-a", p); status != http.StatusBadRequest {
 			t.Errorf("%s: %d %s", name, status, body)
 		}
 	}
-	a.mustAdmin("PATCH", "/admin/inboxes/agent-a", map[string]any{"verifier": "hmac", "verifier_config": map[string]any{"header": "X-Sig"}}, 200)
-	if status, _ := a.admin("PATCH", "/admin/inboxes/no-such-inbox", map[string]any{"name": "x"}); status != 404 {
+	a.mustAdmin("PATCH", "/v1/admin/inboxes/agent-a", map[string]any{"verifier": "hmac", "verifier_config": map[string]any{"header": "X-Sig"}}, 200)
+	if status, _ := a.admin("PATCH", "/v1/admin/inboxes/no-such-inbox", map[string]any{"name": "x"}); status != 404 {
 		t.Errorf("patching a missing inbox: %d", status)
 	}
 }
@@ -434,7 +434,7 @@ func TestTokensAreIssuedScopedAndRevoked(t *testing.T) {
 		t.Fatal("the starting token does not work")
 	}
 	// A second token for the same inbox, so the first can be retired with no gap.
-	second := unjson[tokenCreatedJSON](t, a.mustAdmin("POST", "/admin/tokens", map[string]any{"name": "next", "inboxes": []string{"agent-a"}}, 201))
+	second := unjson[tokenCreatedJSON](t, a.mustAdmin("POST", "/v1/admin/tokens", map[string]any{"name": "next", "inboxes": []string{"agent-a"}}, 201))
 	if second.Token == "" || second.Token == a.tokenA || second.Record.Name != "next" || second.Record.AllInboxes ||
 		len(second.Record.Inboxes) != 1 || second.Record.Inboxes[0] != "agent-a" {
 		t.Fatalf("created token %+v", second)
@@ -451,7 +451,7 @@ func TestTokensAreIssuedScopedAndRevoked(t *testing.T) {
 			ID   int64  `json:"id"`
 			Name string `json:"name"`
 		} `json:"tokens"`
-	}](t, a.mustAdmin("GET", "/admin/tokens?inbox=agent-a", nil, 200))
+	}](t, a.mustAdmin("GET", "/v1/admin/tokens?inbox=agent-a", nil, 200))
 	var firstID int64
 	for _, tk := range list.Tokens {
 		if tk.Name == "default" {
@@ -463,11 +463,11 @@ func TestTokensAreIssuedScopedAndRevoked(t *testing.T) {
 	}
 
 	// An all-inboxes token reads both inboxes and still cannot administer.
-	all := unjson[tokenCreatedJSON](t, a.mustAdmin("POST", "/admin/tokens", map[string]any{"name": "reader", "all_inboxes": true}, 201))
+	all := unjson[tokenCreatedJSON](t, a.mustAdmin("POST", "/v1/admin/tokens", map[string]any{"name": "reader", "all_inboxes": true}, 201))
 	if read(all.Token, "agent-a") != 200 || read(all.Token, "agent-b") != 200 {
 		t.Error("an all-inboxes token should read every inbox")
 	}
-	if status, _, _ := a.call("GET", "/admin/inboxes", nil, all.Token); status != http.StatusForbidden {
+	if status, _, _ := a.call("GET", "/v1/admin/inboxes", nil, all.Token); status != http.StatusForbidden {
 		t.Errorf("an all-inboxes token on the admin API: %d, want 403", status)
 	}
 
@@ -475,8 +475,8 @@ func TestTokensAreIssuedScopedAndRevoked(t *testing.T) {
 	if firstID == 0 {
 		firstID = list.Tokens[0].ID
 	}
-	a.mustAdmin("DELETE", "/admin/tokens/"+strconv.FormatInt(firstID, 10), nil, 204)
-	if status, _ := a.admin("DELETE", "/admin/tokens/"+strconv.FormatInt(firstID, 10), nil); status != 404 {
+	a.mustAdmin("DELETE", "/v1/admin/tokens/"+strconv.FormatInt(firstID, 10), nil, 204)
+	if status, _ := a.admin("DELETE", "/v1/admin/tokens/"+strconv.FormatInt(firstID, 10), nil); status != 404 {
 		t.Errorf("revoking twice: %d", status)
 	}
 	if read(a.tokenA, "agent-a") != 401 {
@@ -495,7 +495,7 @@ func TestTokensAreIssuedScopedAndRevoked(t *testing.T) {
 		"no name at all":        {"all_inboxes": true},
 		"a repeated inbox name": {"name": "x", "inboxes": []string{"agent-a", "agent-a"}},
 	} {
-		status, _ := a.admin("POST", "/admin/tokens", body)
+		status, _ := a.admin("POST", "/v1/admin/tokens", body)
 		want := http.StatusBadRequest
 		if name == "an unknown inbox" {
 			want = http.StatusNotFound
@@ -509,7 +509,7 @@ func TestTokensAreIssuedScopedAndRevoked(t *testing.T) {
 // Two admins changing an inbox at once must not lose either change.
 func TestConcurrentPatchesAreBothApplied(t *testing.T) {
 	a := newAdminEnv(t)
-	start := unjson[viewJSON](t, a.mustAdmin("GET", "/admin/inboxes/agent-a", nil, 200)).Version
+	start := unjson[viewJSON](t, a.mustAdmin("GET", "/v1/admin/inboxes/agent-a", nil, 200)).Version
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Go(func() {
@@ -517,13 +517,13 @@ func TestConcurrentPatchesAreBothApplied(t *testing.T) {
 			if i%2 == 1 {
 				field = map[string]any{"retention_max_count": i + 100}
 			}
-			if status, body := a.admin("PATCH", "/admin/inboxes/agent-a", field); status != 200 {
+			if status, body := a.admin("PATCH", "/v1/admin/inboxes/agent-a", field); status != 200 {
 				t.Errorf("patch %d: %d %s", i, status, body)
 			}
 		})
 	}
 	wg.Wait()
-	v := unjson[viewJSON](t, a.mustAdmin("GET", "/admin/inboxes/agent-a", nil, 200))
+	v := unjson[viewJSON](t, a.mustAdmin("GET", "/v1/admin/inboxes/agent-a", nil, 200))
 	if v.Version != start+8 || v.RetentionDays == 0 || v.RetentionMaxCount == 0 {
 		t.Errorf("after 8 patches from version %d: version %d, days %d, count %d", start, v.Version, v.RetentionDays, v.RetentionMaxCount)
 	}
@@ -544,17 +544,17 @@ func TestNoResponseOrLogContainsASecret(t *testing.T) {
 		return data
 	}
 
-	c := unjson[createdJSON](t, call("POST", "/admin/inboxes", map[string]any{"slug": "leaky", "verifier": "github", "verifier_secret": secret}))
-	call("GET", "/admin/inboxes", nil)
-	call("GET", "/admin/inboxes/leaky", nil)
-	call("PATCH", "/admin/inboxes/leaky", map[string]any{"name": "Leaky"})
-	call("PUT", "/admin/inboxes/leaky/secret", map[string]any{"secret": secret + "-2"})
-	rot := unjson[tokenCreatedJSON](t, call("POST", "/admin/tokens", map[string]any{"name": "second", "inboxes": []string{"leaky"}}))
-	call("GET", "/admin/tokens", nil)
-	call("POST", "/admin/inboxes", map[string]any{"slug": "leaky", "verifier_secret": secret}) // a conflict
-	call("POST", "/admin/inboxes", map[string]any{"slug": "x", "verifier_secret": secret})     // invalid
-	call("GET", "/admin/inboxes/nope", nil)
-	call("POST", "/admin/retention/run", nil)
+	c := unjson[createdJSON](t, call("POST", "/v1/admin/inboxes", map[string]any{"slug": "leaky", "verifier": "github", "verifier_secret": secret}))
+	call("GET", "/v1/admin/inboxes", nil)
+	call("GET", "/v1/admin/inboxes/leaky", nil)
+	call("PATCH", "/v1/admin/inboxes/leaky", map[string]any{"name": "Leaky"})
+	call("PUT", "/v1/admin/inboxes/leaky/secret", map[string]any{"secret": secret + "-2"})
+	rot := unjson[tokenCreatedJSON](t, call("POST", "/v1/admin/tokens", map[string]any{"name": "second", "inboxes": []string{"leaky"}}))
+	call("GET", "/v1/admin/tokens", nil)
+	call("POST", "/v1/admin/inboxes", map[string]any{"slug": "leaky", "verifier_secret": secret}) // a conflict
+	call("POST", "/v1/admin/inboxes", map[string]any{"slug": "x", "verifier_secret": secret})     // invalid
+	call("GET", "/v1/admin/inboxes/nope", nil)
+	call("POST", "/v1/admin/retention/run", nil)
 	body := `{"a":1}`
 	status, text := do2(t, "POST", a.base+"/in/leaky", http.Header{"X-Hub-Signature-256": {githubSig("wrong", body)}}, body)
 	fmt.Fprintf(&all, "%d %s\n", status, text)
@@ -616,7 +616,7 @@ func TestRunningRetentionByAgeByCountAndBoth(t *testing.T) {
 		func(o *Options) { o.Now = func() time.Time { return time.Unix(0, clock.Load()).UTC() } },
 	)
 	mk := func(slug string, days int, count int64) {
-		a.mustAdmin("POST", "/admin/inboxes", map[string]any{"slug": slug, "ingest_key": slug, "verifier": "none", "retention_days": days, "retention_max_count": count}, 201)
+		a.mustAdmin("POST", "/v1/admin/inboxes", map[string]any{"slug": slug, "ingest_key": slug, "verifier": "none", "retention_days": days, "retention_max_count": count}, 201)
 	}
 	mk("by-age", 2, 0)
 	mk("by-count", 0, 3)
@@ -634,7 +634,7 @@ func TestRunningRetentionByAgeByCountAndBoth(t *testing.T) {
 	// It is the end of day 9, and the sweep has not run.
 	clock.Store(day0.AddDate(0, 0, 9).UnixNano())
 	count := func(slug string) int64 {
-		return *unjson[viewJSON](t, a.mustAdmin("GET", "/admin/inboxes/"+slug, nil, 200)).MessageCount
+		return *unjson[viewJSON](t, a.mustAdmin("GET", "/v1/admin/inboxes/"+slug, nil, 200)).MessageCount
 	}
 	for _, slug := range []string{"by-age", "by-count", "by-both", "keeps-all"} {
 		if count(slug) != 10 {
@@ -642,7 +642,7 @@ func TestRunningRetentionByAgeByCountAndBoth(t *testing.T) {
 		}
 	}
 
-	got := unjson[map[string]int64](t, a.mustAdmin("POST", "/admin/retention/run", nil, 200))
+	got := unjson[map[string]int64](t, a.mustAdmin("POST", "/v1/admin/retention/run", nil, 200))
 	// By age (2 days): messages older than two days at day 9 are days 0..6; days 7, 8, 9 stay.
 	// By count (3): the newest 3 stay. Both (2 days, 4 messages): the stricter of the two, which is 3 (age) here.
 	want := map[string]int64{"by-age": 3, "by-count": 3, "by-both": 3, "keeps-all": 10}
@@ -655,13 +655,13 @@ func TestRunningRetentionByAgeByCountAndBoth(t *testing.T) {
 		t.Errorf("deleted = %d, want 21", got["deleted"])
 	}
 	// And it is idempotent.
-	if again := unjson[map[string]int64](t, a.mustAdmin("POST", "/admin/retention/run", nil, 200)); again["deleted"] != 0 {
+	if again := unjson[map[string]int64](t, a.mustAdmin("POST", "/v1/admin/retention/run", nil, 200)); again["deleted"] != 0 {
 		t.Errorf("a second sweep deleted %d", again["deleted"])
 	}
 
 	// Both rules together: the count rule wins when it is the stricter one.
-	a.mustAdmin("PATCH", "/admin/inboxes/by-both", map[string]any{"retention_days": 30, "retention_max_count": 2}, 200)
-	a.mustAdmin("POST", "/admin/retention/run", nil, 200)
+	a.mustAdmin("PATCH", "/v1/admin/inboxes/by-both", map[string]any{"retention_days": 30, "retention_max_count": 2}, 200)
+	a.mustAdmin("POST", "/v1/admin/retention/run", nil, 200)
 	if c := count("by-both"); c != 2 {
 		t.Errorf("by-both holds %d after tightening the count, want 2", c)
 	}
@@ -693,9 +693,9 @@ func TestOnlyOneRetentionSweepRunsAtATime(t *testing.T) {
 	bp := &blockedPrune{entered: make(chan struct{}, 4), release: make(chan struct{})}
 	a := newAdminEnv(t, func(o *Options) { bp.Store = o.Store; o.Store = bp; o.RetentionInterval = -1 })
 	done := make(chan int, 1)
-	go func() { s, _ := a.admin("POST", "/admin/retention/run", nil); done <- s }()
+	go func() { s, _ := a.admin("POST", "/v1/admin/retention/run", nil); done <- s }()
 	<-bp.entered
-	status, body := a.admin("POST", "/admin/retention/run", nil)
+	status, body := a.admin("POST", "/v1/admin/retention/run", nil)
 	if status != http.StatusConflict || errorCodeOfBody(t, body) != "busy" {
 		t.Errorf("a second sweep while one runs: %d %s", status, body)
 	}
@@ -703,7 +703,7 @@ func TestOnlyOneRetentionSweepRunsAtATime(t *testing.T) {
 	if s := <-done; s != 200 {
 		t.Errorf("the first sweep: %d", s)
 	}
-	if status, _ := a.admin("POST", "/admin/retention/run", nil); status != 200 {
+	if status, _ := a.admin("POST", "/v1/admin/retention/run", nil); status != 200 {
 		t.Errorf("a sweep after the first finished: %d", status)
 	}
 }
@@ -797,7 +797,7 @@ func TestBackupStreamsAConsistentCopy(t *testing.T) {
 		}
 	})
 
-	status, hdr, data := a.call("GET", "/admin/backup", nil, testAdminToken)
+	status, hdr, data := a.call("GET", "/v1/admin/backup", nil, testAdminToken)
 	close(stop)
 	wg.Wait()
 	if status != 200 {
@@ -846,7 +846,7 @@ type storeOnly struct{ inbox.Store }
 
 func TestBackupIsNotImplementedWithoutTheCapability(t *testing.T) {
 	a := newAdminEnv(t, func(o *Options) { o.Store = storeOnly{o.Store} })
-	status, body := a.admin("GET", "/admin/backup", nil)
+	status, body := a.admin("GET", "/v1/admin/backup", nil)
 	if status != http.StatusNotImplemented || errorCodeOfBody(t, body) != "not_implemented" {
 		t.Errorf("status %d %s", status, body)
 	}
@@ -868,9 +868,9 @@ func TestOnlyOneBackupRunsAtATime(t *testing.T) {
 	sb := slowBackup{entered: make(chan struct{}, 2), release: make(chan struct{})}
 	a := newAdminEnv(t, func(o *Options) { sb.Store = o.Store; o.Store = sb })
 	first := make(chan int, 1)
-	go func() { s, _ := a.admin("GET", "/admin/backup", nil); first <- s }()
+	go func() { s, _ := a.admin("GET", "/v1/admin/backup", nil); first <- s }()
 	<-sb.entered
-	if status, body := a.admin("GET", "/admin/backup", nil); status != http.StatusConflict || errorCodeOfBody(t, body) != "busy" {
+	if status, body := a.admin("GET", "/v1/admin/backup", nil); status != http.StatusConflict || errorCodeOfBody(t, body) != "busy" {
 		t.Errorf("a second backup: %d %s", status, body)
 	}
 	close(sb.release)
@@ -884,7 +884,7 @@ func TestOnlyOneBackupRunsAtATime(t *testing.T) {
 func TestIngestURLsComeFromTheRequestWhenNoBaseIsConfigured(t *testing.T) {
 	a := newAdminEnv(t)
 	show := func(hdr http.Header) viewJSON {
-		req, _ := http.NewRequestWithContext(t.Context(), "GET", a.base+"/admin/inboxes/agent-a", nil)
+		req, _ := http.NewRequestWithContext(t.Context(), "GET", a.base+"/v1/admin/inboxes/agent-a", nil)
 		req.Header.Set("Authorization", "Bearer "+testAdminToken)
 		for k, v := range hdr {
 			req.Header[k] = v
@@ -965,7 +965,7 @@ func TestAnAbandonedBackupLeavesNoCopyBehind(t *testing.T) {
 		}
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	req, _ := http.NewRequestWithContext(ctx, "GET", a.base+"/admin/backup", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", a.base+"/v1/admin/backup", nil)
 	req.Header.Set("Authorization", "Bearer "+testAdminToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -990,7 +990,7 @@ func TestAnAbandonedBackupLeavesNoCopyBehind(t *testing.T) {
 	// is correct and must be brief; anything but a 200 in the end is not.
 	var status int
 	waitFor(t, "the abandoned backup to let go of the lock", func() bool {
-		status, _ = a.admin("GET", "/admin/backup", nil)
+		status, _ = a.admin("GET", "/v1/admin/backup", nil)
 		return status != http.StatusConflict
 	})
 	if status != 200 {
@@ -1019,7 +1019,7 @@ func TestManualRetentionStopsWhenShutdownBegins(t *testing.T) {
 
 	reply := make(chan int, 1)
 	go func() {
-		status, _ := do2(t, "POST", base+"/admin/retention/run", http.Header{"Authorization": {"Bearer " + testAdminToken}}, "")
+		status, _ := do2(t, "POST", base+"/v1/admin/retention/run", http.Header{"Authorization": {"Bearer " + testAdminToken}}, "")
 		reply <- status
 	}()
 	<-st.entered
