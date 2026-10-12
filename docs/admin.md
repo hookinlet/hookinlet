@@ -107,6 +107,13 @@ other fields are `ingest_key`, `name`, `verifier_config`, `verifier_secret`, `on
 configuration are checked when you save them, so a typo is an error now and not
 a failed delivery later. See [verifiers](verifiers.md).
 
+**Retention and the clock.** Retention by age (`retention_days`) trusts the server's clock. If the clock
+jumps forward between two retention runs (a resumed VM, a wrong time read before it is corrected), a run
+that trusted it would delete messages that are not yet due. A run that finds the wall clock more than ten
+minutes ahead of the time that really passed uses the time that really passed instead, and logs a
+warning; the next run takes the clock as it then reads, so a clock that stays where it jumped is the
+clock. Retention by count is not affected. A server whose clock is wrong for good should have its clock fixed.
+
 A verifier that needs a secret, created without one, comes with a `warnings`
 entry: deliveries fail until you set it. The same warning comes back from any
 change that leaves an inbox in that state.

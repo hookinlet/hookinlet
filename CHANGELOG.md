@@ -56,6 +56,10 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 
 ### Release review fixes
 
+- **A clock that jumps forward no longer makes retention delete messages early.** A retention run that
+  finds the wall clock more than ten minutes ahead of the monotonic clock since the last run uses the time
+  that really passed, and logs it; the next run accepts the clock as it reads.
+
 - **Upgrading from rc.1: stop the old server first.** rc.1 takes no lock on the data directory, so
   a migration could run under it and leave message counts wrong. The migration now refuses when
   another process has the database open.
