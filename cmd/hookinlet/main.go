@@ -42,11 +42,17 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		usage(stderr)
 		return exitUsage
 	}
-	// Secrets may come from files (HOOKINLET_ADMIN_TOKEN_FILE and the like).
-	getenv, err := config.WithSecretFiles(getenv)
-	if err != nil {
-		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
-		return exitUsage
+	// Secrets may come from files (HOOKINLET_ADMIN_TOKEN_FILE and the like). The
+	// commands that use no secret do not read them: a container's health check must
+	// not fail because a secret file is unreadable to it.
+	switch args[0] {
+	case "version", "help", "-h", "--help", "healthcheck":
+	default:
+		var err error
+		if getenv, err = config.WithSecretFiles(getenv); err != nil {
+			fmt.Fprintf(stderr, "hookinlet: %v\n", err)
+			return exitUsage
+		}
 	}
 	switch args[0] {
 	case "serve":
@@ -154,6 +160,10 @@ func serve(args []string, getenv func(string) string, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// The first signal starts the shutdown. Once it has, the default behaviour comes
+	// back, so a second one ends the process at once if the shutdown is stuck or the
+	// drain is longer than anyone cares to wait.
+	go func() { <-ctx.Done(); stop() }()
 	if err := srv.Run(ctx); err != nil {
 		log.Error("server failed", "err", err)
 		return exitRuntime

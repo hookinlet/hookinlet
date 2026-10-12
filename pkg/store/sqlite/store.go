@@ -64,7 +64,7 @@ type Store struct {
 	closeErr  error
 
 	log       *slog.Logger
-	outOfRoom atomic.Bool // a write failed for lack of room, and none has succeeded since
+	fullUntil atomic.Int64 // unix nanoseconds: Ping reports the Store full until then, after a write failed for lack of room
 	freeSpace func(dir string) (uint64, error)
 	lock      *os.File     // held for the life of a Store opened with WithExclusiveLock
 	clockWarn atomic.Int64 // when a stepped-back clock was last logged, in unix seconds
@@ -139,6 +139,9 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 	for _, o := range opts {
 		o(&cfg)
 	}
+	if cfg.log == nil {
+		cfg.log = slog.New(slog.DiscardHandler)
+	}
 	if cfg.readers < 1 {
 		return nil, errors.New("sqlite: readers must be at least 1")
 	}
@@ -152,7 +155,11 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 
 	var lock *os.File
 	if cfg.lock {
-		if lock, err = lockFile(filepath.Join(filepath.Dir(abs), LockFileName)); err != nil {
+		switch lock, err = lockFile(filepath.Join(filepath.Dir(abs), LockFileName)); {
+		case errors.Is(err, errLockUnsupported):
+			cfg.log.Warn("the data directory could not be locked, so nothing stops a second server from using it; make sure only one does", "reason", err.Error())
+			lock, err = nil, nil
+		case err != nil:
 			return nil, err
 		}
 	}
@@ -175,7 +182,7 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 	// The writer is opened first: it creates the file and switches it to WAL.
 	// _txlock=immediate makes every write transaction take the write lock when
 	// it begins, so a transaction never fails halfway with SQLITE_BUSY.
-	wdb, err := openDB(abs, cfg.readers, false)
+	wdb, err := openDB(abs, cfg.readers, false, cfg.walLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -183,15 +190,7 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 	wdb.SetMaxIdleConns(1)
 	wdb.SetConnMaxLifetime(0)
 
-	if _, err := wdb.ExecContext(ctx, fmt.Sprintf("PRAGMA journal_size_limit = %d", cfg.walLimit)); err != nil {
-		_ = wdb.Close()
-		return nil, fmt.Errorf("sqlite: bound the write-ahead log: %w", err)
-	}
-
 	removeStaleBackups(filepath.Dir(abs), time.Now())
-	if cfg.log == nil {
-		cfg.log = slog.New(slog.DiscardHandler)
-	}
 	s := &Store{path: abs, wdb: wdb, now: cfg.now, log: cfg.log, lock: lock, freeSpace: cfg.freeSpace}
 	if err := wdb.PingContext(ctx); err != nil {
 		_ = wdb.Close()
@@ -218,7 +217,10 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 	return s, nil
 }
 
-func openDB(path string, _ int, readOnly bool) (*sql.DB, error) {
+// walLimit, for a connection that writes, is the size the write-ahead log is cut back
+// to when it is reset. It is part of the connection string, so a connection that the
+// pool replaces has it too.
+func openDB(path string, _ int, readOnly bool, walLimit ...int64) (*sql.DB, error) {
 	q := url.Values{}
 	for _, p := range []string{
 		fmt.Sprintf("busy_timeout(%d)", busyTimeout),
@@ -234,6 +236,9 @@ func openDB(path string, _ int, readOnly bool) (*sql.DB, error) {
 	if readOnly {
 		q.Add("_pragma", "query_only(1)")
 	} else {
+		if len(walLimit) > 0 {
+			q.Add("_pragma", fmt.Sprintf("journal_size_limit(%d)", walLimit[0]))
+		}
 		q.Set("_txlock", "immediate")
 	}
 	u := url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}
@@ -289,10 +294,9 @@ func (s *Store) Ping(ctx context.Context) error {
 	switch {
 	case measured && free < MinFreeBytes:
 		return fmt.Errorf("%w: %d bytes are left on the data directory's volume", inbox.ErrStorageFull, free)
-	case measured:
-		s.outOfRoom.Store(false) // there is room again
-	case s.outOfRoom.Load():
-		return fmt.Errorf("%w: the last write failed for lack of room", inbox.ErrStorageFull)
+	case s.now().UnixNano() < s.fullUntil.Load():
+		// The volume may report room (a quota, a size limit) while writes fail.
+		return fmt.Errorf("%w: a write failed for lack of room a moment ago", inbox.ErrStorageFull)
 	}
 	return nil
 }
@@ -328,7 +332,6 @@ func (s *Store) writeTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	if err := tx.Commit(); err != nil {
 		return s.ctxErr(ctx, s.full(fmt.Errorf("sqlite: commit: %w", err)))
 	}
-	s.outOfRoom.Store(false)
 	return nil
 }
 

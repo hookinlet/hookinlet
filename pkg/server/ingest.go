@@ -77,27 +77,22 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	if r.ContentLength > in.MaxBodyBytes {
 		return refuse(http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
 	}
-	// The body is held in memory until the delivery is stored, whoever sent it, and
-	// the signature has not been checked yet. How much may be held at once is
-	// bounded, so that a crowd of large unsigned posts cannot use up the server's
-	// memory; the rest are told to come back.
-	reserve := in.MaxBodyBytes
-	if r.ContentLength >= 0 && r.ContentLength < reserve {
-		reserve = r.ContentLength
-	}
-	release, ok := s.ingestBudget.take(reserve)
-	if !ok {
-		return refuse(http.StatusServiceUnavailable, "overloaded", "too many deliveries are being received at once; retry shortly")
-	}
-	defer release()
 	// A sender gets a bounded time to deliver the body, so a trickle cannot hold a
 	// connection and its buffer open indefinitely. Servers that cannot set a
 	// deadline (such as a test recorder) just do without one.
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.opts.ReadBodyTimeout))
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, in.MaxBodyBytes))
+	// The body is held in memory until the delivery is stored, whoever sent it, and
+	// the signature has not been checked yet. How much may be held at once is
+	// bounded: the bytes are counted as they arrive, and a delivery that would take
+	// the total over is told to come back.
+	br := &budgetReader{r: http.MaxBytesReader(w, r.Body, in.MaxBodyBytes), b: &s.ingestBudget}
+	defer br.release()
+	body, err := io.ReadAll(br)
 	s.metrics.bodyBytes.Add(int64(len(body)))
 	var tooLarge *http.MaxBytesError
 	switch {
+	case errors.Is(err, errOverBudget):
+		return refuse(http.StatusServiceUnavailable, "overloaded", "too many deliveries are being received at once; retry shortly")
 	case errors.As(err, &tooLarge):
 		return refuse(http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
 	case err != nil:

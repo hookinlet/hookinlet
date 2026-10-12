@@ -252,9 +252,11 @@ func TestASlugHeldByAnUnfinishedDeleteSaysWhy(t *testing.T) {
 // and everything recovers when there is room again.
 func TestAFullDiskIsErrStorageFull(t *testing.T) {
 	s, in := internalStore(t)
-	// Where free space cannot be measured (or says nothing is wrong, as it does for a
-	// limit that is not the disk), it is the failed write that marks the Store full.
-	s.freeSpace = func(string) (uint64, error) { return 0, errors.New("cannot measure") }
+	// The volume says there is room, as it does for a quota or a size limit: it is the
+	// failed write that marks the Store full.
+	s.freeSpace = func(string) (uint64, error) { return math.MaxUint64, nil }
+	clock := time.Now()
+	s.now = func() time.Time { return clock }
 	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("x"), Verified: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -279,9 +281,17 @@ func TestAFullDiskIsErrStorageFull(t *testing.T) {
 		t.Errorf("stats after the failed append: %+v, %v", st, err)
 	}
 
+	// A small write that succeeds does not make it believed.
+	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("small"), Verified: true}); err == nil {
+		_ = err // (it may fit in the page that was free; the point is Ping below)
+	}
+	if err := s.Ping(t.Context()); !errors.Is(err, inbox.ErrStorageFull) {
+		t.Errorf("Ping after a small write: %v", err)
+	}
 	if _, err := s.wdb.ExecContext(t.Context(), `PRAGMA max_page_count = 1073741823`); err != nil {
 		t.Fatal(err)
 	}
+	clock = clock.Add(roomRetryWindow + time.Second)
 	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: big, Verified: true}); err != nil {
 		t.Fatalf("an append once there is room: %v", err)
 	}

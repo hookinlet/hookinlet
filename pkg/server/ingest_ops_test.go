@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,78 +20,84 @@ import (
 
 func TestByteBudget(t *testing.T) {
 	b := &byteBudget{limit: 100}
-	r1, ok := b.take(60)
-	if !ok {
+	if !b.add(60) {
 		t.Fatal("60 of 100 refused")
 	}
-	if _, ok := b.take(50); ok {
+	if b.add(50) {
 		t.Error("110 of 100 granted")
 	}
-	r2, ok := b.take(40)
-	if !ok {
+	if !b.add(40) {
 		t.Error("exactly the rest refused")
 	}
-	r1()
-	r1() // giving back twice gives back once
-	if _, ok := b.take(60); !ok {
+	b.sub(60)
+	if !b.add(60) {
 		t.Error("the 60 given back were not available")
 	}
-	r2()
-
-	// A request larger than the whole budget gets the whole budget, when it is free.
-	big := &byteBudget{limit: 10}
-	if _, ok := big.take(1000); !ok {
-		t.Error("a large request on an idle budget was refused")
-	}
-	if _, ok := big.take(1); ok {
-		t.Error("the large request did not hold the whole budget")
-	}
-	// Negative turns it off; zero-sized requests cost nothing.
-	off := &byteBudget{limit: -1}
-	if _, ok := off.take(1 << 40); !ok {
+	if off := (&byteBudget{limit: -1}); !off.add(1 << 40) {
 		t.Error("an unlimited budget refused")
 	}
-	if _, ok := (&byteBudget{limit: 5}).take(0); !ok {
-		t.Error("an empty request was refused")
+	if !(&byteBudget{limit: 5}).add(0) {
+		t.Error("nothing was refused")
 	}
 
-	// Under contention it never grants more than the limit.
+	// Under contention it never holds more than the limit.
 	c := &byteBudget{limit: 1000}
-	var mu sync.Mutex
-	var held, most int64
+	var most atomic.Int64
 	var wg sync.WaitGroup
 	for range 64 {
 		wg.Go(func() {
 			for range 200 {
-				release, ok := c.take(100)
-				if !ok {
+				if !c.add(100) {
 					continue
 				}
-				mu.Lock()
-				held += 100
-				most = max(most, held)
-				mu.Unlock()
-				mu.Lock()
-				held -= 100
-				mu.Unlock()
-				release()
+				c.mu.Lock()
+				most.Store(max(most.Load(), c.used))
+				c.mu.Unlock()
+				c.sub(100)
 			}
 		})
 	}
 	wg.Wait()
-	if most > 1000 {
-		t.Errorf("%d bytes held at once, limit 1000", most)
+	if most.Load() > 1000 {
+		t.Errorf("%d bytes held at once, limit 1000", most.Load())
+	}
+	if c.used != 0 {
+		t.Errorf("%d bytes still held", c.used)
 	}
 }
 
-// Deliveries beyond the memory budget are told to come back, before their bodies
-// are read, and nothing is stored for them.
+// The bytes are counted as they arrive: a connection that has promised a large body
+// and sent nothing holds nothing, and what a delivery held is given back however it
+// ended.
+func TestTheBudgetCountsBytesNotPromises(t *testing.T) {
+	b := &byteBudget{limit: 100}
+	br := &budgetReader{r: strings.NewReader(strings.Repeat("x", 80)), b: b}
+	if got, err := io.ReadAll(br); err != nil || len(got) != 80 || b.used != 80 {
+		t.Fatalf("read %d, used %d, %v", len(got), b.used, err)
+	}
+	over := &budgetReader{r: strings.NewReader(strings.Repeat("y", 50)), b: b}
+	if _, err := io.ReadAll(over); !errors.Is(err, errOverBudget) {
+		t.Errorf("a delivery over the budget: %v", err)
+	}
+	over.release()
+	br.release()
+	if b.used != 0 {
+		t.Errorf("%d bytes still held after both were released", b.used)
+	}
+	idle := &budgetReader{r: strings.NewReader(""), b: b}
+	_, _ = io.ReadAll(idle)
+	if b.used != 0 {
+		t.Error("a delivery that sent nothing held something")
+	}
+}
+
+// Deliveries beyond the memory budget are told to come back and nothing is stored
+// for them; a promise of a large body that is never kept does not block anyone.
 func TestIngestRefusesWhatWouldExceedTheMemoryBudget(t *testing.T) {
-	e := newEnv(t, func(o *Options) { o.IngestMemoryBudget = 1000 })
-	in := e.newInbox("budgeted", "trusted", "")
-	hold, ok := e.server.ingestBudget.take(900)
-	if !ok {
-		t.Fatal("could not take the budget")
+	e := newEnv(t, func(o *Options) { o.IngestMemoryBudget = inbox.MaxBodyBytesCeiling })
+	in := e.newInbox("budgeted", "trusted", "", func(i *inbox.Inbox) { i.MaxBodyBytes = inbox.MaxBodyBytesCeiling })
+	if !e.server.ingestBudget.add(inbox.MaxBodyBytesCeiling - 100) {
+		t.Fatal("could not hold the budget")
 	}
 	rec := e.post("/in/budgeted", strings.Repeat("x", 200))
 	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != "overloaded" || rec.Header().Get("Retry-After") == "" {
@@ -99,16 +106,25 @@ func TestIngestRefusesWhatWouldExceedTheMemoryBudget(t *testing.T) {
 	if n := e.count(in); n != 0 {
 		t.Errorf("%d messages stored", n)
 	}
-	hold()
+	if e.server.ingestBudget.used != inbox.MaxBodyBytesCeiling-100 {
+		t.Errorf("the refused delivery kept %d bytes", e.server.ingestBudget.used-(inbox.MaxBodyBytesCeiling-100))
+	}
+	e.server.ingestBudget.sub(inbox.MaxBodyBytesCeiling - 100)
 	if rec := e.post("/in/budgeted", strings.Repeat("x", 200)); rec.Code != http.StatusOK {
 		t.Errorf("with the budget free again: %d %s", rec.Code, rec.Body)
 	}
-	// And the budget is given back after every delivery, however it ended.
 	for _, body := range []string{"a", strings.Repeat("y", 5000)} {
 		e.post("/in/budgeted", body)
 	}
 	if e.server.ingestBudget.used != 0 {
 		t.Errorf("%d bytes of the budget are still held", e.server.ingestBudget.used)
+	}
+}
+
+func TestABudgetSmallerThanABodyLimitIsRefused(t *testing.T) {
+	store := newEnv(t).store
+	if _, err := New(Options{Addr: "127.0.0.1:0", Store: store, IngestMemoryBudget: 1000}); err == nil {
+		t.Error("a budget smaller than the largest body an inbox may take was accepted")
 	}
 }
 
@@ -282,5 +298,66 @@ func TestMetricsCountWhatHappened(t *testing.T) {
 		if st, _, _ := a.call("GET", "/metrics", nil, tok); st != want {
 			t.Errorf("token %q: %d, want %d", tok, st, want)
 		}
+	}
+}
+
+type breakingStore struct{ inbox.Store }
+
+func (breakingStore) Backup(context.Context) (io.ReadCloser, int64, error) {
+	return io.NopCloser(io.MultiReader(strings.NewReader(strings.Repeat("good data. ", 30000)), failingReader{})), -1, nil
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("the store's stream broke") }
+
+// A streamed backup that fails part way must not look whole to the client: the
+// status is already sent, and a clean end would be taken for the end of the file.
+func TestAStreamedBackupThatBreaksIsNotACleanEnd(t *testing.T) {
+	a := newAdminEnv(t, func(o *Options) { o.Store = breakingStore{o.Store} })
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, a.base+"/admin/backup", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	got, err := io.ReadAll(resp.Body)
+	if err == nil {
+		t.Fatalf("a body of %d bytes that broke part way ended cleanly", len(got))
+	}
+	if len(got) == 0 {
+		t.Error("nothing was sent before the failure; the test proves little")
+	}
+}
+
+// Calling Shutdown during the drain ends Serve, which must return and not wait for a
+// listener that has already reported.
+func TestShutdownDuringTheDrainEndsServe(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.DrainDelay = 5 * time.Second })
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, stop := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- e.server.Serve(ctx, ln) }()
+	time.Sleep(100 * time.Millisecond)
+	stop() // told to stop: the drain begins
+	time.Sleep(100 * time.Millisecond)
+	if err := e.server.Shutdown(t.Context()); err != nil { // an embedder closes it meanwhile
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Serve: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve did not return after Shutdown during the drain")
 	}
 }

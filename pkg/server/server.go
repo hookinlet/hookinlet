@@ -75,10 +75,12 @@ type Options struct {
 	// ShutdownTimeout begins, not out of it.
 	DrainDelay time.Duration
 	// IngestMemoryBudget bounds the bytes of request bodies held in memory at once by
-	// deliveries being received. A delivery that would go over it is answered 503
-	// with Retry-After, before its body is read. Each delivery counts for the
-	// smaller of its Content-Length and its inbox's body limit. Defaults to 256 MiB;
-	// a negative value turns the bound off.
+	// deliveries being received. The bytes are counted as they arrive and held until
+	// the delivery is stored or refused, so a connection that has promised a body and
+	// not sent it costs nothing; a delivery whose bytes would take the total over is
+	// answered 503 with Retry-After. The memory used is a small multiple of the bytes
+	// counted. Defaults to 256 MiB, must be at least the largest body an inbox may take
+	// (10 MiB), and a negative value turns the bound off.
 	IngestMemoryBudget int64
 	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
 	// to the ingest endpoint. Defaults to 60s.
@@ -215,6 +217,9 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.IngestMemoryBudget == 0 {
 		opts.IngestMemoryBudget = 256 << 20
+	}
+	if opts.IngestMemoryBudget > 0 && opts.IngestMemoryBudget < inbox.MaxBodyBytesCeiling {
+		return nil, fmt.Errorf("server: Options.IngestMemoryBudget must be at least %d bytes, the largest body an inbox may take, or a delivery that is allowed could never be received", inbox.MaxBodyBytesCeiling)
 	}
 	if opts.ReadBodyTimeout <= 0 {
 		opts.ReadBodyTimeout = 60 * time.Second
@@ -394,13 +399,21 @@ func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
 	case <-ctx.Done():
 	}
 
+	pending := servers // listeners that have not yet reported on errCh
 	if d := s.opts.DrainDelay; d > 0 {
 		s.draining.Store(true)
 		s.log.Info("draining: reporting not ready before closing", "delay", d.String())
 		select {
 		case <-time.After(d):
-		case err := <-errCh: // a listener failed meanwhile
+		case err := <-errCh:
+			// A listener ended meanwhile: failed, or closed by an embedder's call to
+			// Shutdown. Either way stop waiting out the delay.
+			pending--
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				_ = s.http.Close()
+				if s.adminHTTP != nil {
+					_ = s.adminHTTP.Close()
+				}
 				return err
 			}
 		}
@@ -419,7 +432,7 @@ func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
 		}
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	for range servers {
+	for ; pending > 0; pending-- {
 		<-errCh // each returns http.ErrServerClosed once Shutdown completes
 	}
 	return nil

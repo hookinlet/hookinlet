@@ -5,7 +5,12 @@
 
 package sqlite
 
-import "os"
+import (
+	"errors"
+	"os"
+)
+
+var errLockUnsupported = errors.New("sqlite: file locks are not supported on this platform")
 
 // Where there is no flock the data directory is not locked: running two servers on
 // one directory is then the operator's to avoid.

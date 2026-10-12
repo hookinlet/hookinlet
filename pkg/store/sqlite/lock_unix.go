@@ -17,6 +17,9 @@ import (
 // lock belongs to the open file, so the operating system drops it when the process
 // ends, however it ends: there is no stale lock to clean up. The holder's pid is
 // written into the file for whoever has to find it.
+// errLockUnsupported means the file system cannot lock; Open carries on and says so.
+var errLockUnsupported = errors.New("sqlite: this file system does not support file locks")
+
 func lockFile(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the data directory plus a fixed name
 	if err != nil {
@@ -25,8 +28,12 @@ func lockFile(path string) (*os.File, error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // a file descriptor fits an int
 		holder, _ := os.ReadFile(path) //nolint:gosec // the same file
 		_ = f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+		switch {
+		case errors.Is(err, syscall.EWOULDBLOCK):
 			return nil, &LockedError{Path: path, Holder: string(holder)}
+		case errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.ENOLCK), errors.Is(err, syscall.ENOSYS), errors.Is(err, syscall.EOPNOTSUPP):
+			// Some file systems (certain network and FUSE mounts) do not do locks.
+			return nil, errLockUnsupported
 		}
 		return nil, fmt.Errorf("sqlite: lock %s: %w", path, err)
 	}

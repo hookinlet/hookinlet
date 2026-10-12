@@ -101,7 +101,10 @@ notarized: one downloaded through a browser is quarantined, and
   and waits, and lets deliveries that are being stored finish, for up to
   `HOOKINLET_SHUTDOWN_TIMEOUT` (10 seconds by default); anything still running
   then is cut off. It then stops the retention sweep and checkpoints the database,
-  which is quick. A platform that waits less than the timeout before killing the
+  which is quick. With `HOOKINLET_DRAIN_DELAY` set, the platform must wait for the delay *and* the timeout
+  (Docker's default grace period of 10 seconds equals the default timeout alone, so give
+  `docker stop --time` or the orchestrator's termination grace period their sum). A second
+  signal ends the process at once. A platform that waits less than the timeout before killing the
   process risks cutting off a delivery; killing it at once never damages the data
   (SQLite recovers from the log), but the delivery in flight is lost, and the
   sender, who got no answer, will normally retry.
@@ -150,7 +153,9 @@ A bad setting is reported, all of them at once, and the server does not start.
 Neither needs a credential. The image has no `curl`, so it carries
 `hookinlet healthcheck` (it asks `/readyz` of this machine, at `HOOKINLET_LISTEN_ADDR`;
 `--live` asks `/healthz`; `--url` asks another address), and the `Dockerfile` uses it
-as its `HEALTHCHECK` with a start period of 60 seconds for a long migration.
+as its `HEALTHCHECK` with a start period of 60 seconds for a long migration. It finds
+the server from the environment, so set `HOOKINLET_LISTEN_ADDR` rather than passing
+`--listen-addr` in the command if you change the port.
 
 ## Metrics
 
@@ -185,7 +190,8 @@ crash). A second server started on the same directory stops at once and says whi
 process holds it, instead of two writers corrupting each other's work. `hookinlet
 rekey` and `renew-epochs`, which must not run beside a server, take the same lock.
 The other commands do not, so `hookinlet inbox ...` still works in the directory of a
-running server.
+running server. On a file system that does not support locks (some network and FUSE
+mounts) the server starts anyway and logs a warning: nothing then stops a second one.
 
 ## Starting, and how fast
 
@@ -215,9 +221,12 @@ reads are limited to 16 at a time. Deliveries are not limited in number: each on
 is held in memory while it is read and checked, up to the inbox's body limit
 (1 MiB by default, at most 10 MiB), so a burst of large deliveries uses that much
 each. The total is bounded: deliveries being received hold at most
-`HOOKINLET_INGEST_MEMORY_BUDGET` bytes of bodies between them (256 MiB by default,
-each counting for the smaller of its `Content-Length` and its inbox's limit), and one
-that would go over is answered `503` with `Retry-After` before its body is read. Put a
+`HOOKINLET_INGEST_MEMORY_BUDGET` bytes of bodies between them (256 MiB by default; at
+least 10 MiB, the largest body an inbox may take). The bytes are counted as they
+arrive, so a connection that has promised a large body and sent none costs nothing,
+and a delivery whose bytes would take the total over is answered `503` with
+`Retry-After` and not stored. The memory the process uses is a small multiple of the
+bytes counted (buffers grow, and the body is copied into the database). Put a
 rate limit in front, or in a hook (see [extending](extending.md)). Disk is
 what grows: size the volume for the messages you keep, and set retention on
 inboxes that receive a lot. A backup needs free space in the data directory for a

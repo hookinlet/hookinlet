@@ -28,11 +28,13 @@ func (s *Server) strictServer(impl api.StrictServerInterface) api.ServerInterfac
 				return
 			}
 			s.log.LogAttrs(r.Context(), slog.LevelError, "response failed", slog.String("err", err.Error()))
-			// If the status is already sent (a download that broke part way), all that
-			// can be done is to say so and let the connection break, which tells the
-			// client the body is not whole.
+			// If the status is already sent (a download that broke part way), the body
+			// is not whole and the client must be able to tell. A length that was
+			// promised and not met breaks the connection by itself; a body of unknown
+			// length (chunked) would end cleanly, so the handler is aborted, which
+			// makes net/http drop the connection without the final chunk.
 			if sw, ok := w.(interface{ Wrote() bool }); ok && sw.Wrote() {
-				return
+				panic(http.ErrAbortHandler)
 			}
 			writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		},

@@ -38,6 +38,10 @@ func healthcheckCmd(args []string, getenv func(string) string, stdout, stderr io
 	if code, done := parseFlags(fs, args, stderr); done {
 		return code
 	}
+	if *timeout <= 0 {
+		fmt.Fprintln(stderr, "hookinlet: --timeout must be greater than zero")
+		return exitUsage
+	}
 	target := *base
 	if target == "" {
 		target = localURL(getenv(config.EnvPrefix + "LISTEN_ADDR"))
