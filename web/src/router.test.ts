@@ -17,6 +17,12 @@ describe('parse', () => {
     expect(parse('/admin/inboxes')).toEqual({ name: 'inboxes' })
     expect(parse('/admin/tokens/')).toEqual({ name: 'tokens' })
   })
+  it('finds an inbox and a message in it', () => {
+    expect(parse('/admin/inboxes/stripe-prod')).toEqual({ name: 'inbox', slug: 'stripe-prod', seq: null })
+    expect(parse('/admin/inboxes/stripe-prod/messages/42')).toEqual({ name: 'inbox', slug: 'stripe-prod', seq: 42 })
+    expect(parse('/admin/inboxes/Bad_Slug')).toEqual({ name: 'notfound' })
+    expect(parse('/admin/inboxes/a/messages/x')).toEqual({ name: 'notfound' })
+  })
   it('does not invent screens', () => {
     expect(parse('/admin/nope')).toEqual({ name: 'notfound' })
   })

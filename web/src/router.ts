@@ -5,7 +5,12 @@ import { computed, ref } from 'vue'
 // /admin with the app).
 export const BASE = '/admin'
 
-export type Route = { name: 'overview' } | { name: 'inboxes' } | { name: 'tokens' } | { name: 'notfound' }
+export type Route =
+  | { name: 'overview' }
+  | { name: 'inboxes' }
+  | { name: 'inbox'; slug: string; seq: number | null }
+  | { name: 'tokens' }
+  | { name: 'notfound' }
 
 export function parse(pathname: string): Route {
   const p = pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname
@@ -17,8 +22,11 @@ export function parse(pathname: string): Route {
       return { name: 'inboxes' }
     case '/tokens':
       return { name: 'tokens' }
-    default:
+    default: {
+      const m = /^\/inboxes\/([a-z0-9-]{1,64})(?:\/messages\/(\d{1,15}))?$/.exec(clean)
+      if (m) return { name: 'inbox', slug: m[1]!, seq: m[2] ? Number(m[2]) : null }
       return { name: 'notfound' }
+    }
   }
 }
 
@@ -31,9 +39,13 @@ export function href(path: string): string {
 
 export function navigate(path: string): void {
   const target = href(path)
+  const before = current.value
   if (target !== window.location.pathname) window.history.pushState({}, '', target)
   current.value = parse(target)
-  window.scrollTo(0, 0)
+  // Moving between the messages of one inbox keeps the page where it is; any other move starts at the top.
+  const after = current.value
+  const sameInbox = before.name === 'inbox' && after.name === 'inbox' && before.slug === after.slug
+  if (!sameInbox) window.scrollTo(0, 0)
 }
 
 window.addEventListener('popstate', () => {

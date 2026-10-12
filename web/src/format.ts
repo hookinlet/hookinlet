@@ -46,3 +46,10 @@ export function ago(then: Date | string, now: Date = new Date()): string {
   if (h < 48) return `${h} h ago`
   return `${Math.round(h / 24)} days ago`
 }
+
+// visible makes the characters that change how text is laid out (bidirectional controls,
+// zero-width and invisible formatting) show as <U+XXXX>, so that a sender cannot use them to
+// make an event type or a header read as something it is not.
+export function visible(text: string): string {
+  return text.replace(/[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, (c) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`)
+}

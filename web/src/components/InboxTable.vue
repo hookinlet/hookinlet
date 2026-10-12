@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Inbox } from '../api/client'
 import { compact } from '../format'
+import { href, link } from '../router'
 import { activity } from '../views/useActivity'
 import Sparkline from './Sparkline.vue'
 
@@ -15,7 +16,7 @@ defineProps<{ inboxes: Inbox[]; loadingLines?: boolean }>()
     </div>
     <div v-for="i in inboxes" :key="i.id" class="row" role="row">
       <span class="slug" role="cell">
-        <span class="name">{{ i.slug }}<span v-if="i.disabled" class="pill">disabled</span></span>
+        <span class="name"><a :href="href(`/inboxes/${i.slug}`)" class="slugline" @click="link($event, `/inboxes/${i.slug}`)">{{ i.slug }}</a><span v-if="i.disabled" class="pill">disabled</span></span>
         <small class="mono muted">{{ i.ingest_path }}</small>
       </span>
       <span role="cell" class="pills">
@@ -41,6 +42,8 @@ defineProps<{ inboxes: Inbox[]; loadingLines?: boolean }>()
 .row.head { border-top: 0; background: var(--panel2); color: var(--mute); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; padding-block: 8px; }
 .slug { display: flex; flex-direction: column; min-width: 0; }
 .name { font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.slugline { color: var(--fg); }
+.slugline:hover { color: var(--accent); }
 small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .right { text-align: right; }
 .pills { display: flex; gap: 6px; flex-wrap: wrap; }
