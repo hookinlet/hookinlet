@@ -12,7 +12,7 @@ With Docker, two environment variables and a volume:
 export HOOKINLET_ADMIN_TOKEN=$(openssl rand -base64 32)   # keep these two
 export HOOKINLET_MASTER_KEY=$(openssl rand -base64 32)
 
-docker run -d --name hookinlet -p 8080:8080 \
+docker run -d --name hookinlet -p 127.0.0.1:8080:8080 \
   -v hookinlet-data:/data \
   -e HOOKINLET_ADMIN_TOKEN -e HOOKINLET_MASTER_KEY \
   ghcr.io/hookinlet/hookinlet:latest
@@ -20,6 +20,25 @@ docker run -d --name hookinlet -p 8080:8080 \
 
 (`latest` is the newest final release. A pre-release such as `0.1.0-rc.1` has only
 its own version tag.)
+
+Three things people trip on:
+
+- **Keep the two values.** They exist only in your shell. The container is
+  restarted with the same master key or not at all: a different one cannot open the
+  secrets already stored, and the server says so and refuses to start (see
+  [troubleshooting](troubleshooting.md#the-server-refuses-to-start)). Put them in a
+  password manager or a secrets file (`HOOKINLET_MASTER_KEY_FILE`) before you close
+  the shell.
+- **Use a named volume, or give a directory to uid 65532.** The image runs as a
+  non-root user. `-v hookinlet-data:/data` (a Docker volume) just works;
+  `-v ./data:/data` fails with "permission denied" unless you first
+  `chown 65532:65532 ./data`.
+- **`-p 127.0.0.1:8080:8080`** publishes the port on this machine only. Plain
+  `-p 8080:8080` exposes the admin API to your network; read
+  [Keeping the admin API off the public address](admin.md#keeping-the-admin-api-off-the-public-address)
+  before you do that.
+
+If it does not come up, `docker logs hookinlet` says why in one line.
 
 Create an inbox, send it a webhook, and read it back:
 
@@ -70,6 +89,8 @@ notarized: one downloaded through a browser is quarantined, and
   came from. Without it the header is ignored and the proxy's address is recorded.
   Set `HOOKINLET_PUBLIC_BASE_URL` to the public address (`https://hooks.example.com`)
   so that the ingest URLs the admin API hands out are right.
+- **A proxy that passes the right headers.** See [Behind a proxy](#behind-a-proxy)
+  for starting points.
 - **Proxy timeouts that fit long-lived requests.** An SSE stream is quiet for up
   to 15 seconds between pings (`HOOKINLET_SSE_HEARTBEAT`), and an MCP
   `wait_for_messages` call can wait up to 60 seconds without sending anything. The
@@ -109,6 +130,61 @@ notarized: one downloaded through a browser is quarantined, and
   (SQLite recovers from the log), but the delivery in flight is lost, and the
   sender, who got no answer, will normally retry.
 - **Nothing else.** It makes no network calls of its own, at startup or later.
+
+## Behind a proxy
+
+hookinlet needs the proxy to terminate TLS, to pass `Host` and `X-Forwarded-For`
+through, not to buffer streams, and to wait long enough on quiet connections. Both
+snippets below assume hookinlet listens on `127.0.0.1:8080`, so set
+`HOOKINLET_TRUSTED_PROXIES=127.0.0.1/32` and
+`HOOKINLET_PUBLIC_BASE_URL=https://hooks.example.com`. These are starting points written
+from each proxy's documentation: the project's tests do not run them, so try yours with
+a test delivery and a stream.
+
+**Caddy** (TLS is automatic):
+
+```caddyfile
+hooks.example.com {
+	# The admin API and metrics are for you, not the internet. Reach them on the
+	# admin address instead (HOOKINLET_ADMIN_LISTEN_ADDR=127.0.0.1:9090) and block them here.
+	@private path /v1/admin/* /metrics
+	respond @private 404
+
+	request_body {
+		max_size 11MB     # the largest body an inbox may take is 10 MiB
+	}
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1          # do not hold stream events back
+	}
+}
+```
+
+**nginx** (with certificates from your usual source):
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name hooks.example.com;
+    # ssl_certificate / ssl_certificate_key ...
+
+    client_max_body_size 11m;
+
+    location ~ ^/(v1/admin/|metrics) { return 404; }   # use the admin address instead
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Connection "";
+        proxy_buffering off;            # streams and waits
+        proxy_read_timeout 90s;         # longer than a 60 s wait and a 15 s heartbeat
+    }
+}
+```
+
+With either, ask the server whether it is ready from outside
+(`curl -s https://hooks.example.com/readyz`), and send a test delivery.
 
 ## Settings
 

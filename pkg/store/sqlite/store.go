@@ -4,7 +4,7 @@
 // Package sqlite is the default inbox.Store: a single-node store on SQLite.
 //
 // Single-node assumption: exactly one process may open a data directory. All
-// writes go through one connection (guardrail 19), and reads use a separate
+// writes go through one connection, and reads use a separate
 // pool of read-only connections so they never wait for the writer. The WAL
 // journal gives readers a consistent snapshot while a write is in progress.
 //

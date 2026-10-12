@@ -1,10 +1,58 @@
 # Changelog
 
-All notable changes to the public `pkg/` API are listed here (guardrail 10).
+All notable changes to the public `pkg/` API are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
 ## Unreleased
+
+Nothing yet.
+
+## 0.1.0
+
+The first release. hookinlet is a webhook inbox for AI agents: it receives webhooks,
+checks their signatures, stores them, and lets an agent read them back reliably over
+REST, a live event stream, or MCP.
+
+**What it does**
+
+- **Receives and verifies.** Stripe, GitHub, Slack, Standard Webhooks, generic HMAC and a
+  shared token, or none. The body is stored byte for byte and checked against the raw bytes.
+  A delivery is acknowledged only once it is committed, and repeated deliveries are recognised.
+  Inboxes are reached at a random ingest key, not a guessable name.
+- **Lets an agent read it back.** A REST API with cursors that cannot skip or repeat a message,
+  a Server-Sent Events stream, and an MCP endpoint (list, query, get, wait). Several named
+  tokens per inbox, scoped to some inboxes or all, replaced without a gap. Cursors carry the
+  inbox's epoch, so a restored or recreated inbox is noticed, and a reader is told when
+  retention removed messages it had not read. In MCP, what the sender wrote is under an
+  `untrusted` key and bodies are left out unless asked for.
+- **Is run and managed** with an admin API, a CLI that works through it or directly in the data
+  directory, `hookinlet apply` for inboxes declared in a file, retention, and consistent
+  backups. The whole HTTP API is one OpenAPI 3.1 document that the server is generated from
+  and tested against.
+- **Is safe to run.** Verifier secrets are sealed with a key-identified format bound to their
+  inbox, and a wrong master key stops the server at start-up (`hookinlet rekey` moves them to
+  a new one). A copy of the database is kept before each migration. One server per data
+  directory, enforced by a lock. A full disk is a retryable 503, the write-ahead log is bounded,
+  and unauthenticated ingest has a memory budget. The admin API can be off, or on its own
+  address. `/metrics`, `hookinlet healthcheck`, draining on shutdown, and secrets from files.
+- **Ships verifiably.** Static binaries for Linux and macOS (amd64, arm64) and a multi-arch image,
+  with checksums, SBOMs, signed build provenance, and the licenses of everything inside.
+  Releases are cut only from a commit on main that passed CI, after a vulnerability check.
+
+**Upgrading from 0.1.0-rc.1.** Run it on the same data directory: migrations 0003 to 0007 apply
+at start (a copy of the database is kept first; allow about three times its size free for the
+migration that moves message bodies). What breaks, for anyone who used the candidate:
+the admin API is under `/v1/admin` (was `/admin`); `rotate-token` is gone (issue a new token, then
+revoke the old); ingest URLs use a random key (existing inboxes get new ones: `hookinlet inbox
+show SLUG`); a verifier must be named when an inbox is created; MCP messages have a different
+shape; and the Go interfaces changed as listed below. Verifier secrets stored by the candidate
+keep working; run `hookinlet rekey` once to bring them up to the current format.
+
+## Development notes by phase, for embedders
+
+Everything below is the detail behind the summary above, phase by phase: what changed in the public
+Go packages, the API, and the configuration, in the order it happened. The newest is first.
 
 ### Phase 16: the public face
 
@@ -367,7 +415,7 @@ applies.
 - `inbox.SingleInboxPrincipal`: an optional capability of a `Principal` limited
   to one inbox, checked by `AuthenticatorSuite`. `token.Agent` implements it.
 - Dependency: `github.com/modelcontextprotocol/go-sdk` v1.8.0 (and its
-  permissively licensed dependencies; see `PLAN.md`).
+  permissively licensed dependencies).
 
 #### Changed
 - The REST message JSON can carry `body_truncated: true`, but only where a size

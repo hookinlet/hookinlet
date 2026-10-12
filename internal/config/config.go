@@ -131,7 +131,7 @@ type spec struct {
 var specs = []spec{
 	{name: "listen-addr", def: ":8080", usage: "address the HTTP server listens on"},
 	{name: "data-dir", def: "./data", usage: "directory for persistent data"},
-	{name: "admin-token", required: true, usage: "bearer token that can read every inbox and use the admin API; at least 32 characters, e.g. from `openssl rand -base64 32` (prefer the environment variable: flags are visible in process listings)"},
+	{name: "admin-token", required: true, usage: "bearer token that can read every inbox and use the admin API; at least 32 characters, e.g. from openssl rand -base64 32 (prefer the environment variable: flags are visible in process listings)"},
 	{name: "master-key", required: true, usage: "base64-encoded 32-byte key that encrypts stored secrets (prefer the environment variable)"},
 	{name: "public-base-url", usage: "externally visible base URL, used for ingest URLs in admin responses; derived from the request if unset"},
 	{name: "trusted-proxies", usage: "comma-separated CIDRs whose X-Forwarded-For header is honored"},
@@ -265,6 +265,7 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 		names = append(names, s.name)
 	}
 	src := register(fs, getenv, names...)
+	fs.Usage = func() { writeServeUsage(usageOut) }
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, err
@@ -426,4 +427,61 @@ func splitList(s string) []string {
 
 func fieldErr(name, format string, args ...any) error {
 	return fmt.Errorf("--%s (%s) %s", name, envName(name), fmt.Sprintf(format, args...))
+}
+
+// writeServeUsage prints what `hookinlet serve -h` says: the settings that must be
+// given first, then the rest, each with its environment variable and default. (The
+// flag package's own listing shows every value as a "string" and mangles a description
+// that contains backquotes.)
+func writeServeUsage(w io.Writer) {
+	fmt.Fprint(w, `Usage: hookinlet serve [flags]
+
+Runs the server. Every setting is a flag and an environment variable (--listen-addr
+is also HOOKINLET_LISTEN_ADDR); a flag wins over the variable. The secrets
+(HOOKINLET_ADMIN_TOKEN, HOOKINLET_MASTER_KEY) may instead be read from a file named
+by the variable with _FILE added, such as HOOKINLET_MASTER_KEY_FILE=/run/secrets/key.
+Flags show up in process listings; prefer the environment for secrets.
+
+`)
+	section := func(title string, required bool) {
+		fmt.Fprintf(w, "%s:\n", title)
+		for _, s := range specs {
+			if s.required != required {
+				continue
+			}
+			fmt.Fprintf(w, "  --%s\n", s.name)
+			for _, line := range wrapText(s.usage, 76) {
+				fmt.Fprintf(w, "        %s\n", line)
+			}
+			def := ""
+			if s.def != "" {
+				def = "   default " + s.def
+			}
+			fmt.Fprintf(w, "        env %s%s\n", envName(s.name), def)
+		}
+		fmt.Fprintln(w)
+	}
+	section("Required", true)
+	section("Settings", false)
+	fmt.Fprint(w, "Docs: docs/deploying.md lists every setting and what a host must provide.\n")
+}
+
+// wrapText breaks s into lines of at most width characters at spaces.
+func wrapText(s string, width int) []string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		if line != "" && len(line)+1+len(word) > width {
+			lines = append(lines, line)
+			line = ""
+		}
+		if line != "" {
+			line += " "
+		}
+		line += word
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
 }

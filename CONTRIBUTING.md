@@ -25,17 +25,30 @@ contributed code can ship in both the open-source and the commercial builds.
 The conventions below are the ones the code already follows. They matter if you are invited to contribute, and
 they are useful if you are only reading.
 
-- **The rules are in [`GUARDRAILS.md`](GUARDRAILS.md).** Read it first. The ones people trip over: handlers reach
-  storage, notification, auth, and secrets only through the interfaces in `pkg/inbox`; every interface has a
-  conformance suite in `pkg/inboxtest`; nothing returns 2xx from ingest before the message is committed; bodies are
-  stored byte for byte and verified before any parsing; cursors are per-inbox sequence numbers and never
-  timestamps; and never log bodies, tokens, or secrets.
+- **Seams.** Handlers reach storage, notification, auth, and secrets only through the interfaces in `pkg/inbox`,
+  never through a type assertion to a concrete implementation (the documented optional capabilities, such as
+  `Backupper`, are the exception). Every interface has a conformance suite in `pkg/inboxtest`, and a behaviour that
+  is in no suite is not part of the contract. A new capability is a new optional interface, not a new method on an
+  old one ([stability](docs/stability.md)).
+- **Data integrity.** Nothing returns 2xx from ingest until the message is committed. The body is stored byte for
+  byte and signatures are verified against those raw bytes before any parsing. Cursors are per-inbox sequence
+  numbers assigned in commit order, never timestamps or global row ids. In the SQLite store every write goes
+  through the single writer connection. Migrations are append-only: a shipped one is never edited.
+- **Security.** Never log request bodies, verifier secrets, tokens, or redacted headers (log sequence numbers,
+  slugs, sizes, statuses, durations). Compare secrets, tokens, and signatures only with `crypto/subtle` or
+  `hmac.Equal`. Tokens are stored only as hashes and shown once; verifier secrets are stored only sealed by a
+  `SecretBox`; admin responses never contain either. A credential for one inbox must not reveal whether another
+  exists (404, not 403). Body limits are enforced with `http.MaxBytesReader` before reading.
+- **Runtime.** Startup makes no network calls and reaches "listening" fast; slow work (retention, vacuum) runs after.
+  Streaming handlers exit promptly on client disconnect and on shutdown. Single-node assumptions in the default
+  implementations are commented where they matter.
+- **Errors.** Error responses are JSON, `{"error": {"code": "…", "message": "…"}}`.
 - **Open core.** This repository is complete and useful by itself. Nothing in it is crippled to sell something
   else, and there is no telemetry, license check, or hosting-specific code. Cloud-only concepts (organizations,
   users, plans, billing) do not belong in `pkg/`.
 - **Stdlib first.** A new dependency needs a one-line justification, a license compatible with AGPL-3.0, and
   `CGO_ENABLED=0` must keep building.
-- **Tests come first, and prove themselves.** A bug fix comes with a test that fails without it. A behaviour that
+- **Tests come first, and prove themselves.** `go test -race ./...` and `make lint` pass before every commit. A bug fix comes with a test that fails without it. A behaviour that
   matters is checked by breaking it on purpose and seeing a test fail. A verifier change includes negative tests
   (wrong secret, tampered body, stale timestamp, malformed header).
 - **Docs move with the code.** A change to a request or response shape updates `docs/api.md`, `docs/openapi.json`
@@ -47,7 +60,6 @@ they are useful if you are only reading.
   run by `scripts/test-docs.sh`.
 - **Public Go API.** Everything under `pkg/` is pre-1.0 and may change; every change to it is called out in
   `CHANGELOG.md`. After v1.0.0, semantic versioning applies.
-- **Work comes in phases.** `PLAN.md` describes them and what each must prove before the next begins.
 
 ## License and file headers
 

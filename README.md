@@ -318,6 +318,7 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
 | [**OpenAPI**](docs/openapi.json) | The same, machine-readable (OpenAPI 3.1), checked against the server by tests |
 | [**MCP**](docs/mcp.md) | The tools, their limits, and how to connect clients |
 | [**Verifiers**](docs/verifiers.md) | Stripe, GitHub, Slack, Standard Webhooks, generic HMAC, shared token |
+| [**Troubleshooting**](docs/troubleshooting.md) | A symptom, its cause, and the fix |
 | [**Stability**](docs/stability.md) | What may change, how a change is announced, cursors and ids, CORS and TLS |
 | [**Extending**](docs/extending.md) | Embedding the server; replacing the store, notifier, auth, or secrets |
 | [**Performance**](docs/performance.md) | What was measured, on what, and how to repeat it |
@@ -340,3 +341,10 @@ open a public issue.
 ## License
 
 [AGPL-3.0](LICENSE). If you run a modified hookinlet as a network service, you share your changes.
+
+**Using it in your own program.** Running hookinlet unmodified, alongside your software, and calling its API from
+any language puts no condition on your code. Importing its packages (`pkg/server`, `pkg/inbox`, and the rest) into
+a program that you then make available over a network makes that program a work based on hookinlet, and the AGPL
+asks you to offer its source to the people who use it. If that does not suit your program, run hookinlet as a
+separate service and use its API. This is a summary, not legal advice. Third-party licenses for what is inside the binary are in
+[`THIRD_PARTY_LICENSES`](THIRD_PARTY_LICENSES).

@@ -8,3 +8,8 @@
 /received.log
 /hookinlet-backup.db
 /relay
+
+# Working notes, kept locally and not published.
+/PLAN.md
+/CLAUDE.md
+/GUARDRAILS.md

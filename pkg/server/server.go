@@ -393,7 +393,7 @@ func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
 		servers++
 	}
 
-	// Retention starts once the listener is up and never delays it (guardrail 27).
+	// Retention starts once the listener is up and never delays it (startup makes no network calls and reaches listening fast).
 	// Serve does not return until the sweep has stopped, so the caller may close
 	// the Store as soon as it does.
 	if s.opts.RetentionInterval > 0 {

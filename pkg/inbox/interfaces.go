@@ -177,7 +177,7 @@ type Store interface {
 // data that can be saved elsewhere. It is optional because not every backend
 // can offer one (a hosted database is backed up by its operator). Callers find
 // it with a type assertion and answer 501 when it is absent; this is the one
-// documented exception to guardrail 8.
+// documented exception to the rule that handlers reach the Store only through its interface.
 type Backupper interface {
 	// Backup returns a snapshot of the Store as of a single moment: everything
 	// committed before the call is in it, and nothing in it is half-applied.

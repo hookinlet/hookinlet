@@ -1,4 +1,4 @@
-.PHONY: build test lint generate run docker clean
+.PHONY: build test lint generate licenses run docker clean
 
 VERSION ?= dev
 ADDR ?= :8080
@@ -8,10 +8,14 @@ build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o $(BIN) ./cmd/hookinlet
 
 test:
-	go test -race ./...
+	go test -race -timeout 8m ./...
 
 lint:
 	golangci-lint run ./...
+
+# Rewrites THIRD_PARTY_LICENSES after a dependency changes.
+licenses:
+	scripts/third-party-licenses.sh
 
 # Rewrites internal/api from docs/openapi.json. Run it after editing the document.
 generate:
