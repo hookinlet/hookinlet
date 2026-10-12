@@ -66,15 +66,18 @@ streams and MCP waits first. If you serve the handler yourself, call
 ```go
 type limiter struct{ inbox.NopHooks }
 
-func (limiter) BeforeIngest(ctx context.Context, in *inbox.Inbox, size int64) error {
-	if tooMany(in) {
+func (limiter) BeforeIngest(ctx context.Context, req *inbox.IngestRequest) error {
+	if tooMany(req.Inbox, req.SourceIP) {
 		return fmt.Errorf("%w: slow down", inbox.ErrRateLimited) // 429
 	}
 	return nil
 }
 ```
 
-`BeforeIngest` runs after the inbox is found and the body is read, before the
+`BeforeIngest` gets an `*inbox.IngestRequest`: the inbox, the body size, the source
+address (as recorded, honoring trusted proxies), the method, the path after the
+inbox key, and the request headers (read-only). It runs after the inbox is found
+and the body is read, before the
 signature is checked, so a refusal is cheap. That has a cost to weigh: it sees
 unverified requests too, so a limit that counts every request lets anyone who knows
 an inbox's URL use up its allowance with unsigned posts, and the real sender,

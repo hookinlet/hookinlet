@@ -86,6 +86,7 @@ type Config struct {
 	AdminEnabled       bool
 	AdminListenAddr    string
 	MCPInlineBodyBytes int
+	IngestMemoryBudget int64
 	RetentionInterval  time.Duration
 	ShutdownTimeout    time.Duration
 }
@@ -109,6 +110,7 @@ func (c *Config) LogValue() slog.Value {
 		slog.Bool("admin_enabled", c.AdminEnabled),
 		slog.String("admin_listen_addr", c.AdminListenAddr),
 		slog.Int("mcp_inline_body_bytes", c.MCPInlineBodyBytes),
+		slog.Int64("ingest_memory_budget", c.IngestMemoryBudget),
 		slog.Duration("retention_interval", c.RetentionInterval),
 		slog.Duration("shutdown_timeout", c.ShutdownTimeout),
 	)
@@ -138,6 +140,7 @@ var specs = []spec{
 	{name: "admin-listen-addr", usage: "serve the admin API on its own address (such as 127.0.0.1:9090) and not on --listen-addr; empty serves it on --listen-addr"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
 	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},
+	{name: "ingest-memory-budget", def: "268435456", usage: "most bytes of request bodies held in memory at once by deliveries being received; more are answered 503 with Retry-After (0 turns the bound off)"},
 	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps, at least 1s; \"off\" turns the schedule off (sweeps still run on request)"},
 	{name: "shutdown-timeout", def: "10s", usage: "time allowed for in-flight requests to finish on shutdown"},
 }
@@ -366,6 +369,9 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 		collect(fieldErr("admin-listen-addr", "is set but --admin-enabled is false"))
 	case c.AdminListenAddr != "" && c.AdminListenAddr == c.ListenAddr:
 		collect(fieldErr("admin-listen-addr", "is the same as --listen-addr; leave it empty to serve both there"))
+	}
+	if c.IngestMemoryBudget, err = strconv.ParseInt(vals["ingest-memory-budget"], 10, 64); err != nil || c.IngestMemoryBudget < 0 {
+		collect(fieldErr("ingest-memory-budget", "must be zero (no bound) or a number of bytes"))
 	}
 	if c.MaxStreams, err = strconv.Atoi(vals["max-streams"]); err != nil || c.MaxStreams < 1 {
 		collect(fieldErr("max-streams", "must be a positive integer"))

@@ -66,6 +66,12 @@ type Options struct {
 	// Now is the clock used for signature timestamp tolerance. Defaults to
 	// time.Now.
 	Now func() time.Time
+	// IngestMemoryBudget bounds the bytes of request bodies held in memory at once by
+	// deliveries being received. A delivery that would go over it is answered 503
+	// with Retry-After, before its body is read. Each delivery counts for the
+	// smaller of its Content-Length and its inbox's body limit. Defaults to 256 MiB;
+	// a negative value turns the bound off.
+	IngestMemoryBudget int64
 	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
 	// to the ingest endpoint. Defaults to 60s.
 	ReadBodyTimeout time.Duration
@@ -141,6 +147,8 @@ type Server struct {
 	adminHTTP    *http.Server
 	reads        chan struct{} // a slot per read request being served
 
+	ingestBudget byteBudget // body bytes held by deliveries being received
+
 	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
 	mux        *http.ServeMux
 	mcpSDK     http.Handler // the MCP SDK's handler, which the mcp operation hands calls to
@@ -195,6 +203,9 @@ func New(opts Options) (*Server, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	if opts.IngestMemoryBudget == 0 {
+		opts.IngestMemoryBudget = 256 << 20
+	}
 	if opts.ReadBodyTimeout <= 0 {
 		opts.ReadBodyTimeout = 60 * time.Second
 	}
@@ -246,6 +257,7 @@ func New(opts Options) (*Server, error) {
 		log:          opts.Logger,
 		reads:        make(chan struct{}, opts.MaxConcurrentReads),
 		streams:      make(chan struct{}, opts.MaxStreams),
+		ingestBudget: byteBudget{limit: opts.IngestMemoryBudget},
 		streamCounts: make(map[inbox.ID]int),
 		closeCtx:     closeCtx,
 		closeCancel:  closeCancel,

@@ -187,6 +187,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		PublicBaseURL:      cfg.PublicBaseURL,
 		RetentionInterval:  cfg.RetentionInterval,
 		MCPInlineBodyBytes: cfg.MCPInlineBodyBytes,
+		IngestMemoryBudget: ingestBudget(cfg.IngestMemoryBudget),
 		TrustedProxies:     cfg.TrustedProxies,
 	})
 	if err != nil {
@@ -202,4 +203,13 @@ func newLogger(w io.Writer, cfg *config.Config) *slog.Logger {
 		return slog.New(slog.NewTextHandler(w, opts))
 	}
 	return slog.New(slog.NewJSONHandler(w, opts))
+}
+
+// ingestBudget maps the setting, where 0 means no bound, to the server option,
+// where 0 means the default and a negative number means no bound.
+func ingestBudget(n int64) int64 {
+	if n == 0 {
+		return -1
+	}
+	return n
 }

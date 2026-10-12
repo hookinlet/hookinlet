@@ -200,13 +200,16 @@ func (e ErrorNotReadyErrorCode) Valid() bool {
 
 // Defines values for ErrorOverloadedErrorCode.
 const (
-	ErrorOverloadedErrorCodeOverloaded ErrorOverloadedErrorCode = "overloaded"
+	ErrorOverloadedErrorCodeOverloaded  ErrorOverloadedErrorCode = "overloaded"
+	ErrorOverloadedErrorCodeStorageFull ErrorOverloadedErrorCode = "storage_full"
 )
 
 // Valid indicates whether the value is a known member of the ErrorOverloadedErrorCode enum.
 func (e ErrorOverloadedErrorCode) Valid() bool {
 	switch e {
 	case ErrorOverloadedErrorCodeOverloaded:
+		return true
+	case ErrorOverloadedErrorCodeStorageFull:
 		return true
 	default:
 		return false
@@ -622,7 +625,7 @@ type ErrorNotReadyErrorCode string
 // ErrorOverloaded defines model for ErrorOverloaded.
 type ErrorOverloaded struct {
 	Error struct {
-		// Code A stable, machine-readable code.
+		// Code A stable, machine-readable code. `storage_full` means the server has no room to store the delivery; `overloaded` that it is too busy to take it now.
 		Code ErrorOverloadedErrorCode `json:"code"`
 
 		// Message Safe to show to a person. Never contains a secret, a token, or any part of a request.
@@ -630,7 +633,7 @@ type ErrorOverloaded struct {
 	} `json:"error"`
 }
 
-// ErrorOverloadedErrorCode A stable, machine-readable code.
+// ErrorOverloadedErrorCode A stable, machine-readable code. `storage_full` means the server has no room to store the delivery; `overloaded` that it is too busy to take it now.
 type ErrorOverloadedErrorCode string
 
 // ErrorQuotaExceeded defines model for ErrorQuotaExceeded.
@@ -5366,6 +5369,23 @@ func (response Ingest500JSONResponse) VisitIngestResponse(w http.ResponseWriter)
 	return err
 }
 
+type Ingest503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response Ingest503JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type IngestdefaultResponseHeaders struct {
 	XRequestId *string
 }
@@ -5634,6 +5654,23 @@ func (response IngestPut500JSONResponse) VisitIngestPutResponse(w http.ResponseW
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response IngestPut503JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -5911,6 +5948,23 @@ func (response IngestWithPath500JSONResponse) VisitIngestWithPathResponse(w http
 	return err
 }
 
+type IngestWithPath503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response IngestWithPath503JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type IngestWithPathdefaultResponseHeaders struct {
 	XRequestId *string
 }
@@ -6180,6 +6234,23 @@ func (response IngestPutWithPath500JSONResponse) VisitIngestPutWithPathResponse(
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response IngestPutWithPath503JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }

@@ -297,6 +297,14 @@ func storeFails(t *testing.T, c *contract) {
 	cl.call("readyz", "GET", "/readyz", nil, "")
 	cl.call("headReadyz", "HEAD", "/readyz", nil, "")
 
+	// No room to store a delivery: a 503 the sender retries.
+	f.setNoRoom(true)
+	cl.call("ingest", "POST", "/in/agent-a", "x", "")
+	cl.call("ingestPut", "PUT", "/in/agent-a", "x", "")
+	cl.call("ingestWithPath", "POST", "/in/agent-a/p", "x", "")
+	cl.call("ingestPutWithPath", "PUT", "/in/agent-a/p", "x", "")
+	f.setNoRoom(false)
+
 	f.set(true, false, false)
 	cl.call("ingest", "POST", "/in/agent-a", "x", "")
 	cl.call("ingestPut", "PUT", "/in/agent-a", "x", "")

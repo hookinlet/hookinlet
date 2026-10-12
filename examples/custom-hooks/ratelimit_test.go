@@ -47,11 +47,11 @@ func TestABurstIsAllowedThenRefused(t *testing.T) {
 	r, _ := limiter(1, 3)
 	in := &inbox.Inbox{ID: 1}
 	for i := range 3 {
-		if err := r.BeforeIngest(t.Context(), in, 10); err != nil {
+		if err := r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: in, Size: 10}); err != nil {
 			t.Fatalf("delivery %d inside the burst: %v", i+1, err)
 		}
 	}
-	err := r.BeforeIngest(t.Context(), in, 10)
+	err := r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: in, Size: 10})
 	if !errors.Is(err, inbox.ErrRateLimited) {
 		t.Fatalf("the delivery after the burst: %v, want ErrRateLimited", err)
 	}
@@ -61,23 +61,23 @@ func TestTokensComeBackWithTime(t *testing.T) {
 	r, clk := limiter(2, 2)
 	in := &inbox.Inbox{ID: 1}
 	for range 2 {
-		_ = r.BeforeIngest(t.Context(), in, 1)
+		_ = r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: in, Size: 1})
 	}
-	if err := r.BeforeIngest(t.Context(), in, 1); err == nil {
+	if err := r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: in, Size: 1}); err == nil {
 		t.Fatal("an empty bucket allowed a delivery")
 	}
 	clk.advance(400 * time.Millisecond) // 0.8 of a token: not enough
-	if err := r.BeforeIngest(t.Context(), in, 1); err == nil {
+	if err := r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: in, Size: 1}); err == nil {
 		t.Error("a delivery was allowed with less than one token")
 	}
 	clk.advance(200 * time.Millisecond) // now one token
-	if err := r.BeforeIngest(t.Context(), in, 1); err != nil {
+	if err := r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: in, Size: 1}); err != nil {
 		t.Errorf("after enough time: %v", err)
 	}
 	clk.advance(time.Hour) // refills to the burst and no further
 	allowed := 0
 	for range 10 {
-		if r.BeforeIngest(t.Context(), in, 1) == nil {
+		if r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: in, Size: 1}) == nil {
 			allowed++
 		}
 	}
@@ -89,13 +89,13 @@ func TestTokensComeBackWithTime(t *testing.T) {
 func TestInboxesDoNotShareABucket(t *testing.T) {
 	r, _ := limiter(1, 1)
 	a, b := &inbox.Inbox{ID: 1}, &inbox.Inbox{ID: 2}
-	if err := r.BeforeIngest(t.Context(), a, 1); err != nil {
+	if err := r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: a, Size: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.BeforeIngest(t.Context(), a, 1); err == nil {
+	if err := r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: a, Size: 1}); err == nil {
 		t.Error("inbox a was not limited")
 	}
-	if err := r.BeforeIngest(t.Context(), b, 1); err != nil {
+	if err := r.BeforeIngest(t.Context(), &inbox.IngestRequest{Inbox: b, Size: 1}); err != nil {
 		t.Errorf("inbox b was limited by inbox a's traffic: %v", err)
 	}
 }
@@ -108,7 +108,7 @@ func TestItIsSafeToCallConcurrently(t *testing.T) {
 	allowed := 0
 	for range 200 {
 		wg.Go(func() {
-			if r.BeforeIngest(context.Background(), in, 1) == nil {
+			if r.BeforeIngest(context.Background(), &inbox.IngestRequest{Inbox: in, Size: 1}) == nil {
 				mu.Lock()
 				allowed++
 				mu.Unlock()

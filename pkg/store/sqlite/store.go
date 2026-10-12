@@ -64,6 +64,8 @@ type Store struct {
 	closeErr  error
 
 	log       *slog.Logger
+	outOfRoom atomic.Bool // a write failed for lack of room, and none has succeeded since
+	freeSpace func(dir string) (uint64, error)
 	lock      *os.File     // held for the life of a Store opened with WithExclusiveLock
 	clockWarn atomic.Int64 // when a stepped-back clock was last logged, in unix seconds
 }
@@ -74,10 +76,11 @@ var _ inbox.Store = (*Store)(nil)
 type Option func(*config)
 
 type config struct {
-	now     func() time.Time
-	readers int
-	log     *slog.Logger
-	lock    bool
+	now       func() time.Time
+	readers   int
+	log       *slog.Logger
+	lock      bool
+	freeSpace func(dir string) (uint64, error)
 }
 
 // WithClock sets the clock used for every timestamp the Store assigns. It
@@ -121,7 +124,7 @@ func WithReaders(n int) Option { return func(c *config) { c.readers = n } }
 // pending migrations. It makes no network calls. It fails if the database was
 // written by a newer version of hookinlet.
 func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error) {
-	cfg := config{now: time.Now, readers: defaultReaders}
+	cfg := config{now: time.Now, readers: defaultReaders, freeSpace: freeBytes}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -173,7 +176,7 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 	if cfg.log == nil {
 		cfg.log = slog.New(slog.DiscardHandler)
 	}
-	s := &Store{path: abs, wdb: wdb, now: cfg.now, log: cfg.log, lock: lock}
+	s := &Store{path: abs, wdb: wdb, now: cfg.now, log: cfg.log, lock: lock, freeSpace: cfg.freeSpace}
 	if err := wdb.PingContext(ctx); err != nil {
 		_ = wdb.Close()
 		return nil, fmt.Errorf("sqlite: open %s: %w", abs, err)
@@ -263,6 +266,18 @@ func (s *Store) Ping(ctx context.Context) error {
 	if err := s.wdb.PingContext(ctx); err != nil {
 		return s.ctxErr(ctx, fmt.Errorf("sqlite: ping writer: %w", err))
 	}
+	free, measured := uint64(0), false
+	if f, err := s.freeSpace(filepath.Dir(s.path)); err == nil {
+		free, measured = f, true
+	}
+	switch {
+	case measured && free < MinFreeBytes:
+		return fmt.Errorf("%w: %d bytes are left on the data directory's volume", inbox.ErrStorageFull, free)
+	case measured:
+		s.outOfRoom.Store(false) // there is room again
+	case s.outOfRoom.Load():
+		return fmt.Errorf("%w: the last write failed for lack of room", inbox.ErrStorageFull)
+	}
 	return nil
 }
 
@@ -292,11 +307,12 @@ func (s *Store) writeTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	}
 	if err := fn(tx); err != nil {
 		_ = tx.Rollback()
-		return s.ctxErr(ctx, err)
+		return s.ctxErr(ctx, s.full(err))
 	}
 	if err := tx.Commit(); err != nil {
-		return s.ctxErr(ctx, fmt.Errorf("sqlite: commit: %w", err))
+		return s.ctxErr(ctx, s.full(fmt.Errorf("sqlite: commit: %w", err)))
 	}
+	s.outOfRoom.Store(false)
 	return nil
 }
 

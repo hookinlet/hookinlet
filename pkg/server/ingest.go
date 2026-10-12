@@ -76,6 +76,19 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	if r.ContentLength > in.MaxBodyBytes {
 		return refuse(http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
 	}
+	// The body is held in memory until the delivery is stored, whoever sent it, and
+	// the signature has not been checked yet. How much may be held at once is
+	// bounded, so that a crowd of large unsigned posts cannot use up the server's
+	// memory; the rest are told to come back.
+	reserve := in.MaxBodyBytes
+	if r.ContentLength >= 0 && r.ContentLength < reserve {
+		reserve = r.ContentLength
+	}
+	release, ok := s.ingestBudget.take(reserve)
+	if !ok {
+		return refuse(http.StatusServiceUnavailable, "overloaded", "too many deliveries are being received at once; retry shortly")
+	}
+	defer release()
 	// A sender gets a bounded time to deliver the body, so a trickle cannot hold a
 	// connection and its buffer open indefinitely. Servers that cannot set a
 	// deadline (such as a test recorder) just do without one.
@@ -90,7 +103,10 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 
 	// 3. Let the embedder reject the delivery (rate limit, quota, policy).
-	if err := s.opts.Hooks.BeforeIngest(ctx, in, int64(len(body))); err != nil {
+	if err := s.opts.Hooks.BeforeIngest(ctx, &inbox.IngestRequest{
+		Inbox: in, Size: int64(len(body)), SourceIP: clientIP(r, s.opts.TrustedProxies),
+		Method: r.Method, PathSuffix: r.PathValue("rest"), Headers: r.Header,
+	}); err != nil {
 		return s.rejected(ctx, in, err)
 	}
 
@@ -170,6 +186,10 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	switch {
 	case errors.Is(err, inbox.ErrNotFound): // deleted while we were verifying
 		return refuse(http.StatusNotFound, "not_found", "not found")
+	case errors.Is(err, inbox.ErrStorageFull):
+		// Not stored, so not acknowledged: the sender keeps it and tries again.
+		s.log.LogAttrs(ctx, slog.LevelError, "delivery refused: no room to store it", slog.String("slug", in.Slug), slog.String("err", err.Error()))
+		return refuse(http.StatusServiceUnavailable, "storage_full", "the server has no room to store the delivery; retry later")
 	case err != nil:
 		return s.internalFailure(ctx, "append", err)
 	}

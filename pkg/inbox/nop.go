@@ -10,7 +10,7 @@ import "context"
 type NopHooks struct{}
 
 // BeforeIngest implements Hooks and never rejects.
-func (NopHooks) BeforeIngest(context.Context, *Inbox, int64) error { return nil }
+func (NopHooks) BeforeIngest(context.Context, *IngestRequest) error { return nil }
 
 // AfterIngest implements Hooks and does nothing.
 func (NopHooks) AfterIngest(context.Context, *Inbox, *Message, bool) {}

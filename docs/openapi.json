@@ -471,6 +471,9 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
             "content": {
@@ -692,6 +695,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
           },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
@@ -916,6 +922,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
           },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
@@ -1147,6 +1156,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
           },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
@@ -4361,9 +4373,10 @@
               "code": {
                 "type": "string",
                 "enum": [
-                  "overloaded"
+                  "overloaded",
+                  "storage_full"
                 ],
-                "description": "A stable, machine-readable code."
+                "description": "A stable, machine-readable code. `storage_full` means the server has no room to store the delivery; `overloaded` that it is too busy to take it now."
               },
               "message": {
                 "type": "string",
@@ -5481,7 +5494,7 @@
         }
       },
       "Overloaded": {
-        "description": "Too many reads, streams, or waits are in progress. Retry shortly.",
+        "description": "The server cannot take the request now and the sender should try again: too many reads, streams, or waits are in progress, too many deliveries are being received at once, or (`storage_full`) there is no room to store a delivery. `Retry-After` says when.",
         "content": {
           "application/json": {
             "schema": {
