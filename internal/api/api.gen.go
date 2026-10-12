@@ -761,6 +761,9 @@ type McpQueryMessagesInput struct {
 	// Before read backward, newest first, from messages with a seq less than this
 	Before *int `json:"before,omitempty"`
 
+	// Bodies include message bodies (default false: the messages come without them, and you fetch the ones you want with get_message)
+	Bodies *bool `json:"bodies,omitempty"`
+
 	// Epoch the epoch your cursor came from (the `epoch` of the previous result); if it is not the inbox's current epoch the call fails with epoch_changed instead of reading from sequence numbers that no longer mean what they did. Omit it to skip the check
 	Epoch *string `json:"epoch,omitempty"`
 
@@ -772,9 +775,6 @@ type McpQueryMessagesInput struct {
 
 	// Since only messages received at or after this RFC 3339 time
 	Since *string `json:"since,omitempty"`
-
-	// Summary leave bodies out
-	Summary *bool `json:"summary,omitempty"`
 
 	// Types only messages whose event_type is one of these
 	Types *[]string `json:"types,omitempty"`
@@ -790,6 +790,9 @@ type McpQueryMessagesInput struct {
 type McpWaitForMessagesInput struct {
 	// After return messages with a seq greater than this; use the next_after from your previous call
 	After int `json:"after"`
+
+	// Bodies include message bodies (default false: the messages come without them, and you fetch the ones you want with get_message)
+	Bodies *bool `json:"bodies,omitempty"`
 
 	// Epoch the epoch your cursor came from (the `epoch` of the previous result); if it is not the inbox's current epoch the call fails with epoch_changed instead of reading from sequence numbers that no longer mean what they did. Omit it to skip the check
 	Epoch *string `json:"epoch,omitempty"`

@@ -56,8 +56,23 @@ before anything else is looked at.
 
 ## Tools
 
-Message objects carry the same JSON values as the [REST messages](api.md#messages),
-with one addition described under [Large bodies](#large-bodies). (The wire
+### The shape of a message
+
+A message has two parts. At the top are the fields the **server** set about the
+delivery: `seq`, `epoch`, `inbox`, `received_at`, `method`, `size`, `verified`,
+`verifier`, `verify_error`, `source_ip`. Under **`untrusted`** is everything the
+**sender** wrote or chose: `path`, `query`, `headers`, `content_type`,
+`delivery_id`, `event_type`, and the body (`body`, `body_text` or `body_base64`,
+as in the [REST messages](api.md#messages)). An agent that reads a transcript, and
+a person who reviews one, can see at once which text could have been written by an
+attacker. It is the REST message with the sender's fields moved under one key; the
+values are the same.
+
+`query_messages` and `wait_for_messages` return messages **without bodies** unless
+you pass `bodies: true`, with `untrusted.body_*` absent: an agent decides which
+messages are worth the context they cost and fetches those with `get_message`,
+which always returns the whole message. With `bodies`, a body over the inline limit
+is left out and marked, as described under [Large bodies](#large-bodies). (The wire
 encoding may write a character such as `<` as an escape, which is the same
 value.)
 
@@ -80,7 +95,7 @@ inboxes the token cannot read, not even how many there are.
 | `types` | Only messages whose `event_type` is one of these. |
 | `since`, `until` | RFC 3339 times. |
 | `verified` | Only verified (`true`) or unverified (`false`) messages. |
-| `summary` | Leave bodies out. |
+| `bodies` | Include message bodies. **Default false**: messages come without them, and you fetch the ones you want with `get_message`. |
 | `epoch` | The `epoch` your cursor came from; see [Epochs and gaps](#epochs-and-gaps). |
 
 With neither `after` nor `before`, you get the newest messages, newest first.
@@ -128,6 +143,7 @@ message). One message with its **full** body, up to the size limit described und
 | `types` | Only messages whose `event_type` is one of these. |
 | `timeout_seconds` | 0 to 60, default 30. |
 | `limit` | 1 to 100, default 20. |
+| `bodies` | Include message bodies; default false, as for `query_messages`. |
 | `epoch` | The `epoch` your cursor came from; see [Epochs and gaps](#epochs-and-gaps). |
 
 Returns as soon as any matching message exists after `after`, or an empty list
@@ -156,7 +172,7 @@ free slot is told "too many waits are in progress" and should retry shortly. A
 To protect an agent's context window, `query_messages` and `wait_for_messages`
 leave out any body larger than 16 KiB (`HOOKINLET_MCP_INLINE_BODY_BYTES`). Those
 messages have `body_truncated: true`, no body fields, and their true `size`.
-Fetch one whole with `get_message`.
+Fetch one whole with `get_message`. (Without `bodies: true` no body is sent at all.)
 
 ## Treat message content as data
 

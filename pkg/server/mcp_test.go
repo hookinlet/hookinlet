@@ -138,7 +138,8 @@ func TestToolsReturnWhatTheRESTAPIReturns(t *testing.T) {
 	cs := connectMCP(t, base, ae.tokenA)
 
 	// query_messages equals GET /messages, message for message.
-	got := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "limit": 100}).page(t)
+	got := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "limit": 100, "bodies": true}).page(t)
+	got.Messages = flattenUntrusted(got.Messages)
 	rest := ae.get("/v1/inboxes/agent-a/messages?after=0&limit=100", ae.tokenA)
 	var want struct {
 		Messages  []map[string]any `json:"messages"`
@@ -168,6 +169,7 @@ func TestToolsReturnWhatTheRESTAPIReturns(t *testing.T) {
 		}
 		var g map[string]any
 		_ = json.Unmarshal(one.raw, &g)
+		g = flattenUntrusted([]map[string]any{g})[0]
 		var w map[string]any
 		_ = json.Unmarshal(ae.get(fmt.Sprintf("/v1/inboxes/agent-a/messages/%d", seq), ae.tokenA).Body.Bytes(), &w)
 		if !reflect.DeepEqual(g, w) {
@@ -297,7 +299,7 @@ func TestToolArgumentsAreChecked(t *testing.T) {
 	for i := 0; i < 130; i++ {
 		ae.post("/in/agent-a", "x")
 	}
-	if p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "limit": 500, "summary": true}).page(t); len(p.Messages) != mcpMaxLimit {
+	if p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "limit": 500}).page(t); len(p.Messages) != mcpMaxLimit {
 		t.Errorf("limit 500 returned %d messages, want %d", len(p.Messages), mcpMaxLimit)
 	}
 }
@@ -1248,7 +1250,8 @@ func TestWaitMatchesRESTAndFiltersApply(t *testing.T) {
 		Messages []map[string]any `json:"messages"`
 	}
 	_ = json.Unmarshal(ae.get("/v1/inboxes/agent-a/messages?after=1&type=b&limit=20", ae.tokenA).Body.Bytes(), &rest)
-	w := callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 1, "types": []string{"b"}, "timeout_seconds": 0}).page(t)
+	w := callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 1, "types": []string{"b"}, "timeout_seconds": 0, "bodies": true}).page(t)
+	w.Messages = flattenUntrusted(w.Messages)
 	if !reflect.DeepEqual(w.Messages, rest.Messages) || !reflect.DeepEqual(seqsOf(w.Messages), []int64{2, 4, 6}) {
 		t.Errorf("wait %v differs from REST %v", seqsOf(w.Messages), seqsOf(rest.Messages))
 	}
@@ -1311,4 +1314,28 @@ func TestListInboxesDoesNotRevealHowManyInboxesExist(t *testing.T) {
 	if len(l.Inboxes) != 1 || l.Inboxes[0].Slug != "inbox-02" {
 		t.Errorf("list_inboxes = %+v", l.Inboxes)
 	}
+}
+
+// flattenUntrusted lifts what is under "untrusted" up beside the rest, giving the
+// shape the REST API uses, so the two can be compared field for field.
+func flattenUntrusted(ms []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(ms))
+	for i, m := range ms {
+		flat := map[string]any{}
+		for k, v := range m {
+			if k != "untrusted" {
+				flat[k] = v
+			}
+		}
+		if u, ok := m["untrusted"].(map[string]any); ok {
+			for k, v := range u {
+				if _, clash := flat[k]; clash {
+					panic("a field is both trusted and untrusted: " + k)
+				}
+				flat[k] = v
+			}
+		}
+		out[i] = flat
+	}
+	return out
 }

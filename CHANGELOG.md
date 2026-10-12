@@ -6,6 +6,17 @@ applies.
 
 ## Unreleased
 
+### Phase 16: the public face
+
+#### Changed
+- **The admin API is under `/v1/admin`** (was `/admin`). `/metrics`, ingest (`/in/...`), and
+  the health checks stay where they were.
+- **MCP messages put what the sender wrote under `untrusted`** (`path`, `query`, `headers`,
+  `content_type`, `delivery_id`, `event_type`, and the body); the fields the server set stay at
+  the top. `query_messages` and `wait_for_messages` return messages **without bodies** unless
+  `bodies: true` (replacing `summary`, which meant the opposite and was off by default).
+  REST and SSE messages are unchanged.
+
 ### Phase 15: storage and startup (part 2)
 
 #### Added
