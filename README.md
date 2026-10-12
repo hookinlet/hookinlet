@@ -68,7 +68,7 @@ again whenever you ask.)
 
 <!-- exercise -->
 ```sh
-curl -s -X POST localhost:8080/admin/inboxes \
+curl -s -X POST localhost:8080/v1/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- > created.json <<'EOF'
 {"slug": "github-demo", "verifier": "github", "verifier_secret": "my-webhook-secret"}
 EOF
@@ -137,7 +137,7 @@ account, so it is shown, not run by the tests):
 secret=$(stripe listen --print-secret)
 
 # create the inbox with that secret
-curl -s -X POST localhost:8080/admin/inboxes \
+curl -s -X POST localhost:8080/v1/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- > created.json <<EOF
 {"slug": "stripe", "verifier": "stripe", "verifier_secret": "$secret"}
 EOF
@@ -183,12 +183,11 @@ An agent needs the server's address, an inbox's agent token, and a cursor. Choos
 | Tool | Arguments | Returns |
 |---|---|---|
 | `list_inboxes` | none | slug, name, verifier, `latest_seq` |
-| `query_messages` | `inbox`, `after` or `before`, `limit`, `types`, `since`, `until`, `verified`, `summary` | messages, and `next_after` to keep as the cursor |
+| `query_messages` | `inbox`, `after` or `before`, `limit`, `types`, `since`, `until`, `verified`, `bodies` | messages (without bodies unless `bodies`), and `next_after` to keep as the cursor |
 | `get_message` | `inbox`, `seq` | one message with its full body |
-| `wait_for_messages` | `inbox`, `after`, `types`, `timeout_seconds`, `limit` | messages after `after`; waits up to 60 s for one |
+| `wait_for_messages` | `inbox`, `after`, `types`, `timeout_seconds`, `limit`, `bodies` | messages after `after`; waits up to 60 s for one |
 
-The tools are read-only. A token sees only its own inbox. Bodies over 16 KiB are cut and flagged, so they do not
-fill the agent's context; `get_message` returns the whole thing. A raw call:
+The tools are read-only. A token sees only the inboxes it was issued for. Messages come without bodies unless you ask (`bodies: true`), and a body over 16 KiB is then cut and flagged, so neither fills the agent's context; `get_message` returns the whole thing. What the sender wrote is under each message's `untrusted` key. A raw call:
 
 <!-- exercise -->
 ```sh
@@ -319,6 +318,7 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
 | [**OpenAPI**](docs/openapi.json) | The same, machine-readable (OpenAPI 3.1), checked against the server by tests |
 | [**MCP**](docs/mcp.md) | The tools, their limits, and how to connect clients |
 | [**Verifiers**](docs/verifiers.md) | Stripe, GitHub, Slack, Standard Webhooks, generic HMAC, shared token |
+| [**Stability**](docs/stability.md) | What may change, how a change is announced, cursors and ids, CORS and TLS |
 | [**Extending**](docs/extending.md) | Embedding the server; replacing the store, notifier, auth, or secrets |
 | [**Performance**](docs/performance.md) | What was measured, on what, and how to repeat it |
 

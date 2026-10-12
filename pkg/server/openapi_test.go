@@ -275,7 +275,7 @@ func TestOpenAPISecurityMatchesTheServer(t *testing.T) {
 		var want []string
 		switch {
 		case open[id]:
-		case strings.HasPrefix(o.path, "/admin/") || o.path == "/metrics":
+		case strings.HasPrefix(o.path, "/v1/admin/") || o.path == "/metrics":
 			want = []string{"adminToken"}
 		default:
 			want = []string{"adminToken", "agentToken"}

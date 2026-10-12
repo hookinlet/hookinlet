@@ -5,7 +5,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -233,7 +235,7 @@ func (streamingStore) Backup(context.Context) (io.ReadCloser, int64, error) {
 
 func TestABackupThatStreamsHasNoContentLength(t *testing.T) {
 	a := newAdminEnv(t, func(o *Options) { o.Store = streamingStore{o.Store} })
-	status, hdr, body := a.call("GET", "/admin/backup", nil, testAdminToken)
+	status, hdr, body := a.call("GET", "/v1/admin/backup", nil, testAdminToken)
 	if status != http.StatusOK || string(body) != strings.Repeat("a snapshot of a size nobody knew. ", 10000) {
 		t.Fatalf("%d, %d bytes", status, len(body))
 	}
@@ -315,7 +317,7 @@ func (failingReader) Read([]byte) (int, error) { return 0, errors.New("the store
 // status is already sent, and a clean end would be taken for the end of the file.
 func TestAStreamedBackupThatBreaksIsNotACleanEnd(t *testing.T) {
 	a := newAdminEnv(t, func(o *Options) { o.Store = breakingStore{o.Store} })
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, a.base+"/admin/backup", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, a.base+"/v1/admin/backup", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,5 +361,106 @@ func TestShutdownDuringTheDrainEndsServe(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("Serve did not return after Shutdown during the drain")
+	}
+}
+
+func TestOptionsFollowOneRule(t *testing.T) {
+	store := newEnv(t).store
+	// Only Store is required; an address is for Run.
+	srv, err := New(Options{Store: store})
+	if err != nil {
+		t.Fatalf("a Server with only a Store: %v", err)
+	}
+	if err := srv.Run(t.Context()); err == nil || !strings.Contains(err.Error(), "Addr") {
+		t.Errorf("Run without an address: %v", err)
+	}
+	if srv.Handler() == nil {
+		t.Error("no handler")
+	}
+	// A negative number is an error where it means nothing, and is how a bound is
+	// turned off where it does.
+	for name, o := range map[string]Options{
+		"ShutdownTimeout":    {Store: store, ShutdownTimeout: -1},
+		"MaxStreams":         {Store: store, MaxStreams: -1},
+		"MaxHeaderBytes":     {Store: store, MaxHeaderBytes: -1},
+		"SSERecheckInterval": {Store: store, SSERecheckInterval: -1},
+		"DrainDelay":         {Store: store, DrainDelay: -1},
+		"MCPInlineBodyBytes": {Store: store, MCPInlineBodyBytes: -1},
+	} {
+		if _, err := New(o); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, o := range map[string]Options{
+		"RetentionInterval":  {Store: store, RetentionInterval: -1},
+		"IngestMemoryBudget": {Store: store, IngestMemoryBudget: -1},
+	} {
+		if _, err := New(o); err != nil {
+			t.Errorf("%s: a negative value should turn it off: %v", name, err)
+		}
+	}
+}
+
+// An embedder that serves the handler itself has Maintain to run the schedule.
+func TestMaintainRunsTheRetentionScheduleWithoutServe(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.RetentionInterval = 50 * time.Millisecond })
+	in := e.newInbox("kept-short", "trusted", "", func(i *inbox.Inbox) { i.RetentionMaxCount = 2 })
+	for range 6 {
+		e.post("/in/kept-short", "x")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { e.server.Maintain(ctx); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for e.count(in) != 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := e.count(in); n != 2 {
+		t.Errorf("%d messages after the schedule ran, want 2", n)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Error("Maintain did not return when its context was done")
+	}
+	off := newEnv(t, func(o *Options) { o.RetentionInterval = -1 })
+	returned := make(chan struct{})
+	go func() { off.server.Maintain(t.Context()); close(returned) }()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Error("Maintain with the schedule off did not return at once")
+	}
+}
+
+// The next link of an admin list says the limit the page was cut with, which is the
+// one asked for only if it was within the maximum.
+func TestAnAdminNextLinkCarriesTheEffectiveLimit(t *testing.T) {
+	a := newAdminEnv(t)
+	for i := range 1005 {
+		slug := fmt.Sprintf("bulk-%04d", i)
+		if err := a.store.CreateInbox(t.Context(), &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: "none"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := func(query string) string {
+		var page struct {
+			Next *string `json:"next"`
+		}
+		_ = json.Unmarshal(a.mustAdmin("GET", "/v1/admin/inboxes"+query, nil, 200), &page)
+		if page.Next == nil {
+			return ""
+		}
+		return *page.Next
+	}
+	for query, want := range map[string]string{
+		"?limit=5000": "&limit=1000", // clamped to the maximum
+		"?limit=7":    "&limit=7",
+		"":            "&limit=100", // the default
+	} {
+		if got := next(query); !strings.HasSuffix(got, want) {
+			t.Errorf("GET /v1/admin/inboxes%s: next = %q, want it to end in %q", query, got, want)
+		}
 	}
 }

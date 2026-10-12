@@ -207,7 +207,7 @@ func (a *adminAPI) CreateInbox(ctx context.Context, req api.CreateInboxRequestOb
 	a.s.auditCtx(ctx, "create inbox", c.Inbox.Slug)
 	return api.CreateInbox201JSONResponse{
 		Body:    created(c, base),
-		Headers: api.CreateInbox201ResponseHeaders{Location: "/admin/inboxes/" + c.Inbox.Slug, XRequestId: requestIDOf(ctx)},
+		Headers: api.CreateInbox201ResponseHeaders{Location: "/v1/admin/inboxes/" + c.Inbox.Slug, XRequestId: requestIDOf(ctx)},
 	}, nil
 }
 
@@ -227,10 +227,9 @@ func (a *adminAPI) ListInboxes(ctx context.Context, req api.ListInboxesRequestOb
 		out.Inboxes[i] = view(v, base)
 	}
 	if next != 0 {
-		n := "/admin/inboxes?after=" + strconv.FormatInt(int64(next), 10)
-		if limit > 0 {
-			n += "&limit=" + strconv.Itoa(limit)
-		}
+		// The limit the page was cut with: what was asked, clamped, or the default.
+		n := "/v1/admin/inboxes?after=" + strconv.FormatInt(int64(next), 10) +
+			"&limit=" + strconv.Itoa(inbox.ListParams{Limit: limit}.EffectiveLimit())
 		out.Next = &n
 	}
 	return api.ListInboxes200JSONResponse{Body: out, Headers: api.ListInboxes200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
@@ -335,7 +334,7 @@ func (a *adminAPI) CreateToken(ctx context.Context, req api.CreateTokenRequestOb
 	a.s.auditCtx(ctx, "create token", "", slog.Int64("token_id", c.Record.ID), slog.String("name", c.Record.Name))
 	return api.CreateToken201JSONResponse{
 		Body:    api.TokenCreated{Record: tokenView(c.Record), Token: c.Token},
-		Headers: api.CreateToken201ResponseHeaders{Location: "/admin/tokens/" + strconv.FormatInt(c.Record.ID, 10), XRequestId: requestIDOf(ctx)},
+		Headers: api.CreateToken201ResponseHeaders{Location: "/v1/admin/tokens/" + strconv.FormatInt(c.Record.ID, 10), XRequestId: requestIDOf(ctx)},
 	}, nil
 }
 
@@ -358,13 +357,11 @@ func (a *adminAPI) ListTokens(ctx context.Context, req api.ListTokensRequestObje
 	}
 	if next != 0 {
 		q := url.Values{"after": {strconv.FormatInt(int64(next), 10)}}
-		if limit > 0 {
-			q.Set("limit", strconv.Itoa(limit))
-		}
+		q.Set("limit", strconv.Itoa(inbox.TokenListParams{Limit: limit}.EffectiveLimit()))
 		if slug != "" {
 			q.Set("inbox", slug)
 		}
-		n := "/admin/tokens?" + q.Encode()
+		n := "/v1/admin/tokens?" + q.Encode()
 		out.Next = &n
 	}
 	return api.ListTokens200JSONResponse{Body: out, Headers: api.ListTokens200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil

@@ -31,10 +31,15 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/verify"
 )
 
-// Options configures a Server. Addr and Store are required; every other field
-// has a working default.
+// Options configures a Server. Only Store is required (and Addr, to use Run). The
+// rule for the rest is one: a zero value means the documented default; a negative
+// number turns a bound or a schedule off where that makes sense (RetentionInterval,
+// IngestMemoryBudget) and is an error everywhere else; New reports a contradictory or
+// out-of-range option (MCPInlineBodyBytes is clamped to its maximum instead), and does no
+// I/O.
 type Options struct {
-	// Addr is the TCP address to listen on, for example ":8080".
+	// Addr is the TCP address Run listens on, for example ":8080". It is not needed
+	// to Serve on a listener you made, or to mount Handler() in your own http.Server.
 	Addr string
 	// Logger receives all server logs. Defaults to slog.Default().
 	Logger *slog.Logger
@@ -185,11 +190,23 @@ type Server struct {
 
 // New builds a Server. It performs no I/O and makes no network calls.
 func New(opts Options) (*Server, error) {
-	if opts.Addr == "" {
-		return nil, errors.New("server: Options.Addr is required")
-	}
 	if opts.Store == nil {
 		return nil, errors.New("server: Options.Store is required")
+	}
+	for _, f := range []struct {
+		name string
+		v    int64
+	}{
+		{"ShutdownTimeout", int64(opts.ShutdownTimeout)}, {"ReadBodyTimeout", int64(opts.ReadBodyTimeout)},
+		{"MaxHeaderBytes", int64(opts.MaxHeaderBytes)}, {"MaxConcurrentReads", int64(opts.MaxConcurrentReads)},
+		{"ReadWaitTimeout", int64(opts.ReadWaitTimeout)}, {"MaxStreams", int64(opts.MaxStreams)},
+		{"MaxStreamsPerInbox", int64(opts.MaxStreamsPerInbox)}, {"StreamRevalidateInterval", int64(opts.StreamRevalidateInterval)},
+		{"SSEHeartbeat", int64(opts.SSEHeartbeat)}, {"SSERecheckInterval", int64(opts.SSERecheckInterval)},
+		{"MCPInlineBodyBytes", int64(opts.MCPInlineBodyBytes)}, {"DrainDelay", int64(opts.DrainDelay)},
+	} {
+		if f.v < 0 {
+			return nil, fmt.Errorf("server: Options.%s must not be negative (zero means the default)", f.name)
+		}
 	}
 	if opts.AdminAddr != "" && opts.DisableAdmin {
 		return nil, errors.New("server: Options.AdminAddr and Options.DisableAdmin contradict each other")
@@ -257,9 +274,6 @@ func New(opts Options) (*Server, error) {
 	// Never above what a page query loads for REST: a cap this high would let one
 	// call load a hundred times more than a REST page does.
 	opts.MCPInlineBodyBytes = min(opts.MCPInlineBodyBytes, wire.InlineBodyBytes)
-	if opts.SSERecheckInterval < 0 {
-		opts.SSERecheckInterval = 0
-	}
 
 	spec, err := specvalidate.Load(docs.OpenAPI)
 	if err != nil {
@@ -333,6 +347,9 @@ func (s *Server) AdminHandler() http.Handler { return s.adminHandler }
 // Run listens on Options.Addr and serves until ctx is cancelled, then shuts
 // down gracefully. It returns nil after a clean shutdown.
 func (s *Server) Run(ctx context.Context) error {
+	if s.opts.Addr == "" {
+		return errors.New("server: Options.Addr is required to Run; to serve on a listener you made, use Serve")
+	}
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", s.opts.Addr)
 	if err != nil {
@@ -472,13 +489,38 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 // RetentionInterval until the server shuts down.
 func (s *Server) retentionLoop() {
 	defer s.retention.Done()
+	s.sweepLoop(s.closeCtx)
+}
+
+// Maintain runs the scheduled work (the retention sweep, and the finishing of any
+// delete that was interrupted) until ctx is done or the server is shut down. Serve
+// and Run do this themselves; call Maintain only when you serve Handler() from an
+// http.Server of your own, or the sweep never runs. It does nothing if the schedule
+// is off (a negative RetentionInterval). It returns when it stops.
+func (s *Server) Maintain(ctx context.Context) {
+	if s.opts.RetentionInterval < 0 || s.closeCtx.Err() != nil || ctx.Err() != nil {
+		return // nothing to do, or the server is already shut down and its Store may be closing
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-s.closing:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	s.sweepLoop(ctx)
+}
+
+func (s *Server) sweepLoop(ctx context.Context) {
 	sweep := func() {
 		start := time.Now()
-		n, err := s.adm.SweepRetention(s.closeCtx)
+		n, err := s.adm.SweepRetention(ctx)
 		s.metrics.sweeps.Add(1)
 		s.metrics.retention.Add(n)
 		switch {
-		case err != nil && s.closeCtx.Err() != nil:
+		case err != nil && ctx.Err() != nil:
 			// Shutting down: the sweep stopped part way, and the next one resumes.
 		case err != nil:
 			s.log.Warn("retention sweep failed", "deleted", n, "err", err)
@@ -493,7 +535,7 @@ func (s *Server) retentionLoop() {
 		select {
 		case <-t.C:
 			sweep()
-		case <-s.closing:
+		case <-ctx.Done():
 			return
 		}
 	}

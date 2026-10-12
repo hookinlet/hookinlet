@@ -761,6 +761,9 @@ type McpQueryMessagesInput struct {
 	// Before read backward, newest first, from messages with a seq less than this
 	Before *int `json:"before,omitempty"`
 
+	// Bodies include message bodies (default false: the messages come without them, and you fetch the ones you want with get_message)
+	Bodies *bool `json:"bodies,omitempty"`
+
 	// Epoch the epoch your cursor came from (the `epoch` of the previous result); if it is not the inbox's current epoch the call fails with epoch_changed instead of reading from sequence numbers that no longer mean what they did. Omit it to skip the check
 	Epoch *string `json:"epoch,omitempty"`
 
@@ -772,9 +775,6 @@ type McpQueryMessagesInput struct {
 
 	// Since only messages received at or after this RFC 3339 time
 	Since *string `json:"since,omitempty"`
-
-	// Summary leave bodies out
-	Summary *bool `json:"summary,omitempty"`
 
 	// Types only messages whose event_type is one of these
 	Types *[]string `json:"types,omitempty"`
@@ -790,6 +790,9 @@ type McpQueryMessagesInput struct {
 type McpWaitForMessagesInput struct {
 	// After return messages with a seq greater than this; use the next_after from your previous call
 	After int `json:"after"`
+
+	// Bodies include message bodies (default false: the messages come without them, and you fetch the ones you want with get_message)
+	Bodies *bool `json:"bodies,omitempty"`
 
 	// Epoch the epoch your cursor came from (the `epoch` of the previous result); if it is not the inbox's current epoch the call fails with epoch_changed instead of reading from sequence numbers that no longer mean what they did. Omit it to skip the check
 	Epoch *string `json:"epoch,omitempty"`
@@ -1123,6 +1126,9 @@ type StreamMessagesParams struct {
 	LastEventID *string `json:"Last-Event-ID,omitempty"`
 }
 
+// McpJSONRequestBody defines body for Mcp for application/json ContentType.
+type McpJSONRequestBody = JsonRpcRequest
+
 // CreateInboxJSONRequestBody defines body for CreateInbox for application/json ContentType.
 type CreateInboxJSONRequestBody = CreateInbox
 
@@ -1135,47 +1141,8 @@ type SetVerifierSecretJSONRequestBody = SetSecret
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = CreateToken
 
-// McpJSONRequestBody defines body for Mcp for application/json ContentType.
-type McpJSONRequestBody = JsonRpcRequest
-
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// Backup Download a consistent copy of the database
-	// (GET /admin/backup)
-	Backup(w http.ResponseWriter, r *http.Request)
-	// ListInboxes List inboxes
-	// (GET /admin/inboxes)
-	ListInboxes(w http.ResponseWriter, r *http.Request, params ListInboxesParams)
-	// CreateInbox Create an inbox
-	// (POST /admin/inboxes)
-	CreateInbox(w http.ResponseWriter, r *http.Request)
-	// DeleteInbox Delete an inbox and its messages
-	// (DELETE /admin/inboxes/{slug})
-	DeleteInbox(w http.ResponseWriter, r *http.Request, slug Slug)
-	// ShowInbox Show an inbox
-	// (GET /admin/inboxes/{slug})
-	ShowInbox(w http.ResponseWriter, r *http.Request, slug Slug)
-	// UpdateInbox Change an inbox's settings
-	// (PATCH /admin/inboxes/{slug})
-	UpdateInbox(w http.ResponseWriter, r *http.Request, slug Slug)
-	// RotateIngestKey Issue a new ingest key
-	// (POST /admin/inboxes/{slug}/rotate-ingest-key)
-	RotateIngestKey(w http.ResponseWriter, r *http.Request, slug Slug)
-	// SetVerifierSecret Set or replace the verifier secret
-	// (PUT /admin/inboxes/{slug}/secret)
-	SetVerifierSecret(w http.ResponseWriter, r *http.Request, slug Slug)
-	// RunRetention Apply retention now
-	// (POST /admin/retention/run)
-	RunRetention(w http.ResponseWriter, r *http.Request)
-	// ListTokens List tokens
-	// (GET /admin/tokens)
-	ListTokens(w http.ResponseWriter, r *http.Request, params ListTokensParams)
-	// CreateToken Issue a token
-	// (POST /admin/tokens)
-	CreateToken(w http.ResponseWriter, r *http.Request)
-	// RevokeToken Revoke a token
-	// (DELETE /admin/tokens/{id})
-	RevokeToken(w http.ResponseWriter, r *http.Request, id TokenId)
 	// Healthz Liveness
 	// (GET /healthz)
 	Healthz(w http.ResponseWriter, r *http.Request)
@@ -1206,6 +1173,42 @@ type ServerInterface interface {
 	// HeadReadyz Headers only: Readiness
 	// (HEAD /readyz)
 	HeadReadyz(w http.ResponseWriter, r *http.Request)
+	// Backup Download a consistent copy of the database
+	// (GET /v1/admin/backup)
+	Backup(w http.ResponseWriter, r *http.Request)
+	// ListInboxes List inboxes
+	// (GET /v1/admin/inboxes)
+	ListInboxes(w http.ResponseWriter, r *http.Request, params ListInboxesParams)
+	// CreateInbox Create an inbox
+	// (POST /v1/admin/inboxes)
+	CreateInbox(w http.ResponseWriter, r *http.Request)
+	// DeleteInbox Delete an inbox and its messages
+	// (DELETE /v1/admin/inboxes/{slug})
+	DeleteInbox(w http.ResponseWriter, r *http.Request, slug Slug)
+	// ShowInbox Show an inbox
+	// (GET /v1/admin/inboxes/{slug})
+	ShowInbox(w http.ResponseWriter, r *http.Request, slug Slug)
+	// UpdateInbox Change an inbox's settings
+	// (PATCH /v1/admin/inboxes/{slug})
+	UpdateInbox(w http.ResponseWriter, r *http.Request, slug Slug)
+	// RotateIngestKey Issue a new ingest key
+	// (POST /v1/admin/inboxes/{slug}/rotate-ingest-key)
+	RotateIngestKey(w http.ResponseWriter, r *http.Request, slug Slug)
+	// SetVerifierSecret Set or replace the verifier secret
+	// (PUT /v1/admin/inboxes/{slug}/secret)
+	SetVerifierSecret(w http.ResponseWriter, r *http.Request, slug Slug)
+	// RunRetention Apply retention now
+	// (POST /v1/admin/retention/run)
+	RunRetention(w http.ResponseWriter, r *http.Request)
+	// ListTokens List tokens
+	// (GET /v1/admin/tokens)
+	ListTokens(w http.ResponseWriter, r *http.Request, params ListTokensParams)
+	// CreateToken Issue a token
+	// (POST /v1/admin/tokens)
+	CreateToken(w http.ResponseWriter, r *http.Request)
+	// RevokeToken Revoke a token
+	// (DELETE /v1/admin/tokens/{id})
+	RevokeToken(w http.ResponseWriter, r *http.Request, id TokenId)
 	// GetInbox Inbox metadata
 	// (GET /v1/inboxes/{slug})
 	GetInbox(w http.ResponseWriter, r *http.Request, slug Slug)
@@ -1243,6 +1246,212 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// Healthz operation middleware
+func (siw *ServerInterfaceWrapper) Healthz(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Healthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// HeadHealthz operation middleware
+func (siw *ServerInterfaceWrapper) HeadHealthz(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.HeadHealthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Ingest operation middleware
+func (siw *ServerInterfaceWrapper) Ingest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Ingest(w, r, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IngestPut operation middleware
+func (siw *ServerInterfaceWrapper) IngestPut(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IngestPut(w, r, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IngestWithPath operation middleware
+func (siw *ServerInterfaceWrapper) IngestWithPath(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "rest" -------------
+	var rest string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "rest", r.PathValue("rest"), &rest, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: false, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "rest", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IngestWithPath(w, r, key, rest)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IngestPutWithPath operation middleware
+func (siw *ServerInterfaceWrapper) IngestPutWithPath(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "rest" -------------
+	var rest string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "rest", r.PathValue("rest"), &rest, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: false, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "rest", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IngestPutWithPath(w, r, key, rest)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Mcp operation middleware
+func (siw *ServerInterfaceWrapper) Mcp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Mcp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Metrics operation middleware
+func (siw *ServerInterfaceWrapper) Metrics(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Metrics(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Readyz operation middleware
+func (siw *ServerInterfaceWrapper) Readyz(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Readyz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// HeadReadyz operation middleware
+func (siw *ServerInterfaceWrapper) HeadReadyz(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.HeadReadyz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Backup operation middleware
 func (siw *ServerInterfaceWrapper) Backup(w http.ResponseWriter, r *http.Request) {
@@ -1552,212 +1761,6 @@ func (siw *ServerInterfaceWrapper) RevokeToken(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeToken(w, r, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// Healthz operation middleware
-func (siw *ServerInterfaceWrapper) Healthz(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Healthz(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// HeadHealthz operation middleware
-func (siw *ServerInterfaceWrapper) HeadHealthz(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.HeadHealthz(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// Ingest operation middleware
-func (siw *ServerInterfaceWrapper) Ingest(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "key" -------------
-	var key string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Ingest(w, r, key)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// IngestPut operation middleware
-func (siw *ServerInterfaceWrapper) IngestPut(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "key" -------------
-	var key string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.IngestPut(w, r, key)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// IngestWithPath operation middleware
-func (siw *ServerInterfaceWrapper) IngestWithPath(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "key" -------------
-	var key string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "rest" -------------
-	var rest string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "rest", r.PathValue("rest"), &rest, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: false, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "rest", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.IngestWithPath(w, r, key, rest)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// IngestPutWithPath operation middleware
-func (siw *ServerInterfaceWrapper) IngestPutWithPath(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "key" -------------
-	var key string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "rest" -------------
-	var rest string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "rest", r.PathValue("rest"), &rest, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: false, Type: "string", Format: "", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "rest", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.IngestPutWithPath(w, r, key, rest)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// Mcp operation middleware
-func (siw *ServerInterfaceWrapper) Mcp(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Mcp(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// Metrics operation middleware
-func (siw *ServerInterfaceWrapper) Metrics(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Metrics(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// Readyz operation middleware
-func (siw *ServerInterfaceWrapper) Readyz(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.Readyz(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// HeadReadyz operation middleware
-func (siw *ServerInterfaceWrapper) HeadReadyz(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.HeadReadyz(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2563,18 +2566,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/backup", wrapper.Backup)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/inboxes", wrapper.ListInboxes)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/inboxes", wrapper.CreateInbox)
-	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/admin/inboxes/{slug}", wrapper.DeleteInbox)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/inboxes/{slug}", wrapper.ShowInbox)
-	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/inboxes/{slug}", wrapper.UpdateInbox)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/inboxes/{slug}/rotate-ingest-key", wrapper.RotateIngestKey)
-	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/admin/inboxes/{slug}/secret", wrapper.SetVerifierSecret)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/retention/run", wrapper.RunRetention)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/tokens", wrapper.ListTokens)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/admin/tokens", wrapper.CreateToken)
-	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/admin/tokens/{id}", wrapper.RevokeToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.Healthz)
 	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/healthz", wrapper.HeadHealthz)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/in/{key}", wrapper.Ingest)
@@ -2585,6 +2576,18 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/metrics", wrapper.Metrics)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/readyz", wrapper.Readyz)
 	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/readyz", wrapper.HeadReadyz)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/backup", wrapper.Backup)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/inboxes", wrapper.ListInboxes)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/inboxes", wrapper.CreateInbox)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/admin/inboxes/{slug}", wrapper.DeleteInbox)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/inboxes/{slug}", wrapper.ShowInbox)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/inboxes/{slug}", wrapper.UpdateInbox)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/inboxes/{slug}/rotate-ingest-key", wrapper.RotateIngestKey)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/inboxes/{slug}/secret", wrapper.SetVerifierSecret)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/retention/run", wrapper.RunRetention)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/tokens", wrapper.ListTokens)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/tokens", wrapper.CreateToken)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/admin/tokens/{id}", wrapper.RevokeToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/inboxes/{slug}", wrapper.GetInbox)
 	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/v1/inboxes/{slug}", wrapper.HeadGetInbox)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/inboxes/{slug}/messages", wrapper.ListMessages)
@@ -2707,6 +2710,1892 @@ type UnsupportedJSONResponse struct {
 	Body ErrorUnsupported
 
 	Headers UnsupportedResponseHeaders
+}
+
+type HealthzRequestObject struct {
+}
+
+type HealthzResponseObject interface {
+	VisitHealthzResponse(w http.ResponseWriter) error
+}
+
+type Healthz200ResponseHeaders struct {
+	XRequestId string
+}
+
+type Healthz200JSONResponse struct {
+	Body    Status
+	Headers Healthz200ResponseHeaders
+}
+
+func (response Healthz200JSONResponse) VisitHealthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Healthz405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response Healthz405JSONResponse) VisitHealthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HealthzdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type HealthzdefaultJSONResponse struct {
+	Body       Error
+	Headers    HealthzdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response HealthzdefaultJSONResponse) VisitHealthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HealthzdefaultTextResponse struct {
+	Body       string
+	Headers    HealthzdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response HealthzdefaultTextResponse) VisitHealthzResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type HeadHealthzRequestObject struct {
+}
+
+type HeadHealthzResponseObject interface {
+	VisitHeadHealthzResponse(w http.ResponseWriter) error
+}
+
+type HeadHealthz200ResponseHeaders struct {
+	XRequestId string
+}
+
+type HeadHealthz200Response struct {
+	Headers HeadHealthz200ResponseHeaders
+}
+
+func (response HeadHealthz200Response) VisitHeadHealthzResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+	return nil
+}
+
+type HeadHealthz405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response HeadHealthz405JSONResponse) VisitHeadHealthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadHealthzdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type HeadHealthzdefaultJSONResponse struct {
+	Body       Error
+	Headers    HeadHealthzdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response HeadHealthzdefaultJSONResponse) VisitHeadHealthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadHealthzdefaultTextResponse struct {
+	Body       string
+	Headers    HeadHealthzdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response HeadHealthzdefaultTextResponse) VisitHeadHealthzResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type IngestRequestObject struct {
+	Key         string `json:"key"`
+	ContentType string
+	Body        io.Reader
+}
+
+type IngestResponseObject interface {
+	VisitIngestResponse(w http.ResponseWriter) error
+}
+
+type Ingest200ResponseHeaders struct {
+	XRequestId string
+}
+
+type Ingest200JSONResponse struct {
+	Body    Accepted
+	Headers Ingest200ResponseHeaders
+}
+
+func (response Ingest200JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest200TextResponse struct {
+	Body    string
+	Headers Ingest200ResponseHeaders
+}
+
+func (response Ingest200TextResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type Ingest400ResponseHeaders struct {
+	XRequestId string
+}
+
+type Ingest400JSONResponse struct {
+	Body    ErrorBadRequest
+	Headers Ingest400ResponseHeaders
+}
+
+func (response Ingest400JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest401ResponseHeaders struct {
+	XRequestId string
+}
+
+type Ingest401JSONResponse struct {
+	Body    ErrorVerificationFailed
+	Headers Ingest401ResponseHeaders
+}
+
+func (response Ingest401JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest402ResponseHeaders struct {
+	XRequestId string
+}
+
+type Ingest402JSONResponse struct {
+	Body    ErrorQuotaExceeded
+	Headers Ingest402ResponseHeaders
+}
+
+func (response Ingest402JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest403ResponseHeaders struct {
+	XRequestId string
+}
+
+type Ingest403JSONResponse struct {
+	Body    ErrorForbidden
+	Headers Ingest403ResponseHeaders
+}
+
+func (response Ingest403JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response Ingest404JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response Ingest405JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest413JSONResponse struct{ TooLargeJSONResponse }
+
+func (response Ingest413JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest429ResponseHeaders struct {
+	XRequestId string
+}
+
+type Ingest429JSONResponse struct {
+	Body    ErrorRateLimited
+	Headers Ingest429ResponseHeaders
+}
+
+func (response Ingest429JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest500JSONResponse struct{ InternalJSONResponse }
+
+func (response Ingest500JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Ingest503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response Ingest503JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type IngestdefaultJSONResponse struct {
+	Body       Error
+	Headers    IngestdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response IngestdefaultJSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestdefaultTextResponse struct {
+	Body       string
+	Headers    IngestdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response IngestdefaultTextResponse) VisitIngestResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type IngestPutRequestObject struct {
+	Key         string `json:"key"`
+	ContentType string
+	Body        io.Reader
+}
+
+type IngestPutResponseObject interface {
+	VisitIngestPutResponse(w http.ResponseWriter) error
+}
+
+type IngestPut200ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPut200JSONResponse struct {
+	Body    Accepted
+	Headers IngestPut200ResponseHeaders
+}
+
+func (response IngestPut200JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut200TextResponse struct {
+	Body    string
+	Headers IngestPut200ResponseHeaders
+}
+
+func (response IngestPut200TextResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type IngestPut400ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPut400JSONResponse struct {
+	Body    ErrorBadRequest
+	Headers IngestPut400ResponseHeaders
+}
+
+func (response IngestPut400JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut401ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPut401JSONResponse struct {
+	Body    ErrorVerificationFailed
+	Headers IngestPut401ResponseHeaders
+}
+
+func (response IngestPut401JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut402ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPut402JSONResponse struct {
+	Body    ErrorQuotaExceeded
+	Headers IngestPut402ResponseHeaders
+}
+
+func (response IngestPut402JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut403ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPut403JSONResponse struct {
+	Body    ErrorForbidden
+	Headers IngestPut403ResponseHeaders
+}
+
+func (response IngestPut403JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response IngestPut404JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response IngestPut405JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut413JSONResponse struct{ TooLargeJSONResponse }
+
+func (response IngestPut413JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut429ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPut429JSONResponse struct {
+	Body    ErrorRateLimited
+	Headers IngestPut429ResponseHeaders
+}
+
+func (response IngestPut429JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut500JSONResponse struct{ InternalJSONResponse }
+
+func (response IngestPut500JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPut503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response IngestPut503JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type IngestPutdefaultJSONResponse struct {
+	Body       Error
+	Headers    IngestPutdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response IngestPutdefaultJSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutdefaultTextResponse struct {
+	Body       string
+	Headers    IngestPutdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response IngestPutdefaultTextResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type IngestWithPathRequestObject struct {
+	Key         string `json:"key"`
+	Rest        string `json:"rest,omitempty"`
+	ContentType string
+	Body        io.Reader
+}
+
+type IngestWithPathResponseObject interface {
+	VisitIngestWithPathResponse(w http.ResponseWriter) error
+}
+
+type IngestWithPath200ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestWithPath200JSONResponse struct {
+	Body    Accepted
+	Headers IngestWithPath200ResponseHeaders
+}
+
+func (response IngestWithPath200JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath200TextResponse struct {
+	Body    string
+	Headers IngestWithPath200ResponseHeaders
+}
+
+func (response IngestWithPath200TextResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type IngestWithPath400ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestWithPath400JSONResponse struct {
+	Body    ErrorBadRequest
+	Headers IngestWithPath400ResponseHeaders
+}
+
+func (response IngestWithPath400JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath401ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestWithPath401JSONResponse struct {
+	Body    ErrorVerificationFailed
+	Headers IngestWithPath401ResponseHeaders
+}
+
+func (response IngestWithPath401JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath402ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestWithPath402JSONResponse struct {
+	Body    ErrorQuotaExceeded
+	Headers IngestWithPath402ResponseHeaders
+}
+
+func (response IngestWithPath402JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath403ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestWithPath403JSONResponse struct {
+	Body    ErrorForbidden
+	Headers IngestWithPath403ResponseHeaders
+}
+
+func (response IngestWithPath403JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response IngestWithPath404JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response IngestWithPath405JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath413JSONResponse struct{ TooLargeJSONResponse }
+
+func (response IngestWithPath413JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath429ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestWithPath429JSONResponse struct {
+	Body    ErrorRateLimited
+	Headers IngestWithPath429ResponseHeaders
+}
+
+func (response IngestWithPath429JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath500JSONResponse struct{ InternalJSONResponse }
+
+func (response IngestWithPath500JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPath503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response IngestWithPath503JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPathdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type IngestWithPathdefaultJSONResponse struct {
+	Body       Error
+	Headers    IngestWithPathdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response IngestWithPathdefaultJSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestWithPathdefaultTextResponse struct {
+	Body       string
+	Headers    IngestWithPathdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response IngestWithPathdefaultTextResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type IngestPutWithPathRequestObject struct {
+	Key         string `json:"key"`
+	Rest        string `json:"rest,omitempty"`
+	ContentType string
+	Body        io.Reader
+}
+
+type IngestPutWithPathResponseObject interface {
+	VisitIngestPutWithPathResponse(w http.ResponseWriter) error
+}
+
+type IngestPutWithPath200ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPutWithPath200JSONResponse struct {
+	Body    Accepted
+	Headers IngestPutWithPath200ResponseHeaders
+}
+
+func (response IngestPutWithPath200JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath200TextResponse struct {
+	Body    string
+	Headers IngestPutWithPath200ResponseHeaders
+}
+
+func (response IngestPutWithPath200TextResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type IngestPutWithPath400ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPutWithPath400JSONResponse struct {
+	Body    ErrorBadRequest
+	Headers IngestPutWithPath400ResponseHeaders
+}
+
+func (response IngestPutWithPath400JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath401ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPutWithPath401JSONResponse struct {
+	Body    ErrorVerificationFailed
+	Headers IngestPutWithPath401ResponseHeaders
+}
+
+func (response IngestPutWithPath401JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath402ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPutWithPath402JSONResponse struct {
+	Body    ErrorQuotaExceeded
+	Headers IngestPutWithPath402ResponseHeaders
+}
+
+func (response IngestPutWithPath402JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath403ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPutWithPath403JSONResponse struct {
+	Body    ErrorForbidden
+	Headers IngestPutWithPath403ResponseHeaders
+}
+
+func (response IngestPutWithPath403JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response IngestPutWithPath404JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response IngestPutWithPath405JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath413JSONResponse struct{ TooLargeJSONResponse }
+
+func (response IngestPutWithPath413JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath429ResponseHeaders struct {
+	XRequestId string
+}
+
+type IngestPutWithPath429JSONResponse struct {
+	Body    ErrorRateLimited
+	Headers IngestPutWithPath429ResponseHeaders
+}
+
+func (response IngestPutWithPath429JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath500JSONResponse struct{ InternalJSONResponse }
+
+func (response IngestPutWithPath500JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPath503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response IngestPutWithPath503JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPathdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type IngestPutWithPathdefaultJSONResponse struct {
+	Body       Error
+	Headers    IngestPutWithPathdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response IngestPutWithPathdefaultJSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IngestPutWithPathdefaultTextResponse struct {
+	Body       string
+	Headers    IngestPutWithPathdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response IngestPutWithPathdefaultTextResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type McpRequestObject struct {
+	Body *McpJSONRequestBody
+}
+
+type McpResponseObject interface {
+	VisitMcpResponse(w http.ResponseWriter) error
+}
+
+type Mcp200ResponseHeaders struct {
+	XRequestId string
+}
+
+type Mcp200JSONResponse struct {
+	Body    JsonRpcResponse
+	Headers Mcp200ResponseHeaders
+}
+
+func (response Mcp200JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Mcp202ResponseHeaders struct {
+	XRequestId string
+}
+
+type Mcp202Response struct {
+	Headers Mcp202ResponseHeaders
+}
+
+func (response Mcp202Response) VisitMcpResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(202)
+	return nil
+}
+
+type Mcp400ResponseHeaders struct {
+	XRequestId string
+}
+
+type Mcp400JSONResponse struct {
+	Body    Error
+	Headers Mcp400ResponseHeaders
+}
+
+func (response Mcp400JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Mcp400TextResponse struct {
+	Body    string
+	Headers Mcp400ResponseHeaders
+}
+
+func (response Mcp400TextResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(400)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type Mcp401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response Mcp401JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Mcp405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response Mcp405JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Mcp413JSONResponse struct{ TooLargeJSONResponse }
+
+func (response Mcp413JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Mcp415JSONResponse struct{ UnsupportedJSONResponse }
+
+func (response Mcp415JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(415)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Mcp500JSONResponse struct{ InternalJSONResponse }
+
+func (response Mcp500JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type McpdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type McpdefaultJSONResponse struct {
+	Body       Error
+	Headers    McpdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response McpdefaultJSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type McpdefaultTextResponse struct {
+	Body       string
+	Headers    McpdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response McpdefaultTextResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type MetricsRequestObject struct {
+}
+
+type MetricsResponseObject interface {
+	VisitMetricsResponse(w http.ResponseWriter) error
+}
+
+type Metrics200ResponseHeaders struct {
+	XRequestId string
+}
+
+type Metrics200TextResponse struct {
+	Body    string
+	Headers Metrics200ResponseHeaders
+}
+
+func (response Metrics200TextResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type Metrics400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response Metrics400JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Metrics401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response Metrics401JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Metrics403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response Metrics403JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Metrics405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response Metrics405JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MetricsdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type MetricsdefaultJSONResponse struct {
+	Body       Error
+	Headers    MetricsdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response MetricsdefaultJSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MetricsdefaultTextResponse struct {
+	Body       string
+	Headers    MetricsdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response MetricsdefaultTextResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type ReadyzRequestObject struct {
+}
+
+type ReadyzResponseObject interface {
+	VisitReadyzResponse(w http.ResponseWriter) error
+}
+
+type Readyz200ResponseHeaders struct {
+	XRequestId string
+}
+
+type Readyz200JSONResponse struct {
+	Body    Status
+	Headers Readyz200ResponseHeaders
+}
+
+func (response Readyz200JSONResponse) VisitReadyzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Readyz405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response Readyz405JSONResponse) VisitReadyzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Readyz503ResponseHeaders struct {
+	XRequestId string
+}
+
+type Readyz503JSONResponse struct {
+	Body    ErrorNotReady
+	Headers Readyz503ResponseHeaders
+}
+
+func (response Readyz503JSONResponse) VisitReadyzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadyzdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type ReadyzdefaultJSONResponse struct {
+	Body       Error
+	Headers    ReadyzdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response ReadyzdefaultJSONResponse) VisitReadyzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReadyzdefaultTextResponse struct {
+	Body       string
+	Headers    ReadyzdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response ReadyzdefaultTextResponse) VisitReadyzResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type HeadReadyzRequestObject struct {
+}
+
+type HeadReadyzResponseObject interface {
+	VisitHeadReadyzResponse(w http.ResponseWriter) error
+}
+
+type HeadReadyz200ResponseHeaders struct {
+	XRequestId string
+}
+
+type HeadReadyz200Response struct {
+	Headers HeadReadyz200ResponseHeaders
+}
+
+func (response HeadReadyz200Response) VisitHeadReadyzResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(200)
+	return nil
+}
+
+type HeadReadyz405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response HeadReadyz405JSONResponse) VisitHeadReadyzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadReadyz503ResponseHeaders struct {
+	XRequestId string
+}
+
+type HeadReadyz503Response struct {
+	Headers HeadReadyz503ResponseHeaders
+}
+
+func (response HeadReadyz503Response) VisitHeadReadyzResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(503)
+	return nil
+}
+
+type HeadReadyzdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type HeadReadyzdefaultJSONResponse struct {
+	Body       Error
+	Headers    HeadReadyzdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response HeadReadyzdefaultJSONResponse) VisitHeadReadyzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadReadyzdefaultTextResponse struct {
+	Body       string
+	Headers    HeadReadyzdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response HeadReadyzdefaultTextResponse) VisitHeadReadyzResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
 }
 
 type BackupRequestObject struct {
@@ -4988,1892 +6877,6 @@ func (response RevokeTokendefaultTextResponse) VisitRevokeTokenResponse(w http.R
 	return err
 }
 
-type HealthzRequestObject struct {
-}
-
-type HealthzResponseObject interface {
-	VisitHealthzResponse(w http.ResponseWriter) error
-}
-
-type Healthz200ResponseHeaders struct {
-	XRequestId string
-}
-
-type Healthz200JSONResponse struct {
-	Body    Status
-	Headers Healthz200ResponseHeaders
-}
-
-func (response Healthz200JSONResponse) VisitHealthzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Healthz405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response Healthz405JSONResponse) VisitHealthzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HealthzdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type HealthzdefaultJSONResponse struct {
-	Body       Error
-	Headers    HealthzdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response HealthzdefaultJSONResponse) VisitHealthzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HealthzdefaultTextResponse struct {
-	Body       string
-	Headers    HealthzdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response HealthzdefaultTextResponse) VisitHealthzResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type HeadHealthzRequestObject struct {
-}
-
-type HeadHealthzResponseObject interface {
-	VisitHeadHealthzResponse(w http.ResponseWriter) error
-}
-
-type HeadHealthz200ResponseHeaders struct {
-	XRequestId string
-}
-
-type HeadHealthz200Response struct {
-	Headers HeadHealthz200ResponseHeaders
-}
-
-func (response HeadHealthz200Response) VisitHeadHealthzResponse(w http.ResponseWriter) error {
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(200)
-	return nil
-}
-
-type HeadHealthz405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response HeadHealthz405JSONResponse) VisitHeadHealthzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadHealthzdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type HeadHealthzdefaultJSONResponse struct {
-	Body       Error
-	Headers    HeadHealthzdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response HeadHealthzdefaultJSONResponse) VisitHeadHealthzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadHealthzdefaultTextResponse struct {
-	Body       string
-	Headers    HeadHealthzdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response HeadHealthzdefaultTextResponse) VisitHeadHealthzResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type IngestRequestObject struct {
-	Key         string `json:"key"`
-	ContentType string
-	Body        io.Reader
-}
-
-type IngestResponseObject interface {
-	VisitIngestResponse(w http.ResponseWriter) error
-}
-
-type Ingest200ResponseHeaders struct {
-	XRequestId string
-}
-
-type Ingest200JSONResponse struct {
-	Body    Accepted
-	Headers Ingest200ResponseHeaders
-}
-
-func (response Ingest200JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest200TextResponse struct {
-	Body    string
-	Headers Ingest200ResponseHeaders
-}
-
-func (response Ingest200TextResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(200)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type Ingest400ResponseHeaders struct {
-	XRequestId string
-}
-
-type Ingest400JSONResponse struct {
-	Body    ErrorBadRequest
-	Headers Ingest400ResponseHeaders
-}
-
-func (response Ingest400JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest401ResponseHeaders struct {
-	XRequestId string
-}
-
-type Ingest401JSONResponse struct {
-	Body    ErrorVerificationFailed
-	Headers Ingest401ResponseHeaders
-}
-
-func (response Ingest401JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest402ResponseHeaders struct {
-	XRequestId string
-}
-
-type Ingest402JSONResponse struct {
-	Body    ErrorQuotaExceeded
-	Headers Ingest402ResponseHeaders
-}
-
-func (response Ingest402JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(402)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest403ResponseHeaders struct {
-	XRequestId string
-}
-
-type Ingest403JSONResponse struct {
-	Body    ErrorForbidden
-	Headers Ingest403ResponseHeaders
-}
-
-func (response Ingest403JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response Ingest404JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response Ingest405JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest413JSONResponse struct{ TooLargeJSONResponse }
-
-func (response Ingest413JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(413)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest429ResponseHeaders struct {
-	XRequestId string
-}
-
-type Ingest429JSONResponse struct {
-	Body    ErrorRateLimited
-	Headers Ingest429ResponseHeaders
-}
-
-func (response Ingest429JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(429)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest500JSONResponse struct{ InternalJSONResponse }
-
-func (response Ingest500JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Ingest503JSONResponse struct{ OverloadedJSONResponse }
-
-func (response Ingest503JSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(503)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type IngestdefaultJSONResponse struct {
-	Body       Error
-	Headers    IngestdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response IngestdefaultJSONResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestdefaultTextResponse struct {
-	Body       string
-	Headers    IngestdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response IngestdefaultTextResponse) VisitIngestResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type IngestPutRequestObject struct {
-	Key         string `json:"key"`
-	ContentType string
-	Body        io.Reader
-}
-
-type IngestPutResponseObject interface {
-	VisitIngestPutResponse(w http.ResponseWriter) error
-}
-
-type IngestPut200ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPut200JSONResponse struct {
-	Body    Accepted
-	Headers IngestPut200ResponseHeaders
-}
-
-func (response IngestPut200JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut200TextResponse struct {
-	Body    string
-	Headers IngestPut200ResponseHeaders
-}
-
-func (response IngestPut200TextResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(200)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type IngestPut400ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPut400JSONResponse struct {
-	Body    ErrorBadRequest
-	Headers IngestPut400ResponseHeaders
-}
-
-func (response IngestPut400JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut401ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPut401JSONResponse struct {
-	Body    ErrorVerificationFailed
-	Headers IngestPut401ResponseHeaders
-}
-
-func (response IngestPut401JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut402ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPut402JSONResponse struct {
-	Body    ErrorQuotaExceeded
-	Headers IngestPut402ResponseHeaders
-}
-
-func (response IngestPut402JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(402)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut403ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPut403JSONResponse struct {
-	Body    ErrorForbidden
-	Headers IngestPut403ResponseHeaders
-}
-
-func (response IngestPut403JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response IngestPut404JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response IngestPut405JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut413JSONResponse struct{ TooLargeJSONResponse }
-
-func (response IngestPut413JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(413)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut429ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPut429JSONResponse struct {
-	Body    ErrorRateLimited
-	Headers IngestPut429ResponseHeaders
-}
-
-func (response IngestPut429JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(429)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut500JSONResponse struct{ InternalJSONResponse }
-
-func (response IngestPut500JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPut503JSONResponse struct{ OverloadedJSONResponse }
-
-func (response IngestPut503JSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(503)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type IngestPutdefaultJSONResponse struct {
-	Body       Error
-	Headers    IngestPutdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response IngestPutdefaultJSONResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutdefaultTextResponse struct {
-	Body       string
-	Headers    IngestPutdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response IngestPutdefaultTextResponse) VisitIngestPutResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type IngestWithPathRequestObject struct {
-	Key         string `json:"key"`
-	Rest        string `json:"rest,omitempty"`
-	ContentType string
-	Body        io.Reader
-}
-
-type IngestWithPathResponseObject interface {
-	VisitIngestWithPathResponse(w http.ResponseWriter) error
-}
-
-type IngestWithPath200ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestWithPath200JSONResponse struct {
-	Body    Accepted
-	Headers IngestWithPath200ResponseHeaders
-}
-
-func (response IngestWithPath200JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath200TextResponse struct {
-	Body    string
-	Headers IngestWithPath200ResponseHeaders
-}
-
-func (response IngestWithPath200TextResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(200)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type IngestWithPath400ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestWithPath400JSONResponse struct {
-	Body    ErrorBadRequest
-	Headers IngestWithPath400ResponseHeaders
-}
-
-func (response IngestWithPath400JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath401ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestWithPath401JSONResponse struct {
-	Body    ErrorVerificationFailed
-	Headers IngestWithPath401ResponseHeaders
-}
-
-func (response IngestWithPath401JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath402ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestWithPath402JSONResponse struct {
-	Body    ErrorQuotaExceeded
-	Headers IngestWithPath402ResponseHeaders
-}
-
-func (response IngestWithPath402JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(402)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath403ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestWithPath403JSONResponse struct {
-	Body    ErrorForbidden
-	Headers IngestWithPath403ResponseHeaders
-}
-
-func (response IngestWithPath403JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response IngestWithPath404JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response IngestWithPath405JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath413JSONResponse struct{ TooLargeJSONResponse }
-
-func (response IngestWithPath413JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(413)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath429ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestWithPath429JSONResponse struct {
-	Body    ErrorRateLimited
-	Headers IngestWithPath429ResponseHeaders
-}
-
-func (response IngestWithPath429JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(429)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath500JSONResponse struct{ InternalJSONResponse }
-
-func (response IngestWithPath500JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPath503JSONResponse struct{ OverloadedJSONResponse }
-
-func (response IngestWithPath503JSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(503)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPathdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type IngestWithPathdefaultJSONResponse struct {
-	Body       Error
-	Headers    IngestWithPathdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response IngestWithPathdefaultJSONResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestWithPathdefaultTextResponse struct {
-	Body       string
-	Headers    IngestWithPathdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response IngestWithPathdefaultTextResponse) VisitIngestWithPathResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type IngestPutWithPathRequestObject struct {
-	Key         string `json:"key"`
-	Rest        string `json:"rest,omitempty"`
-	ContentType string
-	Body        io.Reader
-}
-
-type IngestPutWithPathResponseObject interface {
-	VisitIngestPutWithPathResponse(w http.ResponseWriter) error
-}
-
-type IngestPutWithPath200ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPutWithPath200JSONResponse struct {
-	Body    Accepted
-	Headers IngestPutWithPath200ResponseHeaders
-}
-
-func (response IngestPutWithPath200JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath200TextResponse struct {
-	Body    string
-	Headers IngestPutWithPath200ResponseHeaders
-}
-
-func (response IngestPutWithPath200TextResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(200)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type IngestPutWithPath400ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPutWithPath400JSONResponse struct {
-	Body    ErrorBadRequest
-	Headers IngestPutWithPath400ResponseHeaders
-}
-
-func (response IngestPutWithPath400JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath401ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPutWithPath401JSONResponse struct {
-	Body    ErrorVerificationFailed
-	Headers IngestPutWithPath401ResponseHeaders
-}
-
-func (response IngestPutWithPath401JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath402ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPutWithPath402JSONResponse struct {
-	Body    ErrorQuotaExceeded
-	Headers IngestPutWithPath402ResponseHeaders
-}
-
-func (response IngestPutWithPath402JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(402)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath403ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPutWithPath403JSONResponse struct {
-	Body    ErrorForbidden
-	Headers IngestPutWithPath403ResponseHeaders
-}
-
-func (response IngestPutWithPath403JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response IngestPutWithPath404JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response IngestPutWithPath405JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath413JSONResponse struct{ TooLargeJSONResponse }
-
-func (response IngestPutWithPath413JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(413)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath429ResponseHeaders struct {
-	XRequestId string
-}
-
-type IngestPutWithPath429JSONResponse struct {
-	Body    ErrorRateLimited
-	Headers IngestPutWithPath429ResponseHeaders
-}
-
-func (response IngestPutWithPath429JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(429)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath500JSONResponse struct{ InternalJSONResponse }
-
-func (response IngestPutWithPath500JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPath503JSONResponse struct{ OverloadedJSONResponse }
-
-func (response IngestPutWithPath503JSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(503)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPathdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type IngestPutWithPathdefaultJSONResponse struct {
-	Body       Error
-	Headers    IngestPutWithPathdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response IngestPutWithPathdefaultJSONResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type IngestPutWithPathdefaultTextResponse struct {
-	Body       string
-	Headers    IngestPutWithPathdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response IngestPutWithPathdefaultTextResponse) VisitIngestPutWithPathResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type McpRequestObject struct {
-	Body *McpJSONRequestBody
-}
-
-type McpResponseObject interface {
-	VisitMcpResponse(w http.ResponseWriter) error
-}
-
-type Mcp200ResponseHeaders struct {
-	XRequestId string
-}
-
-type Mcp200JSONResponse struct {
-	Body    JsonRpcResponse
-	Headers Mcp200ResponseHeaders
-}
-
-func (response Mcp200JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Mcp202ResponseHeaders struct {
-	XRequestId string
-}
-
-type Mcp202Response struct {
-	Headers Mcp202ResponseHeaders
-}
-
-func (response Mcp202Response) VisitMcpResponse(w http.ResponseWriter) error {
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(202)
-	return nil
-}
-
-type Mcp400ResponseHeaders struct {
-	XRequestId string
-}
-
-type Mcp400JSONResponse struct {
-	Body    Error
-	Headers Mcp400ResponseHeaders
-}
-
-func (response Mcp400JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Mcp400TextResponse struct {
-	Body    string
-	Headers Mcp400ResponseHeaders
-}
-
-func (response Mcp400TextResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(400)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type Mcp401JSONResponse struct{ UnauthenticatedJSONResponse }
-
-func (response Mcp401JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Mcp405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response Mcp405JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Mcp413JSONResponse struct{ TooLargeJSONResponse }
-
-func (response Mcp413JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(413)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Mcp415JSONResponse struct{ UnsupportedJSONResponse }
-
-func (response Mcp415JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(415)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Mcp500JSONResponse struct{ InternalJSONResponse }
-
-func (response Mcp500JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type McpdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type McpdefaultJSONResponse struct {
-	Body       Error
-	Headers    McpdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response McpdefaultJSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type McpdefaultTextResponse struct {
-	Body       string
-	Headers    McpdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response McpdefaultTextResponse) VisitMcpResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type MetricsRequestObject struct {
-}
-
-type MetricsResponseObject interface {
-	VisitMetricsResponse(w http.ResponseWriter) error
-}
-
-type Metrics200ResponseHeaders struct {
-	XRequestId string
-}
-
-type Metrics200TextResponse struct {
-	Body    string
-	Headers Metrics200ResponseHeaders
-}
-
-func (response Metrics200TextResponse) VisitMetricsResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(200)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type Metrics400JSONResponse struct{ BadRequestJSONResponse }
-
-func (response Metrics400JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Metrics401JSONResponse struct{ UnauthenticatedJSONResponse }
-
-func (response Metrics401JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Metrics403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response Metrics403JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Metrics405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response Metrics405JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type MetricsdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type MetricsdefaultJSONResponse struct {
-	Body       Error
-	Headers    MetricsdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response MetricsdefaultJSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type MetricsdefaultTextResponse struct {
-	Body       string
-	Headers    MetricsdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response MetricsdefaultTextResponse) VisitMetricsResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type ReadyzRequestObject struct {
-}
-
-type ReadyzResponseObject interface {
-	VisitReadyzResponse(w http.ResponseWriter) error
-}
-
-type Readyz200ResponseHeaders struct {
-	XRequestId string
-}
-
-type Readyz200JSONResponse struct {
-	Body    Status
-	Headers Readyz200ResponseHeaders
-}
-
-func (response Readyz200JSONResponse) VisitReadyzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Readyz405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response Readyz405JSONResponse) VisitReadyzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Readyz503ResponseHeaders struct {
-	XRequestId string
-}
-
-type Readyz503JSONResponse struct {
-	Body    ErrorNotReady
-	Headers Readyz503ResponseHeaders
-}
-
-func (response Readyz503JSONResponse) VisitReadyzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(503)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ReadyzdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type ReadyzdefaultJSONResponse struct {
-	Body       Error
-	Headers    ReadyzdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response ReadyzdefaultJSONResponse) VisitReadyzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ReadyzdefaultTextResponse struct {
-	Body       string
-	Headers    ReadyzdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response ReadyzdefaultTextResponse) VisitReadyzResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
-type HeadReadyzRequestObject struct {
-}
-
-type HeadReadyzResponseObject interface {
-	VisitHeadReadyzResponse(w http.ResponseWriter) error
-}
-
-type HeadReadyz200ResponseHeaders struct {
-	XRequestId string
-}
-
-type HeadReadyz200Response struct {
-	Headers HeadReadyz200ResponseHeaders
-}
-
-func (response HeadReadyz200Response) VisitHeadReadyzResponse(w http.ResponseWriter) error {
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(200)
-	return nil
-}
-
-type HeadReadyz405JSONResponse struct{ MethodNotAllowedJSONResponse }
-
-func (response HeadReadyz405JSONResponse) VisitHeadReadyzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	setContentLength(w, &buf)
-	w.WriteHeader(405)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadReadyz503ResponseHeaders struct {
-	XRequestId string
-}
-
-type HeadReadyz503Response struct {
-	Headers HeadReadyz503ResponseHeaders
-}
-
-func (response HeadReadyz503Response) VisitHeadReadyzResponse(w http.ResponseWriter) error {
-	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
-	w.WriteHeader(503)
-	return nil
-}
-
-type HeadReadyzdefaultResponseHeaders struct {
-	XRequestId *string
-}
-
-type HeadReadyzdefaultJSONResponse struct {
-	Body       Error
-	Headers    HeadReadyzdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response HeadReadyzdefaultJSONResponse) VisitHeadReadyzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := encodeJSON(&buf, response.Body); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	setContentLength(w, &buf)
-	w.WriteHeader(response.StatusCode)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type HeadReadyzdefaultTextResponse struct {
-	Body       string
-	Headers    HeadReadyzdefaultResponseHeaders
-	StatusCode int
-}
-
-func (response HeadReadyzdefaultTextResponse) VisitHeadReadyzResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	if response.Headers.XRequestId != nil {
-		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
-	}
-	w.WriteHeader(response.StatusCode)
-
-	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
-	return err
-}
-
 type GetInboxRequestObject struct {
 	Slug Slug `json:"slug"`
 }
@@ -8537,42 +8540,6 @@ func (response StreamMessagesdefaultTextResponse) VisitStreamMessagesResponse(w 
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
-	// Backup Download a consistent copy of the database
-	// (GET /admin/backup)
-	Backup(ctx context.Context, request BackupRequestObject) (BackupResponseObject, error)
-	// ListInboxes List inboxes
-	// (GET /admin/inboxes)
-	ListInboxes(ctx context.Context, request ListInboxesRequestObject) (ListInboxesResponseObject, error)
-	// CreateInbox Create an inbox
-	// (POST /admin/inboxes)
-	CreateInbox(ctx context.Context, request CreateInboxRequestObject) (CreateInboxResponseObject, error)
-	// DeleteInbox Delete an inbox and its messages
-	// (DELETE /admin/inboxes/{slug})
-	DeleteInbox(ctx context.Context, request DeleteInboxRequestObject) (DeleteInboxResponseObject, error)
-	// ShowInbox Show an inbox
-	// (GET /admin/inboxes/{slug})
-	ShowInbox(ctx context.Context, request ShowInboxRequestObject) (ShowInboxResponseObject, error)
-	// UpdateInbox Change an inbox's settings
-	// (PATCH /admin/inboxes/{slug})
-	UpdateInbox(ctx context.Context, request UpdateInboxRequestObject) (UpdateInboxResponseObject, error)
-	// RotateIngestKey Issue a new ingest key
-	// (POST /admin/inboxes/{slug}/rotate-ingest-key)
-	RotateIngestKey(ctx context.Context, request RotateIngestKeyRequestObject) (RotateIngestKeyResponseObject, error)
-	// SetVerifierSecret Set or replace the verifier secret
-	// (PUT /admin/inboxes/{slug}/secret)
-	SetVerifierSecret(ctx context.Context, request SetVerifierSecretRequestObject) (SetVerifierSecretResponseObject, error)
-	// RunRetention Apply retention now
-	// (POST /admin/retention/run)
-	RunRetention(ctx context.Context, request RunRetentionRequestObject) (RunRetentionResponseObject, error)
-	// ListTokens List tokens
-	// (GET /admin/tokens)
-	ListTokens(ctx context.Context, request ListTokensRequestObject) (ListTokensResponseObject, error)
-	// CreateToken Issue a token
-	// (POST /admin/tokens)
-	CreateToken(ctx context.Context, request CreateTokenRequestObject) (CreateTokenResponseObject, error)
-	// RevokeToken Revoke a token
-	// (DELETE /admin/tokens/{id})
-	RevokeToken(ctx context.Context, request RevokeTokenRequestObject) (RevokeTokenResponseObject, error)
 	// Healthz Liveness
 	// (GET /healthz)
 	Healthz(ctx context.Context, request HealthzRequestObject) (HealthzResponseObject, error)
@@ -8603,6 +8570,42 @@ type StrictServerInterface interface {
 	// HeadReadyz Headers only: Readiness
 	// (HEAD /readyz)
 	HeadReadyz(ctx context.Context, request HeadReadyzRequestObject) (HeadReadyzResponseObject, error)
+	// Backup Download a consistent copy of the database
+	// (GET /v1/admin/backup)
+	Backup(ctx context.Context, request BackupRequestObject) (BackupResponseObject, error)
+	// ListInboxes List inboxes
+	// (GET /v1/admin/inboxes)
+	ListInboxes(ctx context.Context, request ListInboxesRequestObject) (ListInboxesResponseObject, error)
+	// CreateInbox Create an inbox
+	// (POST /v1/admin/inboxes)
+	CreateInbox(ctx context.Context, request CreateInboxRequestObject) (CreateInboxResponseObject, error)
+	// DeleteInbox Delete an inbox and its messages
+	// (DELETE /v1/admin/inboxes/{slug})
+	DeleteInbox(ctx context.Context, request DeleteInboxRequestObject) (DeleteInboxResponseObject, error)
+	// ShowInbox Show an inbox
+	// (GET /v1/admin/inboxes/{slug})
+	ShowInbox(ctx context.Context, request ShowInboxRequestObject) (ShowInboxResponseObject, error)
+	// UpdateInbox Change an inbox's settings
+	// (PATCH /v1/admin/inboxes/{slug})
+	UpdateInbox(ctx context.Context, request UpdateInboxRequestObject) (UpdateInboxResponseObject, error)
+	// RotateIngestKey Issue a new ingest key
+	// (POST /v1/admin/inboxes/{slug}/rotate-ingest-key)
+	RotateIngestKey(ctx context.Context, request RotateIngestKeyRequestObject) (RotateIngestKeyResponseObject, error)
+	// SetVerifierSecret Set or replace the verifier secret
+	// (PUT /v1/admin/inboxes/{slug}/secret)
+	SetVerifierSecret(ctx context.Context, request SetVerifierSecretRequestObject) (SetVerifierSecretResponseObject, error)
+	// RunRetention Apply retention now
+	// (POST /v1/admin/retention/run)
+	RunRetention(ctx context.Context, request RunRetentionRequestObject) (RunRetentionResponseObject, error)
+	// ListTokens List tokens
+	// (GET /v1/admin/tokens)
+	ListTokens(ctx context.Context, request ListTokensRequestObject) (ListTokensResponseObject, error)
+	// CreateToken Issue a token
+	// (POST /v1/admin/tokens)
+	CreateToken(ctx context.Context, request CreateTokenRequestObject) (CreateTokenResponseObject, error)
+	// RevokeToken Revoke a token
+	// (DELETE /v1/admin/tokens/{id})
+	RevokeToken(ctx context.Context, request RevokeTokenRequestObject) (RevokeTokenResponseObject, error)
 	// GetInbox Inbox metadata
 	// (GET /v1/inboxes/{slug})
 	GetInbox(ctx context.Context, request GetInboxRequestObject) (GetInboxResponseObject, error)
@@ -8669,6 +8672,275 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// Healthz operation middleware
+func (sh *strictHandler) Healthz(w http.ResponseWriter, r *http.Request) {
+	var request HealthzRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Healthz(ctx, request.(HealthzRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Healthz")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(HealthzResponseObject); ok {
+		if err := validResponse.VisitHealthzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// HeadHealthz operation middleware
+func (sh *strictHandler) HeadHealthz(w http.ResponseWriter, r *http.Request) {
+	var request HeadHealthzRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.HeadHealthz(ctx, request.(HeadHealthzRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "HeadHealthz")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(HeadHealthzResponseObject); ok {
+		if err := validResponse.VisitHeadHealthzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Ingest operation middleware
+func (sh *strictHandler) Ingest(w http.ResponseWriter, r *http.Request, key string) {
+	var request IngestRequestObject
+
+	request.Key = key
+	request.ContentType = r.Header.Get("Content-Type")
+
+	request.Body = r.Body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Ingest(ctx, request.(IngestRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Ingest")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IngestResponseObject); ok {
+		if err := validResponse.VisitIngestResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// IngestPut operation middleware
+func (sh *strictHandler) IngestPut(w http.ResponseWriter, r *http.Request, key string) {
+	var request IngestPutRequestObject
+
+	request.Key = key
+	request.ContentType = r.Header.Get("Content-Type")
+
+	request.Body = r.Body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.IngestPut(ctx, request.(IngestPutRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "IngestPut")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IngestPutResponseObject); ok {
+		if err := validResponse.VisitIngestPutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// IngestWithPath operation middleware
+func (sh *strictHandler) IngestWithPath(w http.ResponseWriter, r *http.Request, key string, rest string) {
+	var request IngestWithPathRequestObject
+
+	request.Key = key
+	request.Rest = rest
+	request.ContentType = r.Header.Get("Content-Type")
+
+	request.Body = r.Body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.IngestWithPath(ctx, request.(IngestWithPathRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "IngestWithPath")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IngestWithPathResponseObject); ok {
+		if err := validResponse.VisitIngestWithPathResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// IngestPutWithPath operation middleware
+func (sh *strictHandler) IngestPutWithPath(w http.ResponseWriter, r *http.Request, key string, rest string) {
+	var request IngestPutWithPathRequestObject
+
+	request.Key = key
+	request.Rest = rest
+	request.ContentType = r.Header.Get("Content-Type")
+
+	request.Body = r.Body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.IngestPutWithPath(ctx, request.(IngestPutWithPathRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "IngestPutWithPath")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IngestPutWithPathResponseObject); ok {
+		if err := validResponse.VisitIngestPutWithPathResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Mcp operation middleware
+func (sh *strictHandler) Mcp(w http.ResponseWriter, r *http.Request) {
+	var request McpRequestObject
+
+	var body McpJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Mcp(ctx, request.(McpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Mcp")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(McpResponseObject); ok {
+		if err := validResponse.VisitMcpResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Metrics operation middleware
+func (sh *strictHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+	var request MetricsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Metrics(ctx, request.(MetricsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Metrics")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MetricsResponseObject); ok {
+		if err := validResponse.VisitMetricsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Readyz operation middleware
+func (sh *strictHandler) Readyz(w http.ResponseWriter, r *http.Request) {
+	var request ReadyzRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Readyz(ctx, request.(ReadyzRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Readyz")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReadyzResponseObject); ok {
+		if err := validResponse.VisitReadyzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// HeadReadyz operation middleware
+func (sh *strictHandler) HeadReadyz(w http.ResponseWriter, r *http.Request) {
+	var request HeadReadyzRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.HeadReadyz(ctx, request.(HeadReadyzRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "HeadReadyz")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(HeadReadyzResponseObject); ok {
+		if err := validResponse.VisitHeadReadyzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // Backup operation middleware
@@ -8996,275 +9268,6 @@ func (sh *strictHandler) RevokeToken(w http.ResponseWriter, r *http.Request, id 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeTokenResponseObject); ok {
 		if err := validResponse.VisitRevokeTokenResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// Healthz operation middleware
-func (sh *strictHandler) Healthz(w http.ResponseWriter, r *http.Request) {
-	var request HealthzRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.Healthz(ctx, request.(HealthzRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "Healthz")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(HealthzResponseObject); ok {
-		if err := validResponse.VisitHealthzResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// HeadHealthz operation middleware
-func (sh *strictHandler) HeadHealthz(w http.ResponseWriter, r *http.Request) {
-	var request HeadHealthzRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.HeadHealthz(ctx, request.(HeadHealthzRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "HeadHealthz")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(HeadHealthzResponseObject); ok {
-		if err := validResponse.VisitHeadHealthzResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// Ingest operation middleware
-func (sh *strictHandler) Ingest(w http.ResponseWriter, r *http.Request, key string) {
-	var request IngestRequestObject
-
-	request.Key = key
-	request.ContentType = r.Header.Get("Content-Type")
-
-	request.Body = r.Body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.Ingest(ctx, request.(IngestRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "Ingest")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(IngestResponseObject); ok {
-		if err := validResponse.VisitIngestResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// IngestPut operation middleware
-func (sh *strictHandler) IngestPut(w http.ResponseWriter, r *http.Request, key string) {
-	var request IngestPutRequestObject
-
-	request.Key = key
-	request.ContentType = r.Header.Get("Content-Type")
-
-	request.Body = r.Body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.IngestPut(ctx, request.(IngestPutRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "IngestPut")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(IngestPutResponseObject); ok {
-		if err := validResponse.VisitIngestPutResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// IngestWithPath operation middleware
-func (sh *strictHandler) IngestWithPath(w http.ResponseWriter, r *http.Request, key string, rest string) {
-	var request IngestWithPathRequestObject
-
-	request.Key = key
-	request.Rest = rest
-	request.ContentType = r.Header.Get("Content-Type")
-
-	request.Body = r.Body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.IngestWithPath(ctx, request.(IngestWithPathRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "IngestWithPath")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(IngestWithPathResponseObject); ok {
-		if err := validResponse.VisitIngestWithPathResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// IngestPutWithPath operation middleware
-func (sh *strictHandler) IngestPutWithPath(w http.ResponseWriter, r *http.Request, key string, rest string) {
-	var request IngestPutWithPathRequestObject
-
-	request.Key = key
-	request.Rest = rest
-	request.ContentType = r.Header.Get("Content-Type")
-
-	request.Body = r.Body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.IngestPutWithPath(ctx, request.(IngestPutWithPathRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "IngestPutWithPath")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(IngestPutWithPathResponseObject); ok {
-		if err := validResponse.VisitIngestPutWithPathResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// Mcp operation middleware
-func (sh *strictHandler) Mcp(w http.ResponseWriter, r *http.Request) {
-	var request McpRequestObject
-
-	var body McpJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.Mcp(ctx, request.(McpRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "Mcp")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(McpResponseObject); ok {
-		if err := validResponse.VisitMcpResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// Metrics operation middleware
-func (sh *strictHandler) Metrics(w http.ResponseWriter, r *http.Request) {
-	var request MetricsRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.Metrics(ctx, request.(MetricsRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "Metrics")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(MetricsResponseObject); ok {
-		if err := validResponse.VisitMetricsResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// Readyz operation middleware
-func (sh *strictHandler) Readyz(w http.ResponseWriter, r *http.Request) {
-	var request ReadyzRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.Readyz(ctx, request.(ReadyzRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "Readyz")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ReadyzResponseObject); ok {
-		if err := validResponse.VisitReadyzResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// HeadReadyz operation middleware
-func (sh *strictHandler) HeadReadyz(w http.ResponseWriter, r *http.Request) {
-	var request HeadReadyzRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.HeadReadyz(ctx, request.(HeadReadyzRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "HeadReadyz")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(HeadReadyzResponseObject); ok {
-		if err := validResponse.VisitHeadReadyzResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

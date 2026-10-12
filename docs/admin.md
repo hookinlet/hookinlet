@@ -28,7 +28,7 @@ The admin API is on the same address as ingest by default. Two settings take it
 off the internet:
 
 - `--admin-listen-addr 127.0.0.1:9090` serves it on its own address and nowhere
-  else; the public address answers `404` for `/admin/...`, and the admin address
+  else; the public address answers `404` for `/v1/admin/...`, and the admin address
   answers `404` for everything that is not admin. This moves the *admin API*; the
   admin token still reads every inbox through the read API and MCP on the public
   address, so keep it as secret as before and give agents their own tokens. Reach it over an SSH tunnel, a
@@ -48,18 +48,18 @@ shown exactly once is a new agent token, in the response that creates it.
 
 | Method and path | Purpose |
 |---|---|
-| `POST /admin/inboxes` | Create an inbox. Returns its first agent token (named `default`) once. |
-| `GET /admin/inboxes` | List inboxes, 100 at a time by default and at most 1000 (`?limit=`; follow `next`). |
-| `GET /admin/inboxes/{slug}` | Show one, with its message count. |
-| `PATCH /admin/inboxes/{slug}` | Change settings. |
-| `PUT /admin/inboxes/{slug}/secret` | Set or replace the verifier secret. |
-| `POST /admin/inboxes/{slug}/rotate-ingest-key` | A new random ingest key. The old URL stops working at once; give senders the new one. |
-| `DELETE /admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). The inbox is gone as far as readers, senders and tokens are concerned the moment the call starts; its messages are then removed in small batches so that other inboxes keep receiving. If the server stops part way, the retention sweep finishes the job (`hookinlet retention run` does it at once, and is the way to do it if the sweep is off); until then the slug and ingest key are still taken. |
-| `POST /admin/tokens` | Issue an agent token for some inboxes (`inboxes`: a list of slugs) or all of them (`all_inboxes`). Returns the token once. |
-| `GET /admin/tokens` | List tokens, never their secrets (`?inbox=slug` for those that can read an inbox; `?limit=`; follow `next`). |
-| `DELETE /admin/tokens/{id}` | Revoke a token (`204`). It stops working at once. |
-| `POST /admin/retention/run` | Apply retention now. Returns `{"deleted": N}`. |
-| `GET /admin/backup` | Download a consistent copy of the database. |
+| `POST /v1/admin/inboxes` | Create an inbox. Returns its first agent token (named `default`) once. |
+| `GET /v1/admin/inboxes` | List inboxes, 100 at a time by default and at most 1000 (`?limit=`; follow `next`). |
+| `GET /v1/admin/inboxes/{slug}` | Show one, with its message count. |
+| `PATCH /v1/admin/inboxes/{slug}` | Change settings. |
+| `PUT /v1/admin/inboxes/{slug}/secret` | Set or replace the verifier secret. |
+| `POST /v1/admin/inboxes/{slug}/rotate-ingest-key` | A new random ingest key. The old URL stops working at once; give senders the new one. |
+| `DELETE /v1/admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). The inbox is gone as far as readers, senders and tokens are concerned the moment the call starts; its messages are then removed in small batches so that other inboxes keep receiving. If the server stops part way, the retention sweep finishes the job (`hookinlet retention run` does it at once, and is the way to do it if the sweep is off); until then the slug and ingest key are still taken. |
+| `POST /v1/admin/tokens` | Issue an agent token for some inboxes (`inboxes`: a list of slugs) or all of them (`all_inboxes`). Returns the token once. |
+| `GET /v1/admin/tokens` | List tokens, never their secrets (`?inbox=slug` for those that can read an inbox; `?limit=`; follow `next`). |
+| `DELETE /v1/admin/tokens/{id}` | Revoke a token (`204`). It stops working at once. |
+| `POST /v1/admin/retention/run` | Apply retention now. Returns `{"deleted": N}`. |
+| `GET /v1/admin/backup` | Download a consistent copy of the database. |
 | `GET /metrics` | Prometheus metrics (see [deploying](deploying.md#metrics)). |
 
 Request bodies are JSON (`Content-Type: application/json`, else `415`), at most
@@ -75,7 +75,7 @@ Store cannot make backups.
 
 <!-- exercise -->
 ```sh
-curl -s -X POST "$BASE/admin/inboxes" \
+curl -s -X POST "$BASE/v1/admin/inboxes" \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"slug": "stripe-api", "verifier": "stripe", "verifier_secret": "whsec_example",
        "retention_days": 30, "event_type_pointer": "/type"}'
@@ -155,7 +155,7 @@ leaves the rest.
 
 <!-- exercise -->
 ```sh
-curl -s -X POST "$BASE/admin/tokens" \
+curl -s -X POST "$BASE/v1/admin/tokens" \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "billing-agent", "inboxes": ["stripe-api"]}'
 # → {"record": {"id": 2, "name": "billing-agent", "all_inboxes": false, "inboxes": ["stripe-api"], …}, "token": "hki_…"}
@@ -380,7 +380,7 @@ pruned; it simply finds nothing older.
 The server applies every inbox's policy once when it starts (after it is
 listening, so startup is not delayed) and then every
 `HOOKINLET_RETENTION_INTERVAL` (default `1h`, at least `1s`, or `off` to run
-only on request). `POST /admin/retention/run` and
+only on request). `POST /v1/admin/retention/run` and
 `hookinlet retention run` do the same on demand; only one sweep runs at a time,
 and a second request while one is running gets `409`.
 
@@ -392,7 +392,7 @@ the next one.
 
 ## Backups
 
-`GET /admin/backup` (or `hookinlet backup --out FILE`) returns a complete,
+`GET /v1/admin/backup` (or `hookinlet backup --out FILE`) returns a complete,
 consistent copy of the database as it was at one moment, taken while deliveries
 carry on. It contains every inbox, every message, the agent token **hashes**, and
 the verifier secrets **still sealed**; it is useless without the master key and
@@ -417,7 +417,7 @@ like: `sqlite3 backup.db 'PRAGMA integrity_check'` should print `ok`.
 
 **Epochs.** A restored server may hand out sequence numbers that differ from the
 ones the original handed out after the backup was taken, so cursors held from before
-must not be believed. Each snapshot from `GET /admin/backup` or `hookinlet backup`
+must not be believed. Each snapshot from `GET /v1/admin/backup` or `hookinlet backup`
 therefore has a **new epoch** for every inbox, and readers using
 [`epoch`](api.md#epochs-and-gaps) are told to start again. Two cases the snapshot
 cannot cover: a **copy of the data directory** made with the server stopped, and

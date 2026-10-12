@@ -18,16 +18,16 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Authenticator`, `Principal` | Says who a request is and what it may read or administer. | `pkg/auth/token` | `AuthenticatorSuite` |
 | `SecretBox` | Seals and opens verifier secrets, bound to a context (the inbox's slug). | `pkg/secretbox` | `SecretBoxSuite` |
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
-| `Backupper` (optional) | A consistent snapshot of the Store, for `GET /admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
+| `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they
-are absent: no `Backupper` means `GET /admin/backup` answers `501`.
+are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`.
 
 ## Putting them together
 
-`server.New` takes an `Options`. Only `Addr` and `Store` are required, but the
+`server.New` takes an `Options`. Only `Store` is required (and `Addr`, if you call `Run`), but the
 read API, the admin API, SSE and MCP are served only when there is an
 `Authenticator`, since there is no safe default for who may read.
 
@@ -53,11 +53,16 @@ starting point. `Options` has the rest (limits, timeouts, `TrustedProxies`,
 its default is.
 
 `srv.Handler()` returns the whole `http.Handler`, if you would rather mount it in
-a server of your own than call `Run`. `Run` and `Serve` do two things the handler
-alone does not: they start the retention schedule, and on shutdown they end open
-streams and MCP waits first. If you serve the handler yourself, call
-`srv.Shutdown(ctx)` to end the streams, and run retention yourself
-(`POST /admin/retention/run`, or `Store.Prune`) on whatever schedule you want.
+a server of your own than call `Run` (no `Addr` is needed then). `Run` and `Serve` do
+two things the handler alone does not: they start the retention schedule, and on
+shutdown they end open streams and MCP waits first. If you serve the handler yourself,
+run `srv.Maintain(ctx)` in a goroutine for the schedule (it also finishes any delete
+that was cut short), and call `srv.Shutdown(ctx)` to end the streams.
+
+Every numeric and duration option follows one rule, written in `Options`' comment and
+in [Stability](stability.md#the-go-packages): zero is the default, and a negative
+number is an error unless it turns a bound off (`RetentionInterval`,
+`IngestMemoryBudget`).
 
 ## Writing hooks
 

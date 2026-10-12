@@ -113,11 +113,11 @@ func TestOpenAPIRequestBodiesAreHeldToTheirSchemas(t *testing.T) {
 		okStatus     int
 	}
 	targets := []target{
-		{"createInbox", "POST", func(int) string { return "/admin/inboxes" }, func(n int) map[string]any {
+		{"createInbox", "POST", func(int) string { return "/v1/admin/inboxes" }, func(n int) map[string]any {
 			return map[string]any{"slug": fmt.Sprintf("neg-%03d", n), "verifier": "none"}
 		}, 201},
-		{"updateInbox", "PATCH", func(int) string { return "/admin/inboxes/agent-a" }, func(int) map[string]any { return map[string]any{"name": "ok"} }, 200},
-		{"setVerifierSecret", "PUT", func(int) string { return "/admin/inboxes/agent-a/secret" }, func(int) map[string]any { return map[string]any{"secret": "ok"} }, 200},
+		{"updateInbox", "PATCH", func(int) string { return "/v1/admin/inboxes/agent-a" }, func(int) map[string]any { return map[string]any{"name": "ok"} }, 200},
+		{"setVerifierSecret", "PUT", func(int) string { return "/v1/admin/inboxes/agent-a/secret" }, func(int) map[string]any { return map[string]any{"secret": "ok"} }, 200},
 	}
 	n := 0
 	for _, tg := range targets {
@@ -204,7 +204,7 @@ func TestOpenAPIQueryParametersAreHeldToTheirSchemas(t *testing.T) {
 	cases := []struct{ opID, path, tok string }{
 		{"listMessages", "/v1/inboxes/agent-a/messages", a.tokenA},
 		{"streamMessages", "/v1/inboxes/agent-a/stream", a.tokenA},
-		{"listInboxes", "/admin/inboxes", testAdminToken},
+		{"listInboxes", "/v1/admin/inboxes", testAdminToken},
 	}
 	for _, cs := range cases {
 		o := sp.op(cs.opID)

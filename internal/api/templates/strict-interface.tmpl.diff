@@ -1,0 +1,6 @@
+90c90
+<                     if err := json.NewEncoder(&buf).Encode(response{{if $hasBodyVar}}.Body{{end}}{{if and $hasUnionElements (not .Schema.IsExternalRef)}}.union{{end}}); err != nil {
+---
+>                     if err := encodeJSON(&buf, response{{if $hasBodyVar}}.Body{{end}}{{if and $hasUnionElements (not .Schema.IsExternalRef)}}.union{{end}}); err != nil {
+106a107
+>                     setContentLength(w, &buf)

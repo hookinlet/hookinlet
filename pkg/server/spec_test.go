@@ -126,14 +126,14 @@ func TestTheGuardsRunAfterAuthentication(t *testing.T) {
 func TestAdminBodiesAreHeldToTheDocument(t *testing.T) {
 	a := newAdminEnv(t)
 	body := map[string]any{"slug": "tighter", "verifier": "none", "name": "abcd"}
-	if st, data := a.admin(http.MethodPost, "/admin/inboxes", body); st != http.StatusCreated {
+	if st, data := a.admin(http.MethodPost, "/v1/admin/inboxes", body); st != http.StatusCreated {
 		t.Fatalf("before the document changes: %d %s", st, data)
 	}
 	holdTo(t, a.server, func(doc map[string]any) {
 		at(doc, "components", "schemas", "CreateInbox", "properties", "name")["maxLength"] = 3
 	})
 	body["slug"] = "tighter-2"
-	st, data := a.admin(http.MethodPost, "/admin/inboxes", body)
+	st, data := a.admin(http.MethodPost, "/v1/admin/inboxes", body)
 	if st != http.StatusBadRequest || !strings.Contains(string(data), "name: must be at most 3 character(s)") {
 		t.Errorf("a name past the new maximum: %d %s", st, data)
 	}
@@ -146,7 +146,7 @@ func TestAdminBodiesAreHeldToTheDocument(t *testing.T) {
 		{`{}`, "slug: is required"},
 		{`[]`, "must be an object"},
 	} {
-		st, data := a.admin(http.MethodPost, "/admin/inboxes", tc.body)
+		st, data := a.admin(http.MethodPost, "/v1/admin/inboxes", tc.body)
 		if st != http.StatusBadRequest || !strings.Contains(string(data), tc.want) {
 			t.Errorf("%s: %d %s, want 400 containing %q", tc.body, st, data, tc.want)
 		}
@@ -155,14 +155,14 @@ func TestAdminBodiesAreHeldToTheDocument(t *testing.T) {
 
 func TestTheAdminQueryGuardRunsAfterAuthentication(t *testing.T) {
 	a := newAdminEnv(t)
-	st, _, _ := a.call(http.MethodGet, "/admin/inboxes?bogus=1", nil, "")
+	st, _, _ := a.call(http.MethodGet, "/v1/admin/inboxes?bogus=1", nil, "")
 	if st != http.StatusUnauthorized {
 		t.Errorf("anonymous with a bad query: %d", st)
 	}
-	if st, _, _ := a.call(http.MethodGet, "/admin/inboxes?bogus=1", nil, a.tokenA); st != http.StatusForbidden {
+	if st, _, _ := a.call(http.MethodGet, "/v1/admin/inboxes?bogus=1", nil, a.tokenA); st != http.StatusForbidden {
 		t.Errorf("an agent token with a bad query: %d", st)
 	}
-	if st, _, _ := a.call(http.MethodPost, "/admin/inboxes?bogus=1", `{"slug":"abc","verifier":"none"}`, ""); st != http.StatusUnauthorized {
+	if st, _, _ := a.call(http.MethodPost, "/v1/admin/inboxes?bogus=1", `{"slug":"abc","verifier":"none"}`, ""); st != http.StatusUnauthorized {
 		t.Errorf("anonymous POST with a bad query: %d", st)
 	}
 }
@@ -170,15 +170,15 @@ func TestTheAdminQueryGuardRunsAfterAuthentication(t *testing.T) {
 func TestEveryAdminOperationRefusesAnUnknownQueryParameter(t *testing.T) {
 	a := newAdminEnv(t)
 	for _, tc := range []struct{ method, path string }{
-		{http.MethodGet, "/admin/inboxes?x=1"},
-		{http.MethodGet, "/admin/inboxes/agent-a?x=1"},
-		{http.MethodDelete, "/admin/inboxes/agent-a?x=1"},
-		{http.MethodGet, "/admin/tokens?x=1"},
-		{http.MethodPost, "/admin/tokens?x=1"},
-		{http.MethodDelete, "/admin/tokens/1?x=1"},
-		{http.MethodPost, "/admin/inboxes/agent-a/rotate-ingest-key?x=1"},
-		{http.MethodPost, "/admin/retention/run?x=1"},
-		{http.MethodGet, "/admin/backup?x=1"},
+		{http.MethodGet, "/v1/admin/inboxes?x=1"},
+		{http.MethodGet, "/v1/admin/inboxes/agent-a?x=1"},
+		{http.MethodDelete, "/v1/admin/inboxes/agent-a?x=1"},
+		{http.MethodGet, "/v1/admin/tokens?x=1"},
+		{http.MethodPost, "/v1/admin/tokens?x=1"},
+		{http.MethodDelete, "/v1/admin/tokens/1?x=1"},
+		{http.MethodPost, "/v1/admin/inboxes/agent-a/rotate-ingest-key?x=1"},
+		{http.MethodPost, "/v1/admin/retention/run?x=1"},
+		{http.MethodGet, "/v1/admin/backup?x=1"},
 		{http.MethodGet, "/metrics?x=1"},
 	} {
 		// The response is also checked against the document, which has to list 400.
@@ -188,18 +188,18 @@ func TestEveryAdminOperationRefusesAnUnknownQueryParameter(t *testing.T) {
 		}
 	}
 	// And nothing was deleted by the refused DELETE.
-	a.mustAdmin(http.MethodGet, "/admin/inboxes/agent-a", nil, http.StatusOK)
+	a.mustAdmin(http.MethodGet, "/v1/admin/inboxes/agent-a", nil, http.StatusOK)
 }
 
 func TestAnAdminListAcceptsAnyCursorAnInt64Can(t *testing.T) {
 	a := newAdminEnv(t)
-	a.mustAdmin(http.MethodGet, "/admin/inboxes?after=9223372036854775807", nil, http.StatusOK)
+	a.mustAdmin(http.MethodGet, "/v1/admin/inboxes?after=9223372036854775807", nil, http.StatusOK)
 }
 
 func TestARefusedBodyDoesNotRepeatALongFieldName(t *testing.T) {
 	a := newAdminEnv(t)
 	body := `{"slug":"clipped","verifier":"none","` + strings.Repeat("k", 50000) + `":1}`
-	st, data := a.admin(http.MethodPost, "/admin/inboxes", body)
+	st, data := a.admin(http.MethodPost, "/v1/admin/inboxes", body)
 	if st != http.StatusBadRequest {
 		t.Fatalf("status %d", st)
 	}
@@ -211,9 +211,9 @@ func TestARefusedBodyDoesNotRepeatALongFieldName(t *testing.T) {
 func TestAnAdminRouteMissingFromTheDocumentIsRefusedNotServedUnchecked(t *testing.T) {
 	a := newAdminEnv(t)
 	holdTo(t, a.server, func(doc map[string]any) {
-		delete(at(doc, "paths", "/admin/inboxes"), "post")
+		delete(at(doc, "paths", "/v1/admin/inboxes"), "post")
 	})
-	st, data := a.admin(http.MethodPost, "/admin/inboxes", map[string]any{"slug": "unchecked", "verifier": "none"})
+	st, data := a.admin(http.MethodPost, "/v1/admin/inboxes", map[string]any{"slug": "unchecked", "verifier": "none"})
 	if st != http.StatusInternalServerError {
 		t.Errorf("a route the document lacks: %d %s", st, data)
 	}
@@ -245,8 +245,8 @@ func TestAMalformedParameterNeverBeatsTheCredentialCheck(t *testing.T) {
 		{"anonymous, bad stream cursor", http.MethodGet, "/v1/inboxes/agent-a/stream?after=x", "", http.StatusUnauthorized},
 		{"another inbox's token, bad after", http.MethodGet, "/v1/inboxes/agent-a/messages?after=abc", a.tokenB, http.StatusNotFound},
 		{"another inbox's token, bad seq", http.MethodGet, "/v1/inboxes/agent-a/messages/abc", a.tokenB, http.StatusNotFound},
-		{"an agent on the admin API, bad limit", http.MethodGet, "/admin/inboxes?limit=abc", a.tokenA, http.StatusForbidden},
-		{"anonymous on the admin API, bad limit", http.MethodGet, "/admin/inboxes?limit=abc", "", http.StatusUnauthorized},
+		{"an agent on the admin API, bad limit", http.MethodGet, "/v1/admin/inboxes?limit=abc", a.tokenA, http.StatusForbidden},
+		{"anonymous on the admin API, bad limit", http.MethodGet, "/v1/admin/inboxes?limit=abc", "", http.StatusUnauthorized},
 	} {
 		st, _, data := a.call(tc.method, tc.path, nil, tc.tok)
 		if st != tc.want {

@@ -138,7 +138,8 @@ func TestToolsReturnWhatTheRESTAPIReturns(t *testing.T) {
 	cs := connectMCP(t, base, ae.tokenA)
 
 	// query_messages equals GET /messages, message for message.
-	got := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "limit": 100}).page(t)
+	got := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "limit": 100, "bodies": true}).page(t)
+	got.Messages = flattenUntrusted(got.Messages)
 	rest := ae.get("/v1/inboxes/agent-a/messages?after=0&limit=100", ae.tokenA)
 	var want struct {
 		Messages  []map[string]any `json:"messages"`
@@ -168,6 +169,7 @@ func TestToolsReturnWhatTheRESTAPIReturns(t *testing.T) {
 		}
 		var g map[string]any
 		_ = json.Unmarshal(one.raw, &g)
+		g = flattenUntrusted([]map[string]any{g})[0]
 		var w map[string]any
 		_ = json.Unmarshal(ae.get(fmt.Sprintf("/v1/inboxes/agent-a/messages/%d", seq), ae.tokenA).Body.Bytes(), &w)
 		if !reflect.DeepEqual(g, w) {
@@ -240,10 +242,14 @@ func TestQueryFiltersAndDirections(t *testing.T) {
 		t.Errorf("forward walk = %v", seen)
 	}
 
-	// Summaries have no bodies.
-	p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "summary": true, "limit": 1}).page(t)
-	if _, has := p.Messages[0]["body"]; has {
-		t.Errorf("summary carried a body: %v", p.Messages[0])
+	// Messages come without bodies unless asked.
+	p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "limit": 1}).page(t)
+	u, ok := p.Messages[0]["untrusted"].(map[string]any)
+	if !ok {
+		t.Fatalf("no untrusted object: %v", p.Messages[0])
+	}
+	if _, has := u["body"]; has {
+		t.Errorf("a default query carried a body: %v", p.Messages[0])
 	}
 }
 
@@ -297,7 +303,7 @@ func TestToolArgumentsAreChecked(t *testing.T) {
 	for i := 0; i < 130; i++ {
 		ae.post("/in/agent-a", "x")
 	}
-	if p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "limit": 500, "summary": true}).page(t); len(p.Messages) != mcpMaxLimit {
+	if p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "limit": 500}).page(t); len(p.Messages) != mcpMaxLimit {
 		t.Errorf("limit 500 returned %d messages, want %d", len(p.Messages), mcpMaxLimit)
 	}
 }
@@ -314,10 +320,11 @@ func TestBodiesOverTheInlineLimitAreTruncatedAndFetchableWhole(t *testing.T) {
 	for _, tool := range []string{"query", "wait"} {
 		var p mcpPage
 		if tool == "query" {
-			p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0}).page(t)
+			p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "bodies": true}).page(t)
 		} else {
-			p = callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 0, "timeout_seconds": 0}).page(t)
+			p = callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 0, "timeout_seconds": 0, "bodies": true}).page(t)
 		}
+		p.Messages = flattenUntrusted(p.Messages)
 		if len(p.Messages) != 2 {
 			t.Fatalf("%s: %d messages", tool, len(p.Messages))
 		}
@@ -340,14 +347,16 @@ func TestBodiesOverTheInlineLimitAreTruncatedAndFetchableWhole(t *testing.T) {
 
 	whole := callTool(t, cs, "get_message", map[string]any{"inbox": "agent-a", "seq": 2})
 	var m struct {
-		Body          map[string]string `json:"body"`
-		BodyTruncated bool              `json:"body_truncated"`
+		BodyTruncated bool `json:"body_truncated"`
+		Untrusted     struct {
+			Body map[string]string `json:"body"`
+		} `json:"untrusted"`
 	}
 	if err := json.Unmarshal(whole.raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m.BodyTruncated || m.Body["data"] != strings.Repeat("z", 5000) {
-		t.Errorf("get_message must return the full body (truncated=%v, %d bytes)", m.BodyTruncated, len(m.Body["data"]))
+	if m.BodyTruncated || m.Untrusted.Body["data"] != strings.Repeat("z", 5000) {
+		t.Errorf("get_message must return the full body (truncated=%v, %d bytes)", m.BodyTruncated, len(m.Untrusted.Body["data"]))
 	}
 }
 
@@ -1096,7 +1105,7 @@ func TestResultsAreBoundedByWhatIsSentNotWhatIsStored(t *testing.T) {
 	}
 	call := func(after int64) (int, mcpPage) {
 		status, _, resp := mcpPost(t, base, ae.tokenA, fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_messages","arguments":{"inbox":"agent-a","after":%d,"limit":100}}}`, after))
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_messages","arguments":{"inbox":"agent-a","after":%d,"limit":100,"bodies":true}}}`, after))
 		if status != http.StatusOK {
 			t.Fatalf("status %d: %.200s", status, resp)
 		}
@@ -1146,10 +1155,14 @@ func TestAMessageTooBigToReturnIsFetchedOverREST(t *testing.T) {
 	if o := callTool(t, cs, "get_message", map[string]any{"inbox": "agent-a", "seq": 2}); o.err != "" {
 		t.Errorf("a small message was refused: %s", o.err)
 	}
-	// It is still in a page, whole, as the only message that fits.
-	p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0}).page(t)
+	// It is still in a page, as the only message that fits, and with bodies it is
+	// marked as too big to include (it is over the inline limit).
+	p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "bodies": true}).page(t)
 	if len(p.Messages) == 0 || seqsOf(p.Messages)[0] != 1 {
-		t.Errorf("the first message must still be deliverable in a page: %v", seqsOf(p.Messages))
+		t.Fatalf("the first message must still be deliverable in a page: %v", seqsOf(p.Messages))
+	}
+	if p.Messages[0]["body_truncated"] != true {
+		t.Errorf("a body over the inline limit must be flagged: %v", p.Messages[0])
 	}
 }
 
@@ -1162,7 +1175,8 @@ func TestInlineLimitIsExactAndCannotExceedWhatRESTLoads(t *testing.T) {
 	ae.post("/in/agent-a", exact, "Content-Type", "application/json")
 	ae.post("/in/agent-a", exact+" ", "Content-Type", "application/json") // 101
 	cs := connectMCP(t, base, ae.tokenA)
-	p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0}).page(t)
+	p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "bodies": true}).page(t)
+	p.Messages = flattenUntrusted(p.Messages)
 	if p.Messages[0]["body_truncated"] != nil || p.Messages[0]["body"] == nil {
 		t.Errorf("a body of exactly the limit must be inline: %v", p.Messages[0])
 	}
@@ -1248,7 +1262,8 @@ func TestWaitMatchesRESTAndFiltersApply(t *testing.T) {
 		Messages []map[string]any `json:"messages"`
 	}
 	_ = json.Unmarshal(ae.get("/v1/inboxes/agent-a/messages?after=1&type=b&limit=20", ae.tokenA).Body.Bytes(), &rest)
-	w := callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 1, "types": []string{"b"}, "timeout_seconds": 0}).page(t)
+	w := callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 1, "types": []string{"b"}, "timeout_seconds": 0, "bodies": true}).page(t)
+	w.Messages = flattenUntrusted(w.Messages)
 	if !reflect.DeepEqual(w.Messages, rest.Messages) || !reflect.DeepEqual(seqsOf(w.Messages), []int64{2, 4, 6}) {
 		t.Errorf("wait %v differs from REST %v", seqsOf(w.Messages), seqsOf(rest.Messages))
 	}
@@ -1310,5 +1325,63 @@ func TestListInboxesDoesNotRevealHowManyInboxesExist(t *testing.T) {
 	}
 	if len(l.Inboxes) != 1 || l.Inboxes[0].Slug != "inbox-02" {
 		t.Errorf("list_inboxes = %+v", l.Inboxes)
+	}
+}
+
+// flattenUntrusted lifts what is under "untrusted" up beside the rest, giving the
+// shape the REST API uses, so the two can be compared field for field.
+func flattenUntrusted(ms []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(ms))
+	for i, m := range ms {
+		flat := map[string]any{}
+		for k, v := range m {
+			if k != "untrusted" {
+				flat[k] = v
+			}
+		}
+		if u, ok := m["untrusted"].(map[string]any); ok {
+			for k, v := range u {
+				if _, clash := flat[k]; clash {
+					panic("a field is both trusted and untrusted: " + k)
+				}
+				flat[k] = v
+			}
+		}
+		out[i] = flat
+	}
+	return out
+}
+
+// Reading backward is trimmed to the same budget, and the cursor to continue from
+// is the oldest message kept.
+func TestABackwardReadIsTrimmedToTheBudgetToo(t *testing.T) {
+	ae, base, _ := mcpEnv(t, func(o *Options) { o.MCPInlineBodyBytes = 16 << 10 })
+	body := strings.Repeat("<", 15<<10)
+	const total = 30
+	for range total {
+		ae.post("/in/agent-a", body, "Content-Type", "text/plain")
+	}
+	status, _, resp := mcpPost(t, base, ae.tokenA, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_messages","arguments":{"inbox":"agent-a","limit":100,"bodies":true}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+	if len(resp) > mcpResultBudget+(64<<10) {
+		t.Errorf("a result of %d bytes, over the %d byte budget", len(resp), mcpResultBudget)
+	}
+	var env struct {
+		Result struct {
+			StructuredContent mcpPage `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(resp), &env); err != nil {
+		t.Fatal(err)
+	}
+	p := env.Result.StructuredContent
+	if len(p.Messages) == 0 || len(p.Messages) >= total {
+		t.Fatalf("%d messages: it was not trimmed, or nothing is left", len(p.Messages))
+	}
+	oldest := seqsOf(p.Messages)[len(p.Messages)-1]
+	if p.NextBefore == nil || *p.NextBefore != oldest {
+		t.Errorf("next_before = %v, want the oldest message kept (%d)", p.NextBefore, oldest)
 	}
 }

@@ -9,7 +9,7 @@ server as in the [README](../README.md#receive-your-first-signed-webhook), then:
 
 <!-- exercise -->
 ```sh
-curl -s -X POST localhost:8080/admin/inboxes \
+curl -s -X POST localhost:8080/v1/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' \
   -d '{"slug": "examples-demo", "ingest_key": "examples-demo", "verifier": "token", "verifier_secret": "examples-secret"}' > created.json
 export HOOKINLET_AGENT_TOKEN=$(sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p' created.json)

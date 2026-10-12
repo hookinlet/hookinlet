@@ -94,7 +94,7 @@ for file in "${files[@]}"; do
       echo 'until curl -sf localhost:8080/readyz >/dev/null; do sleep 0.2; done'
       case "$file" in
       docs/mcp.md) # the document talks about an inbox called demo and its agent token
-        echo 'export HOOKINLET_AGENT_TOKEN=$(curl -s -X POST localhost:8080/admin/inboxes -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" -d "{\"slug\": \"demo\", \"ingest_key\": \"demo\", \"verifier\": \"none\"}" | sed -n '"'"'s/.*"agent_token":"\([^"]*\)".*/\1/p'"'"')'
+        echo 'export HOOKINLET_AGENT_TOKEN=$(curl -s -X POST localhost:8080/v1/admin/inboxes -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H "Content-Type: application/json" -d "{\"slug\": \"demo\", \"ingest_key\": \"demo\", \"verifier\": \"none\"}" | sed -n '"'"'s/.*"agent_token":"\([^"]*\)".*/\1/p'"'"')'
         echo 'curl -s -X POST localhost:8080/in/demo -d "{\"n\":1}" >/dev/null'
         ;;
       esac
@@ -143,7 +143,7 @@ grep -q '"'"'seq=1 {"hello": "examples"}'"'"' received.log || { echo "CHECK: the
 # apply must have written the new tokens, privately.
 [ "$(find tokens.json -perm 600 | wc -l)" -eq 1 ] || { echo "CHECK: tokens.json is missing or is not mode 0600" >&2; exit 1; }
 grep -q "hki_" tokens.json || { echo "CHECK: tokens.json holds no token" >&2; exit 1; }
-curl -s localhost:8080/admin/inboxes/stripe-live -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" | grep -q "\"has_verifier_secret\":true" || { echo "CHECK: apply did not set the secret" >&2; exit 1; }'
+curl -s localhost:8080/v1/admin/inboxes/stripe-live -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" | grep -q "\"has_verifier_secret\":true" || { echo "CHECK: apply did not set the secret" >&2; exit 1; }'
     ;;
   esac
   if [ -n "$checks" ]; then
