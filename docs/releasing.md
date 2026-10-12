@@ -5,7 +5,9 @@ For whoever tags a release. The work is in `.github/workflows/release.yml` and
 
 ## Before tagging
 
-1. `main` is green, and `CHANGELOG.md` has what changed under "Unreleased".
+1. `main` is green, and `CHANGELOG.md` has the release's entry at the top (move "Unreleased" into a
+   heading for the version). The workflow will not publish a tag whose commit is not on `main` or
+   has no passing CI run, so there is nothing to bypass: wait for CI.
 2. Run the workflow by hand (Actions, Release, Run workflow). It builds the
    archives, checksums, SBOMs, and both image architectures, and smoke-tests the
    image, but publishes nothing, whatever ref you run it from.
@@ -25,9 +27,11 @@ git push origin v0.1.0-rc.1
 
 The workflow then:
 
-1. checks the tag and works out the image tags;
-2. builds and publishes the archives, `checksums.txt`, and one SBOM per archive to
-   a GitHub release (marked a pre-release when the tag has a hyphen);
+1. checks that the tagged commit is on `main` and that CI passed on it, runs `govulncheck`, checks the
+   tag, and works out the image tags;
+2. builds and publishes the archives (each with `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES`),
+   `checksums.txt`, and one SBOM per archive to a GitHub release, and attests their build
+   provenance (marked a pre-release when the tag has a hyphen);
 3. only if that succeeded, builds the image, smoke-tests it, and publishes
    `linux/amd64` and `linux/arm64` to `ghcr.io/hookinlet/hookinlet` with provenance
    and an SBOM.
@@ -39,6 +43,21 @@ nor a newer line's tag.
 
 Promoting a candidate is a new tag, `v0.1.0`, on the same commit: the workflow
 builds exactly the tag that was pushed, not whichever tag sorts first.
+
+## Checking what you downloaded
+
+```sh
+sha256sum -c --ignore-missing checksums.txt
+gh attestation verify hookinlet_0.1.0_linux_amd64.tar.gz --repo hookinlet/hookinlet
+docker buildx imagetools inspect ghcr.io/hookinlet/hookinlet:0.1.0   # provenance and SBOM are attached
+```
+
+## Keeping it current
+
+`THIRD_PARTY_LICENSES` is generated (`make licenses`) and CI fails if it is out of date, or if a
+dependency has a license other than MIT, BSD, ISC or Apache-2.0. Dependabot opens a weekly pull
+request for Go modules, the GitHub Actions (pinned by commit) and the Docker base images
+(pinned by digest); `govulncheck` runs on every change and every night.
 
 ## Before the repository goes public
 
