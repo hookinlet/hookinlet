@@ -54,6 +54,47 @@ jobs:
         # job's whole budget.
         run: go test -timeout 6m $([ "$RACE" = true ] && echo -race) $(go list ./... | grep -v '/pkg/server$')
 
+  # The admin console (web/) is built from source into internal/ui/dist, which is
+  # committed so that `go build` and `go install` need no Node. CI rebuilds it from the
+  # lockfile and fails if the committed files differ, as it does for the generated API
+  # code, so what is embedded is always what the source builds.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # --ignore-scripts: a package's install script never runs here.
+      - name: Install from the lockfile
+        run: npm ci --ignore-scripts
+      - name: The API types match docs/openapi.json
+        run: |
+          npm run types
+          git diff --exit-code -- src/api || { echo "::error::web/src/api/schema.d.ts is out of date; run npm run types in web/ and commit the result"; exit 1; }
+      - name: Unit tests
+        run: npm test
+      - name: Message content is never rendered as HTML
+        run: |
+          if grep -rn "v-html\|innerHTML\|insertAdjacentHTML" src; then echo "::error::the console must render senders' content as text only"; exit 1; fi
+      - name: Build, and the committed build is what the source builds
+        run: |
+          npm run build
+          git diff --exit-code -- ../internal/ui/dist || { echo "::error::internal/ui/dist is out of date; run npm run build in web/ and commit the result"; exit 1; }
+          test -z "$(git status --porcelain -- ../internal/ui/dist)"
+      - name: THIRD_PARTY_LICENSES for the console is current
+        run: |
+          node licenses.mjs
+          git diff --exit-code -- THIRD_PARTY_LICENSES || { echo "::error::web/THIRD_PARTY_LICENSES is out of date; run node licenses.mjs in web/ and then scripts/third-party-licenses.sh"; exit 1; }
+      - name: Known vulnerabilities in what ships
+        run: npm audit --omit=dev --audit-level=high
+
   # pkg/server has several hundred tests that run one after another and takes as
   # long as all the rest together, so it runs alongside them, not after them.
   test-server:

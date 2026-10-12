@@ -176,6 +176,25 @@ type Store interface {
 	Close() error
 }
 
+// StoreStatus is what a StatusReporter says about its storage.
+type StoreStatus struct {
+	// SchemaVersion is the newest applied migration.
+	SchemaVersion int
+	// DatabaseBytes is the size of the data, not counting its log.
+	DatabaseBytes int64
+	// FreeBytes is the room left where the data lives. It is meaningful only when
+	// FreeKnown is true.
+	FreeBytes uint64
+	FreeKnown bool
+}
+
+// StatusReporter is an optional capability of a Store: facts about its storage that
+// the admin console shows. A backend that cannot report them leaves it out, and the
+// status endpoint omits what it does not know.
+type StatusReporter interface {
+	Status(ctx context.Context) (StoreStatus, error)
+}
+
 // Backupper is an optional capability of a Store: a consistent copy of all its
 // data that can be saved elsewhere. It is optional because not every backend
 // can offer one (a hosted database is backed up by its operator). Callers find

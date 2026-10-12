@@ -58,6 +58,14 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - **`hookinlet check`** verifies the database file (SQLite's integrity check, or `--quick`), for use after a
   crash, a disk problem or a restore. The server still does not scan the file at startup. New in `pkg/`:
   `sqlite.Store.Check`.
+- **Admin console, first part.** A web console is served at `/admin` (switch off with
+  `HOOKINLET_ADMIN_UI=false`). This release carries the plumbing and a sign-in page that shows
+  the server's status; the screens follow. New admin endpoint `GET /v1/admin/status`. New in
+  `pkg/`: `Options.DisableUI`, the optional `inbox.StatusReporter` (implemented by the SQLite store).
+  The built app is committed under `internal/ui/dist` and built from `web/`.
+- **A clock that jumps forward no longer makes retention delete messages early.** A retention run that
+  finds the wall clock more than ten minutes ahead of the monotonic clock since the last run uses the time
+  that really passed, and logs it; the next run accepts the clock as it reads.
 - **A database restored with a wide file mode is made private when it is opened** (and its `-wal` and
   `-shm` files), with a warning in the log. Before, the server kept whatever mode the copy came with.
 - **`/readyz` no longer fails for the whole server because one inbox's secret does not open.**

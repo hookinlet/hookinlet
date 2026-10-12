@@ -107,6 +107,13 @@ other fields are `ingest_key`, `name`, `verifier_config`, `verifier_secret`, `on
 configuration are checked when you save them, so a typo is an error now and not
 a failed delivery later. See [verifiers](verifiers.md).
 
+**Retention and the clock.** Retention by age (`retention_days`) trusts the server's clock. If the clock
+jumps forward between two retention runs (a resumed VM, a wrong time read before it is corrected), a run
+that trusted it would delete messages that are not yet due. A run that finds the wall clock more than ten
+minutes ahead of the time that really passed uses the time that really passed instead, and logs a
+warning; the next run takes the clock as it then reads, so a clock that stays where it jumped is the
+clock. Retention by count is not affected. A server whose clock is wrong for good should have its clock fixed.
+
 A verifier that needs a secret, created without one, comes with a `warnings`
 entry: deliveries fail until you set it. The same warning comes back from any
 change that leaves an inbox in that state.
@@ -194,6 +201,18 @@ with `ingest_key`; you are then trusting the signature alone.
 The key is a secret of the same kind as a webhook URL on a chat service: keep it
 out of public places, and rotate it (`rotate-ingest-key`) if it leaks. Messages
 stay where they are.
+
+## The console
+
+The server also serves a web console at `/admin`, on the same listener as the admin API (or on
+`HOOKINLET_ADMIN_LISTEN_ADDR`, if the admin API has its own). It is a page that calls the admin
+API with the admin token: you type the token to sign in, and it stays in the page's memory until
+you sign out or close the tab. It is on by default; `HOOKINLET_ADMIN_UI=false` turns it off, and it
+is absent whenever the admin API is. The page and its scripts are static files built into the
+binary; they are served under a content security policy that allows no inline script and no other
+origin, and message content is always shown as text. It adds no new way to change anything: whatever
+it does goes through the endpoints in this document. `GET /v1/admin/status` is the one endpoint it
+needed that did not exist (version, schema, database size, free space, last retention run).
 
 ## The command line
 

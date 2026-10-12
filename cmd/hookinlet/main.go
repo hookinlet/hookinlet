@@ -238,6 +238,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		SSERecheckInterval: cfg.SSERecheckInterval,
 		DisableMCP:         !cfg.MCPEnabled,
 		DisableAdmin:       !cfg.AdminEnabled,
+		DisableUI:          !cfg.AdminUI,
 		AdminAddr:          cfg.AdminListenAddr,
 		Version:            version,
 		PublicBaseURL:      cfg.PublicBaseURL,

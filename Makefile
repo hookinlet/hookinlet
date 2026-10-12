@@ -1,4 +1,4 @@
-.PHONY: build test lint generate licenses run docker clean
+.PHONY: build test lint generate licenses run docker clean web
 
 VERSION ?= dev
 ADDR ?= :8080
@@ -15,6 +15,12 @@ lint:
 
 # Rewrites THIRD_PARTY_LICENSES after a dependency changes.
 licenses:
+	scripts/third-party-licenses.sh
+
+# Rebuilds the admin console from web/ into internal/ui/dist (which is committed), and
+# the files that depend on it. Needs Node (see web/.nvmrc); a Go build does not.
+web:
+	cd web && npm ci --ignore-scripts && npm run types && npm test && npm run build && node licenses.mjs
 	scripts/third-party-licenses.sh
 
 # Rewrites internal/api from docs/openapi.json. Run it after editing the document.

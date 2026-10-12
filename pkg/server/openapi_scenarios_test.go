@@ -241,6 +241,10 @@ func ordinaryUse(t *testing.T, c *contract) {
 	cl.call("runRetention", "GET", "/v1/admin/retention/run", nil, admin)
 	cl.call("runRetention", "POST", "/v1/admin/retention/run", nil, agent)
 	cl.call("runRetention", "POST", "/v1/admin/retention/run", nil, "")
+	cl.call("adminStatus", "GET", "/v1/admin/status", nil, admin)
+	cl.call("adminStatus", "POST", "/v1/admin/status", nil, admin)
+	cl.call("adminStatus", "GET", "/v1/admin/status", nil, agent)
+	cl.call("adminStatus", "GET", "/v1/admin/status", nil, "")
 	cl.call("backup", "GET", "/v1/admin/backup", nil, admin)
 	cl.call("backup", "GET", "/v1/admin/backup?bogus=1", nil, admin)
 	cl.call("backup", "GET", "/v1/admin/backup", nil, agent)
@@ -335,6 +339,7 @@ func storeFails(t *testing.T, c *contract) {
 	cl.call("rotateIngestKey", "POST", "/v1/admin/inboxes/agent-a/rotate-ingest-key", nil, admin)
 	cl.call("deleteInbox", "DELETE", "/v1/admin/inboxes/agent-a", nil, admin)
 	cl.call("runRetention", "POST", "/v1/admin/retention/run", nil, admin) // Prune is not failing: this one succeeds
+	cl.call("adminStatus", "GET", "/v1/admin/status", nil, admin)
 	cl.call("backup", "GET", "/v1/admin/backup", nil, admin)
 	f.set(false, false, false)
 }

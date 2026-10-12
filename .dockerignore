@@ -4,3 +4,4 @@ bin
 data
 *.md
 !LICENSE
+web/node_modules
