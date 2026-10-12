@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -56,8 +57,23 @@ type Service struct {
 	Verifiers *verify.Registry
 	// Now is the clock for retention. Defaults to time.Now.
 	Now func() time.Time
+	// Log receives a warning when the clock is found to have stepped forward. Defaults
+	// to discarding it.
+	Log *slog.Logger
+	// GuardClock turns on the check for a wall clock that has stepped forward (see
+	// retentionTime). It is meant for the real clock: a Now that is made up, as in a
+	// test, moves as it likes. It is also on whenever Monotonic is set.
+	GuardClock bool
+	// Monotonic reads a clock that does not step, as a duration from any fixed start.
+	// Defaults to the time since the process began. It exists for tests.
+	Monotonic func() time.Duration
 
 	pruneMu sync.Mutex
+	// lastWall and lastMono are the wall and monotonic clocks at the previous retention
+	// run, guarded by pruneMu.
+	lastWall time.Time
+	lastMono time.Duration
+	haveLast bool
 	// editMu serializes this process's read-modify-write edits, so that admins
 	// changing one inbox together do not collide with each other. A change made
 	// from outside (the command line in direct mode) can still land in between,
@@ -443,6 +459,45 @@ func (s *Service) Delete(ctx context.Context, slug string) error {
 	return s.Store.DeleteInbox(ctx, in.ID)
 }
 
+// clockStepTolerance is how far the wall clock may run ahead of the monotonic clock
+// between two retention runs before it is taken for a step and not for drift.
+const clockStepTolerance = 10 * time.Minute
+
+var processStart = time.Now()
+
+func (s *Service) monotonic() time.Duration {
+	if s.Monotonic != nil {
+		return s.Monotonic()
+	}
+	return time.Since(processStart)
+}
+
+// retentionTime is the time retention is applied at, with pruneMu held. Age-based
+// retention deletes whatever is older than now minus its window, so a wall clock that
+// jumps forward (a resumed VM, a wrong time read before it is corrected) would delete
+// messages that are not yet due. When the wall clock has run ahead of the monotonic
+// clock by more than the tolerance since the last run, this run counts the time that
+// really passed instead, and says so. The next run accepts the new reading: a clock that
+// stays where it jumped is the clock, and this only protects against one that comes back.
+func (s *Service) retentionTime() time.Time {
+	wall, mono := s.now(), s.monotonic()
+	prevWall, prevMono, had := s.lastWall, s.lastMono, s.haveLast
+	s.lastWall, s.lastMono, s.haveLast = wall, mono, true
+	if !had || (!s.GuardClock && s.Monotonic == nil) {
+		return wall
+	}
+	// Round(0) drops time.Time's own monotonic reading, so Sub compares wall clocks.
+	ahead := wall.Round(0).Sub(prevWall.Round(0)) - (mono - prevMono)
+	if ahead <= clockStepTolerance {
+		return wall
+	}
+	if s.Log != nil {
+		s.Log.Warn("the clock stepped forward since the last retention run; this run uses the time that really passed, so messages are not deleted early",
+			"stepped", ahead.Round(time.Second).String())
+	}
+	return prevWall.Round(0).Add(mono - prevMono)
+}
+
 // RunRetention applies every inbox's retention policy now. It fails with
 // ErrBusy if a sweep is already running.
 func (s *Service) RunRetention(ctx context.Context) (deleted int64, err error) {
@@ -450,7 +505,7 @@ func (s *Service) RunRetention(ctx context.Context) (deleted int64, err error) {
 		return 0, ErrBusy
 	}
 	defer s.pruneMu.Unlock()
-	return s.Store.Prune(ctx, s.now())
+	return s.Store.Prune(ctx, s.retentionTime())
 }
 
 // SweepRetention is RunRetention for the scheduled sweep: if someone is
@@ -458,7 +513,7 @@ func (s *Service) RunRetention(ctx context.Context) (deleted int64, err error) {
 func (s *Service) SweepRetention(ctx context.Context) (deleted int64, err error) {
 	s.pruneMu.Lock()
 	defer s.pruneMu.Unlock()
-	return s.Store.Prune(ctx, s.now())
+	return s.Store.Prune(ctx, s.retentionTime())
 }
 
 // Backup takes a snapshot of the Store. The caller closes the reader.
