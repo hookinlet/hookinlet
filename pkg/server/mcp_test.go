@@ -1389,7 +1389,11 @@ func TestABackwardReadIsTrimmedToTheBudgetToo(t *testing.T) {
 // A wait that has nothing to return holds no read slot while it waits, and the answer
 // it finally returns is not lost to a busy server when it wakes.
 func TestIdleMCPWaitsDoNotUseUpTheReadSlots(t *testing.T) {
-	ae := newAgentEnv2(t, func(o *Options) { o.MaxConcurrentReads = 2; o.ReadWaitTimeout = 300 * time.Millisecond; o.Notifier = local.New() })
+	ae := newAgentEnv2(t, func(o *Options) {
+		o.MaxConcurrentReads = 2
+		o.ReadWaitTimeout = 300 * time.Millisecond
+		o.Notifier = local.New()
+	})
 	ae.tokenA = ae.tokenFor(ae.a)
 	base := serveOn(t, ae.env)
 	cs := connectMCP(t, base, ae.tokenA)
