@@ -6,6 +6,8 @@ import { href, link, route } from './router'
 import { signedIn } from './session'
 import InboxesView from './views/InboxesView.vue'
 import InboxView from './views/InboxView.vue'
+import MaintenanceView from './views/MaintenanceView.vue'
+import NewInboxView from './views/NewInboxView.vue'
 import OverviewView from './views/OverviewView.vue'
 import TokensView from './views/TokensView.vue'
 
@@ -17,6 +19,10 @@ const view = computed(() => {
       return InboxesView
     case 'tokens':
       return TokensView
+    case 'maintenance':
+      return MaintenanceView
+    case 'newinbox':
+      return NewInboxView
     default:
       return null
   }
@@ -26,7 +32,7 @@ const view = computed(() => {
 <template>
   <SignIn v-if="!signedIn" />
   <AppShell v-else>
-    <InboxView v-if="route.name === 'inbox'" :key="route.slug" :slug="route.slug" :seq="route.seq" />
+    <InboxView v-if="route.name === 'inbox'" :key="route.slug" :slug="route.slug" :seq="route.seq" :tab="route.tab" />
     <component :is="view" v-else-if="view" :key="route.name" />
     <section v-else class="card missing">
       <h1>Not found</h1>

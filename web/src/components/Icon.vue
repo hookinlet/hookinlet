@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // A small set of line icons, drawn inline so nothing is fetched.
-defineProps<{ name: 'overview' | 'inboxes' | 'tokens' | 'copy' | 'check' | 'sun' | 'moon' | 'monitor' | 'plus' | 'logout' | 'alert' }>()
+defineProps<{ name: 'overview' | 'inboxes' | 'tokens' | 'copy' | 'check' | 'sun' | 'moon' | 'monitor' | 'plus' | 'logout' | 'alert' | 'wrench' | 'search' }>()
 </script>
 
 <template>
@@ -18,6 +18,8 @@ defineProps<{ name: 'overview' | 'inboxes' | 'tokens' | 'copy' | 'check' | 'sun'
     <template v-else-if="name === 'monitor'"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></template>
     <path v-else-if="name === 'plus'" d="M12 5v14M5 12h14" />
     <path v-else-if="name === 'logout'" d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 8l-4 4 4 4M6 12h10" />
+    <path v-else-if="name === 'wrench'" d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z" />
+    <template v-else-if="name === 'search'"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></template>
     <template v-else-if="name === 'alert'"><path d="M12 3l9.5 17h-19z" /><path d="M12 10v4M12 17.5v.5" /></template>
   </svg>
 </template>

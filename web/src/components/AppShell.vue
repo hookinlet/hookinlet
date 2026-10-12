@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { bytes } from '../format'
 import { link, navigate, route, href } from '../router'
 import { signOut } from '../session'
 import { status } from '../store'
 import { cycleTheme, theme } from '../theme'
+import CommandPalette from './CommandPalette.vue'
 import Icon from './Icon.vue'
 
 const nav = [
   { path: '/', name: 'overview', label: 'Overview', icon: 'overview' },
   { path: '/inboxes', name: 'inboxes', label: 'Inboxes', icon: 'inboxes' },
   { path: '/tokens', name: 'tokens', label: 'Tokens', icon: 'tokens' },
+  { path: '/maintenance', name: 'maintenance', label: 'Maintenance', icon: 'wrench' },
 ] as const
 
 const themeIcon = computed(() => (theme.value === 'dark' ? 'moon' : theme.value === 'light' ? 'sun' : 'monitor'))
@@ -20,6 +22,16 @@ function out() {
   signOut()
   navigate('/')
 }
+
+const palette = ref(false)
+function onKey(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    palette.value = !palette.value
+  }
+}
+onMounted(() => window.addEventListener('keydown', onKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 const main = ref<HTMLElement | null>(null)
 // A page change is announced by moving focus to the new page, for screen readers and keyboards.
@@ -35,6 +47,7 @@ onMounted(() => void status.refresh())
   <div class="shell">
     <aside class="side">
       <a class="logo" :href="href('/')" @click="link($event, '/')"><i aria-hidden="true"></i>hookinlet</a>
+      <button type="button" class="search" @click="palette = true"><Icon name="search" />Search<kbd>⌘K</kbd></button>
       <nav aria-label="Main">
         <a v-for="n in nav" :key="n.name" class="nav" :class="{ on: route.name === n.name }" :href="href(n.path)" :aria-current="route.name === n.name ? 'page' : undefined" @click="link($event, n.path)">
           <Icon :name="n.icon" />{{ n.label }}
@@ -54,6 +67,7 @@ onMounted(() => void status.refresh())
       </div>
     </aside>
     <main ref="main" class="main" tabindex="-1"><slot /></main>
+    <CommandPalette v-model="palette" />
   </div>
 </template>
 
@@ -64,6 +78,10 @@ onMounted(() => void status.refresh())
 .logo:hover { text-decoration: none; }
 .logo i { width: 22px; height: 22px; border: 2px solid var(--fg); border-top-color: transparent; border-radius: 0 0 6px 6px; position: relative; display: inline-block; }
 .logo i::after { content: ''; position: absolute; left: 4px; top: 3px; width: 8px; height: 4px; border-radius: 2px; background: var(--accent); }
+.search { display: flex; align-items: center; gap: 10px; width: 100%; margin-bottom: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--mute); cursor: pointer; font-size: 13px; }
+.search:hover { color: var(--fg); }
+.search svg { width: 15px; height: 15px; }
+.search kbd { margin-left: auto; font: 11px var(--font-mono); }
 nav { display: flex; flex-direction: column; gap: 2px; }
 .nav { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--mute); font-weight: 500; }
 .nav:hover { background: var(--panel2); color: var(--fg); text-decoration: none; }
@@ -86,6 +104,8 @@ nav { display: flex; flex-direction: column; gap: 2px; }
   .logo { padding: 0 8px 0 0; }
   nav { flex-direction: row; order: 3; width: 100%; overflow-x: auto; }
   .grow, .srv { display: none; }
+  .search { width: auto; margin: 0 0 0 auto; padding: 6px 10px; }
+  .search kbd { display: none; }
   .tools { margin-left: auto; gap: 4px; }
   .main { padding: 20px 16px 48px; }
 }

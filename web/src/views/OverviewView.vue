@@ -30,6 +30,7 @@ onMounted(load)
     <h1>Overview</h1>
     <span class="grow"></span>
     <button type="button" class="btn" :disabled="inboxes.loading.value" @click="load">Refresh</button>
+    <a class="btn primary" :href="href('/new')" @click="link($event, '/new')">New inbox</a>
   </header>
 
   <p v-if="inboxes.error.value" class="err" role="alert">{{ inboxes.error.value }} <button type="button" class="btn" @click="load">Try again</button></p>
@@ -51,7 +52,8 @@ onMounted(load)
 
   <section v-if="inboxes.data.value && list.length === 0" class="card empty">
     <h2>No inboxes yet</h2>
-    <p class="muted">An inbox is a named place webhooks arrive. Create one with <code>hookinlet inbox create</code> or the admin API; creating from this console comes in a later release.</p>
+    <p class="muted">An inbox is a named place webhooks arrive and are checked and kept.</p>
+    <p><a class="btn primary" :href="href('/new')" @click="link($event, '/new')">Create your first inbox</a></p>
   </section>
   <InboxTable v-else-if="inboxes.data.value" :inboxes="list" :loading-lines="loadingActivity" />
   <div v-else class="card skel"><div class="skeleton line"></div><div class="skeleton line"></div><div class="skeleton line"></div></div>

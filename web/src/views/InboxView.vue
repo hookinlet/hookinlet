@@ -4,12 +4,13 @@ import { ApiError, type Inbox } from '../api/client'
 import { follow, getInbox, newest, type Filters, type Message } from '../api/messages'
 import CopyField from '../components/CopyField.vue'
 import MessageDetail from '../components/MessageDetail.vue'
+import InboxSettings from '../components/InboxSettings.vue'
 import MessageList from '../components/MessageList.vue'
 import { compact } from '../format'
 import { href, link, navigate } from '../router'
 import { currentToken, guard, signOut } from '../session'
 
-const props = defineProps<{ slug: string; seq: number | null }>()
+const props = defineProps<{ slug: string; seq: number | null; tab: 'messages' | 'settings' }>()
 
 const info = ref<Inbox | null>(null)
 const infoError = ref('')
@@ -204,10 +205,19 @@ watch(
   },
 )
 
+// The messages are read when the Messages tab is showing, not behind the Settings tab.
+watch(
+  () => props.tab,
+  (t) => {
+    if (t === 'messages') void loadList()
+    else stopLive()
+  },
+)
+
 onMounted(() => {
   window.addEventListener('keydown', onKey)
   void loadInfo()
-  void loadList()
+  if (props.tab === 'messages') void loadList()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
@@ -224,21 +234,28 @@ onBeforeUnmount(() => {
     <span v-if="info" class="pill acc">{{ info.verifier }}</span>
     <span v-if="info?.disabled" class="pill warn">disabled</span>
     <span class="grow"></span>
-    <button type="button" class="btn" :class="{ live: wantLive }" :aria-pressed="wantLive" @click="toggleLive">
+    <button v-if="tab === 'messages'" type="button" class="btn" :class="{ live: wantLive }" :aria-pressed="wantLive" @click="toggleLive">
       <span class="dot" :class="liveState" aria-hidden="true"></span>
       {{ !wantLive ? 'Go live' : liveState === 'live' ? 'Live' : liveState === 'retrying' ? 'Reconnecting…' : 'Connecting…' }}
     </button>
   </header>
   <p v-if="infoError" class="err" role="alert">{{ infoError }}</p>
+  <nav class="itabs" aria-label="Inbox">
+    <a :href="href(`/inboxes/${slug}`)" :aria-current="tab === 'messages' ? 'page' : undefined" @click="link($event, `/inboxes/${slug}`)">Messages</a>
+    <a :href="href(`/inboxes/${slug}/settings`)" :aria-current="tab === 'settings' ? 'page' : undefined" @click="link($event, `/inboxes/${slug}/settings`)">Settings</a>
+  </nav>
   <p v-if="liveNote" class="err" role="alert">Live stopped: {{ liveNote }}</p>
 
-  <section v-if="info" class="facts card" aria-label="Inbox">
+  <section v-if="info && tab === 'messages'" class="facts card" aria-label="Inbox">
     <div><span class="k">Stored</span><span class="v num">{{ compact(info.message_count ?? 0) }}</span></div>
     <div><span class="k">Newest</span><span class="v num mono">#{{ info.last_seq }}</span></div>
     <div><span class="k">Keeps</span><span class="v">{{ retention }}</span></div>
     <div class="wide"><span class="k">Senders post to</span><CopyField :value="info.ingest_path" label="Ingest path" /></div>
   </section>
 
+  <InboxSettings v-if="tab === 'settings' && info" :inbox="info" @updated="info = $event" @deleted="navigate('/inboxes')" />
+
+  <template v-if="tab === 'messages'">
   <div class="bar">
     <div class="field"><label for="ftype">Event type</label><input id="ftype" v-model="filters.type" class="input" placeholder="invoice.paid" autocomplete="off" spellcheck="false" /></div>
     <div class="field"><label for="fver">Verification</label>
@@ -266,9 +283,14 @@ onBeforeUnmount(() => {
     <MessageDetail v-if="seq !== null" ref="detail" :slug="slug" :seq="seq" @close="close" />
     <div v-else class="placeholder card"><p class="muted">Pick a message to read it.</p></div>
   </div>
+  </template>
 </template>
 
 <style scoped>
+.itabs { display: flex; gap: 20px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.itabs a { padding: 8px 0; color: var(--mute); border-bottom: 2px solid transparent; font-weight: 500; }
+.itabs a:hover { color: var(--fg); text-decoration: none; }
+.itabs a[aria-current='page'] { color: var(--fg); border-bottom-color: var(--accent); }
 .crumb { font-size: 13px; color: var(--mute); margin-bottom: 4px; display: flex; gap: 6px; }
 .top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 h1 { font-size: 22px; }

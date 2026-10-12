@@ -228,6 +228,18 @@ delivered after a long outage may be refused. Headers that say where a request c
 rest are the sender's, so a receiver must not take them on trust. hookinlet keeps no delivery queue of its own, and
 the relay shows how little one takes.
 
+## The console
+
+Open `/admin` on a running server and sign in with the admin token. It does what the command line does, and
+shows what is arriving: the inboxes and their activity, every message (body, headers, exact bytes) with a live
+mode, new inboxes with a form for each kind of sender, secrets, retention, tokens, and backups. It is built into
+the binary, follows your system's light or dark theme, and works on a phone. `HOOKINLET_ADMIN_UI=false` turns it
+off. The token stays in the page's memory, and everything a sender wrote is shown as text, never as HTML.
+
+![The overview: inboxes, their verifiers and a line of recent activity](docs/images/console-overview.png)
+
+![An inbox: its messages, and one open with its verified body](docs/images/console-messages.png)
+
 ## Configuration
 
 Every setting is a flag and a `HOOKINLET_*` environment variable. The flag wins.
@@ -278,7 +290,7 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
 - **Inboxes as a file.** `hookinlet apply -f inboxes.yaml` creates the inboxes a file declares and changes the ones that
   differ. It never deletes anything. See [applying a file](docs/admin.md#applying-a-file).
 - **Backups while it runs.** `hookinlet backup --out file.db` takes a consistent snapshot.
-- **No dashboard, users, or billing.** The admin API and the command line are how you manage it.
+- **A console, no users or billing.** The admin API and the command line manage it, and a web console at `/admin` does the same with a browser (below). There is one admin token and no accounts.
 - **Not a delivery service for third parties.** It guarantees what it stored and its order. What an agent or relay
   does next is yours.
 

@@ -95,6 +95,40 @@ jobs:
       - name: Known vulnerabilities in what ships
         run: npm audit --omit=dev --audit-level=high
 
+  # The console in a real browser, against the real binary: signing in, creating an inbox,
+  # receiving a signed delivery, reading and following it, tokens, settings, maintenance, the
+  # command palette, and an accessibility scan (axe) of every screen in both themes.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install from the lockfile
+        working-directory: web
+        run: npm ci --ignore-scripts
+      - name: Install the browser
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        working-directory: web
+        run: npm run e2e
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+
   # pkg/server has several hundred tests that run one after another and takes as
   # long as all the rest together, so it runs alongside them, not after them.
   test-server:

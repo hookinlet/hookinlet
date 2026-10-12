@@ -15,3 +15,5 @@
 /GUARDRAILS.md
 /web/node_modules/
 /web/.vite/
+/web/test-results/
+/web/playwright-report/
