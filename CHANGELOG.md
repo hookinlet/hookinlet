@@ -58,6 +58,9 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 
 - **A database restored with a wide file mode is made private when it is opened** (and its `-wal` and
   `-shm` files), with a warning in the log. Before, the server kept whatever mode the copy came with.
+- **`/readyz` no longer fails for the whole server because one inbox's secret does not open.**
+  It fails when the master key opens none of the stored secrets (a wrong key), and logs a warning
+  naming the inboxes when only some do not open. Starting still refuses until they are fixed.
 
 - **Upgrading from rc.1: stop the old server first.** rc.1 takes no lock on the data directory, so
   a migration could run under it and leave message counts wrong. The migration now refuses when
