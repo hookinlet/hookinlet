@@ -146,6 +146,7 @@ func TestShippedMigrationsAreUnchanged(t *testing.T) {
 		"0004_random_ingest_keys.sql":        "c7a59a986049078495f68dd7ff74f3a855993ab0ca8bf42cb08fdd39a8f9c766",
 		"0005_tokens.sql":                    "23fb693300baff378d1743d6c3c1c910ee195c6e46667cc33a4b988316c79772",
 		"0006_epochs_counts_deleting.sql":    "1c73657daaa8c26d56a2d3029d2aaafa2efcff00e7943b0a31726424f4f9b3e4",
+		"0007_body_last.sql":                 "2431d584b6dfe37a47ba364e9800d612a413b04e9cb4223c156b666ef26265ba",
 	}
 	entries, err := os.ReadDir("migrations")
 	if err != nil {

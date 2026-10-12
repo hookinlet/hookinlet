@@ -191,3 +191,49 @@ func TestANewDatabaseIsNotCopied(t *testing.T) {
 		t.Errorf("a new database left %v", all)
 	}
 }
+
+// The body is the last column of a message, and the rebuild keeps every message,
+// its id, and its indexes.
+func TestTheBodyIsTheLastColumnAfterTheUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &inbox.Inbox{Slug: "body-last", IngestKey: "body-last", Name: "n", Verifier: "none"}
+	if err := s.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("kept"), Verified: true, DeliveryID: "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+
+	db, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	rows, err := db.QueryContext(t.Context(), `SELECT name FROM pragma_table_info('messages') ORDER BY cid`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cols []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		cols = append(cols, c)
+	}
+	_ = rows.Close()
+	if len(cols) == 0 || cols[len(cols)-1] != "body" {
+		t.Errorf("columns: %v; the body must come last", cols)
+	}
+	for _, idx := range []string{"messages_inbox_type", "messages_inbox_received", "messages_dedupe", "messages_inbox_delivery"} {
+		var n int
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, idx).Scan(&n); err != nil || n != 1 {
+			t.Errorf("index %s: %d (%v)", idx, n, err)
+		}
+	}
+}
