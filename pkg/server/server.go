@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hookinlet/hookinlet/docs"
@@ -66,6 +67,13 @@ type Options struct {
 	// Now is the clock used for signature timestamp tolerance. Defaults to
 	// time.Now.
 	Now func() time.Time
+	// DrainDelay is how long the server goes on serving, but reports itself not
+	// ready (/readyz answers 503), after it is told to stop and before it stops
+	// listening. A load balancer that polls readiness takes the instance out of
+	// rotation in that time, so that no request is sent to a listener that is
+	// closing. Zero (the default) stops at once. It comes out of the time before
+	// ShutdownTimeout begins, not out of it.
+	DrainDelay time.Duration
 	// IngestMemoryBudget bounds the bytes of request bodies held in memory at once by
 	// deliveries being received. A delivery that would go over it is answered 503
 	// with Retry-After, before its body is read. Each delivery counts for the
@@ -147,7 +155,8 @@ type Server struct {
 	adminHTTP    *http.Server
 	reads        chan struct{} // a slot per read request being served
 
-	ingestBudget byteBudget // body bytes held by deliveries being received
+	draining     atomic.Bool // set when the server is told to stop: /readyz fails
+	ingestBudget byteBudget  // body bytes held by deliveries being received
 
 	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
 	mux        *http.ServeMux
@@ -384,6 +393,17 @@ func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
 	case <-ctx.Done():
 	}
 
+	if d := s.opts.DrainDelay; d > 0 {
+		s.draining.Store(true)
+		s.log.Info("draining: reporting not ready before closing", "delay", d.String())
+		select {
+		case <-time.After(d):
+		case err := <-errCh: // a listener failed meanwhile
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				return err
+			}
+		}
+	}
 	s.log.Info("shutting down", "timeout", s.opts.ShutdownTimeout.String())
 	// Tell long-lived streams to finish. This is separate from cancelling request
 	// contexts, which would also cut off deliveries that are in the middle of

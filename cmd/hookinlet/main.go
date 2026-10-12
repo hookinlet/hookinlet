@@ -55,6 +55,8 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		return retentionCmd(args[1:], getenv, stdout, stderr)
 	case "apply":
 		return applyCmd(args[1:], getenv, stdout, stderr)
+	case "healthcheck":
+		return healthcheckCmd(args[1:], getenv, stdout, stderr)
 	case "rekey":
 		return rekeyCmd(args[1:], getenv, stdout, stderr)
 	case "renew-epochs":
@@ -84,6 +86,7 @@ Commands:
   token     Manage agent tokens: create, list, revoke
   retention Apply retention policies now (retention run)
   apply     Bring inboxes to the state a YAML file declares (apply -f FILE)
+  healthcheck  Ask a running server if it is ready (for a container HEALTHCHECK)
   rekey     Seal the stored secrets under a new master key (server stopped)
   renew-epochs  Give every inbox a new epoch, after restoring from a copy (server stopped)
   backup    Write a consistent copy of the database (backup --out FILE)
@@ -188,6 +191,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		RetentionInterval:  cfg.RetentionInterval,
 		MCPInlineBodyBytes: cfg.MCPInlineBodyBytes,
 		IngestMemoryBudget: ingestBudget(cfg.IngestMemoryBudget),
+		DrainDelay:         cfg.DrainDelay,
 		TrustedProxies:     cfg.TrustedProxies,
 	})
 	if err != nil {

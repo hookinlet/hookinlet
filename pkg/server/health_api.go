@@ -58,6 +58,9 @@ func (a *healthAPI) HeadReadyz(ctx context.Context, _ api.HeadReadyzRequestObjec
 // server whose key is not the one its data was sealed under accepts every
 // delivery and fails every one that needs a secret.
 func (s *Server) notReady(ctx context.Context) string {
+	if s.draining.Load() {
+		return "the server is shutting down"
+	}
 	if err := s.opts.Store.Ping(ctx); err != nil {
 		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready", slog.String("err", err.Error()))
 		if errors.Is(err, inbox.ErrStorageFull) {

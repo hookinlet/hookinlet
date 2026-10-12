@@ -87,6 +87,7 @@ type Config struct {
 	AdminListenAddr    string
 	MCPInlineBodyBytes int
 	IngestMemoryBudget int64
+	DrainDelay         time.Duration
 	RetentionInterval  time.Duration
 	ShutdownTimeout    time.Duration
 }
@@ -141,6 +142,7 @@ var specs = []spec{
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
 	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},
 	{name: "ingest-memory-budget", def: "268435456", usage: "most bytes of request bodies held in memory at once by deliveries being received; more are answered 503 with Retry-After (0 turns the bound off)"},
+	{name: "drain-delay", def: "0", usage: "after being told to stop, keep serving for this long while /readyz answers 503, so a load balancer can take the instance out of rotation before the listener closes; 0 stops at once"},
 	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps, at least 1s; \"off\" turns the schedule off (sweeps still run on request)"},
 	{name: "shutdown-timeout", def: "10s", usage: "time allowed for in-flight requests to finish on shutdown"},
 }
@@ -353,6 +355,9 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 		collect(err)
 	} else if c.RetentionInterval < time.Second {
 		collect(fieldErr("retention-interval", "must be at least 1s, or \"off\""))
+	}
+	if c.DrainDelay, err = parseDuration(vals, "drain-delay", false); err != nil {
+		collect(err)
 	}
 	if c.ShutdownTimeout, err = parseDuration(vals, "shutdown-timeout", true); err != nil {
 		collect(err)

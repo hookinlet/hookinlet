@@ -310,3 +310,38 @@ func TestAFailedCopyLeavesTheEarlierOneAndTheDatabaseAlone(t *testing.T) {
 		t.Errorf("the database is at version %d (%v), want it untouched at 2", v, err)
 	}
 }
+
+// The write-ahead log is cut back to its limit after it is checkpointed, and does
+// not stay as large as the biggest burst of writes.
+func TestTheWriteAheadLogIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	const limit = 1 << 20
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithWALLimit(limit))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	in := &inbox.Inbox{Slug: "wal-bound", IngestKey: "wal-bound", Name: "n", Verifier: "none", MaxBodyBytes: 4 << 20}
+	if err := s.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	body := make([]byte, 3<<20) // one message much bigger than the limit
+	for range 6 {
+		if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: body, Verified: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A burst of small writes lets the checkpoint run and the log reset.
+	for range 200 {
+		if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("x"), Verified: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := os.Stat(filepath.Join(dir, sqlite.DBFileName+"-wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > 4*limit {
+		t.Errorf("the write-ahead log is %d bytes after the burst, want it cut back near %d", info.Size(), limit)
+	}
+}

@@ -81,11 +81,22 @@ type config struct {
 	log       *slog.Logger
 	lock      bool
 	freeSpace func(dir string) (uint64, error)
+	walLimit  int64
 }
 
 // WithClock sets the clock used for every timestamp the Store assigns. It
 // exists so tests can control time; the default is time.Now.
 func WithClock(now func() time.Time) Option { return func(c *config) { c.now = now } }
+
+// DefaultWALLimit is the size the write-ahead log is cut back to whenever it is
+// reset after a checkpoint. SQLite checkpoints on its own every 1000 pages, but
+// never shrinks the file, so one burst of writes (or one long read that held a
+// checkpoint back) would leave a log that size for good. The limit is on what stays;
+// a log may be larger than it between checkpoints.
+const DefaultWALLimit = 64 << 20
+
+// WithWALLimit sets the size the write-ahead log is cut back to (DefaultWALLimit).
+func WithWALLimit(bytes int64) Option { return func(c *config) { c.walLimit = bytes } }
 
 // LockFileName is the file in the data directory that WithExclusiveLock locks.
 const LockFileName = "hookinlet.lock"
@@ -124,7 +135,7 @@ func WithReaders(n int) Option { return func(c *config) { c.readers = n } }
 // pending migrations. It makes no network calls. It fails if the database was
 // written by a newer version of hookinlet.
 func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error) {
-	cfg := config{now: time.Now, readers: defaultReaders, freeSpace: freeBytes}
+	cfg := config{now: time.Now, readers: defaultReaders, freeSpace: freeBytes, walLimit: DefaultWALLimit}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -171,6 +182,11 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 	wdb.SetMaxOpenConns(1)
 	wdb.SetMaxIdleConns(1)
 	wdb.SetConnMaxLifetime(0)
+
+	if _, err := wdb.ExecContext(ctx, fmt.Sprintf("PRAGMA journal_size_limit = %d", cfg.walLimit)); err != nil {
+		_ = wdb.Close()
+		return nil, fmt.Errorf("sqlite: bound the write-ahead log: %w", err)
+	}
 
 	removeStaleBackups(filepath.Dir(abs), time.Now())
 	if cfg.log == nil {

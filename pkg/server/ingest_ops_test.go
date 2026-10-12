@@ -6,10 +6,12 @@ package server
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
@@ -149,5 +151,58 @@ func TestBeforeIngestSeesTheSourceAndTheHeaders(t *testing.T) {
 	}
 	if r.SourceIP == "" {
 		t.Error("no source address")
+	}
+}
+
+// Told to stop, the server reports not ready for DrainDelay while it still serves,
+// and only then closes.
+func TestADrainingServerReportsNotReadyBeforeItCloses(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.DrainDelay = 600 * time.Millisecond })
+	e.newInbox("draining", "trusted", "")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, stop := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- e.server.Serve(ctx, ln) }()
+	base := "http://" + ln.Addr().String()
+
+	if status, _ := do2(t, "GET", base+"/readyz", nil, ""); status != http.StatusOK {
+		t.Fatalf("before: %d", status)
+	}
+	begin := time.Now()
+	stop()
+	deadline := time.Now().Add(400 * time.Millisecond)
+	var sawNotReady bool
+	for time.Now().Before(deadline) {
+		status, body := do2(t, "GET", base+"/readyz", nil, "")
+		if status == http.StatusServiceUnavailable && strings.Contains(body, "shutting down") {
+			sawNotReady = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !sawNotReady {
+		t.Fatal("/readyz did not report the shutdown during the delay")
+	}
+	// Still serving: liveness and ingest work while the balancer catches up.
+	if status, _ := do2(t, "GET", base+"/healthz", nil, ""); status != http.StatusOK {
+		t.Errorf("/healthz while draining: %d", status)
+	}
+	if status, _ := do2(t, "POST", base+"/in/draining", nil, "x"); status != http.StatusOK {
+		t.Errorf("ingest while draining: %d", status)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Serve: %v", err)
+		}
+		if time.Since(begin) < 500*time.Millisecond {
+			t.Errorf("closed after %v, before the delay was over", time.Since(begin))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return")
 	}
 }
