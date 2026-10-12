@@ -27,7 +27,7 @@ are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`.
 
 ## Putting them together
 
-`server.New` takes an `Options`. Only `Addr` and `Store` are required, but the
+`server.New` takes an `Options`. Only `Store` is required (and `Addr`, if you call `Run`), but the
 read API, the admin API, SSE and MCP are served only when there is an
 `Authenticator`, since there is no safe default for who may read.
 
@@ -53,11 +53,16 @@ starting point. `Options` has the rest (limits, timeouts, `TrustedProxies`,
 its default is.
 
 `srv.Handler()` returns the whole `http.Handler`, if you would rather mount it in
-a server of your own than call `Run`. `Run` and `Serve` do two things the handler
-alone does not: they start the retention schedule, and on shutdown they end open
-streams and MCP waits first. If you serve the handler yourself, call
-`srv.Shutdown(ctx)` to end the streams, and run retention yourself
-(`POST /v1/admin/retention/run`, or `Store.Prune`) on whatever schedule you want.
+a server of your own than call `Run` (no `Addr` is needed then). `Run` and `Serve` do
+two things the handler alone does not: they start the retention schedule, and on
+shutdown they end open streams and MCP waits first. If you serve the handler yourself,
+run `srv.Maintain(ctx)` in a goroutine for the schedule (it also finishes any delete
+that was cut short), and call `srv.Shutdown(ctx)` to end the streams.
+
+Every numeric and duration option follows one rule, written in `Options`' comment and
+in [Stability](stability.md#the-go-packages): zero is the default, and a negative
+number is an error unless it turns a bound off (`RetentionInterval`,
+`IngestMemoryBudget`).
 
 ## Writing hooks
 

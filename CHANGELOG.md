@@ -16,6 +16,19 @@ applies.
   the top. `query_messages` and `wait_for_messages` return messages **without bodies** unless
   `bodies: true` (replacing `summary`, which meant the opposite and was off by default).
   REST and SSE messages are unchanged.
+- **`server.Options` follows one rule**: zero is the default, a negative number turns a bound
+  off where that makes sense (`RetentionInterval`, `IngestMemoryBudget`) and is an error
+  everywhere else (it used to be taken as the default). `Addr` is only needed to `Run`.
+
+#### Added
+- `docs/stability.md`: what is stable, what is not, how a change is announced, what an inbox
+  identifier is, and where CORS, TLS and the Host check stand.
+- `Server.Maintain(ctx)` runs the retention schedule for an embedder that serves `Handler()`
+  itself.
+- Tests that fail when a core interface (`Store`, `Hooks`, `SecretBox`, `Authenticator`,
+  `Principal`, `Notifier`) gains or loses a method, when the REST, wire and MCP message types
+  stop carrying the same fields, and when the generator template we changed stops being
+  upstream's plus the recorded edits (`scripts/check-template.sh`, in CI).
 
 ### Phase 15: storage and startup (part 2)
 

@@ -80,8 +80,8 @@ func TestNewValidatesOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if _, err := New(Options{Store: store}); err == nil {
-		t.Error("want an error for a missing Addr")
+	if _, err := New(Options{Store: store}); err != nil {
+		t.Errorf("a Server for the handler needs no Addr: %v", err)
 	}
 	if _, err := New(Options{Addr: "127.0.0.1:0"}); err == nil {
 		t.Error("want an error for a missing Store")

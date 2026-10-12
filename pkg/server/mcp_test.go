@@ -242,10 +242,10 @@ func TestQueryFiltersAndDirections(t *testing.T) {
 		t.Errorf("forward walk = %v", seen)
 	}
 
-	// Summaries have no bodies.
-	p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "summary": true, "limit": 1}).page(t)
-	if _, has := p.Messages[0]["body"]; has {
-		t.Errorf("summary carried a body: %v", p.Messages[0])
+	// Messages come without bodies unless asked.
+	p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "limit": 1}).page(t)
+	if _, has := p.Messages[0]["untrusted"].(map[string]any)["body"]; has {
+		t.Errorf("a default query carried a body: %v", p.Messages[0])
 	}
 }
 
@@ -316,10 +316,11 @@ func TestBodiesOverTheInlineLimitAreTruncatedAndFetchableWhole(t *testing.T) {
 	for _, tool := range []string{"query", "wait"} {
 		var p mcpPage
 		if tool == "query" {
-			p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0}).page(t)
+			p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "bodies": true}).page(t)
 		} else {
-			p = callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 0, "timeout_seconds": 0}).page(t)
+			p = callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 0, "timeout_seconds": 0, "bodies": true}).page(t)
 		}
+		p.Messages = flattenUntrusted(p.Messages)
 		if len(p.Messages) != 2 {
 			t.Fatalf("%s: %d messages", tool, len(p.Messages))
 		}
@@ -342,14 +343,16 @@ func TestBodiesOverTheInlineLimitAreTruncatedAndFetchableWhole(t *testing.T) {
 
 	whole := callTool(t, cs, "get_message", map[string]any{"inbox": "agent-a", "seq": 2})
 	var m struct {
-		Body          map[string]string `json:"body"`
-		BodyTruncated bool              `json:"body_truncated"`
+		Untrusted struct {
+			Body          map[string]string `json:"body"`
+			BodyTruncated bool              `json:"body_truncated"`
+		} `json:"untrusted"`
 	}
 	if err := json.Unmarshal(whole.raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m.BodyTruncated || m.Body["data"] != strings.Repeat("z", 5000) {
-		t.Errorf("get_message must return the full body (truncated=%v, %d bytes)", m.BodyTruncated, len(m.Body["data"]))
+	if m.Untrusted.BodyTruncated || m.Untrusted.Body["data"] != strings.Repeat("z", 5000) {
+		t.Errorf("get_message must return the full body (truncated=%v, %d bytes)", m.Untrusted.BodyTruncated, len(m.Untrusted.Body["data"]))
 	}
 }
 
@@ -1164,7 +1167,8 @@ func TestInlineLimitIsExactAndCannotExceedWhatRESTLoads(t *testing.T) {
 	ae.post("/in/agent-a", exact, "Content-Type", "application/json")
 	ae.post("/in/agent-a", exact+" ", "Content-Type", "application/json") // 101
 	cs := connectMCP(t, base, ae.tokenA)
-	p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0}).page(t)
+	p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "bodies": true}).page(t)
+	p.Messages = flattenUntrusted(p.Messages)
 	if p.Messages[0]["body_truncated"] != nil || p.Messages[0]["body"] == nil {
 		t.Errorf("a body of exactly the limit must be inline: %v", p.Messages[0])
 	}
