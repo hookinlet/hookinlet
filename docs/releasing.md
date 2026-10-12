@@ -57,20 +57,25 @@ docker buildx imagetools inspect ghcr.io/hookinlet/hookinlet:0.1.0   # provenanc
 `THIRD_PARTY_LICENSES` is generated (`make licenses`) and CI fails if it is out of date, or if a
 dependency has a license other than MIT, BSD, ISC or Apache-2.0. Dependabot opens a weekly pull
 request for Go modules, the GitHub Actions (pinned by commit) and the Docker base images
-(pinned by digest); `govulncheck` runs on every change and every night.
+(pinned by digest); `govulncheck` runs on every change and every night. Turn on Dependabot security updates in the
+repository settings (Code security) as well, or only the weekly pull requests are opened.
+A grouped Go-module pull request changes versions only; it passes CI unless it adds a dependency or
+changes a license, in which case run `make licenses` on its branch.
 
 ## Before the repository goes public
 
 None of this is done by a workflow; each is a setting or a tag only a maintainer can make.
 
-1. **Tag a final release** (`v0.1.0`). The README and `docs/deploying.md` start with
+1. **Tag a final release** (`v0.1.0`). The release workflow works while the repository is private (a
+   release candidate is a good way to try it), but it makes the provenance attestation only once
+   the repository is public, so make it public first if you want the final release to have one. The README and `docs/deploying.md` start with
    `ghcr.io/hookinlet/hookinlet:latest`, which does not exist until a final release does
    (a pre-release such as `v0.1.0-rc.1` gets only its own version tag).
 2. **Make the GHCR package public** and link it to the repository, then check with an anonymous
    `docker pull ghcr.io/hookinlet/hookinlet:0.1.0`.
 3. **Enable private vulnerability reporting** (Settings, Code security). `SECURITY.md` and the
    issue chooser send reporters there, and it is off until it is enabled.
-4. **The planning notes are not in the repository.** `PLAN.md`, `CLAUDE.md` and `GUARDRAILS.md` are untracked and ignored (the rules that matter are in `CONTRIBUTING.md`). They are still in the git history, which a public repository shows; if that matters, publish a history that does not contain them.
+4. **The planning notes are not in the repository.** `PLAN.md`, `CLAUDE.md` and `GUARDRAILS.md` are untracked and ignored (the rules that matter are in `CONTRIBUTING.md`). Earlier versions are in the git history, which a public repository shows; if that matters, publish a history that does not contain them.
 5. **Read the README once from a clean clone**, in a new shell, as a stranger would.
 
 ## After
@@ -99,7 +104,10 @@ put the digests after the tags in the `FROM` lines, and run
 
 ## What is not done
 
-The macOS binaries are not signed or notarized, and the archives and checksums are
-not signed. The checksums and SBOMs come from the same workflow run as the
-archives, so they guard against a damaged download, not against a compromised
-release.
+The macOS binaries are not signed or notarized. The archives and `checksums.txt` carry a
+signed build-provenance attestation (`gh attestation verify`), which says that this
+repository's release workflow built them; it is made only when the repository is public (GitHub
+does not offer it to a private one on a free plan), so a release cut while private has
+checksums and SBOMs only, which guard against a damaged download and not against a
+compromised release. The container image has BuildKit provenance and an SBOM attached, which are
+not signed.
