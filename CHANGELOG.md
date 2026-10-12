@@ -56,6 +56,12 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 
 ### Release review fixes
 
+- **Admin console, third part.** Each inbox has a page: its facts and ingest path, and its messages, newest
+  first, with filters (event type, verification, time), older messages on request, and a live mode that
+  follows the stream. A message opens at its own address (`/admin/inboxes/SLUG/messages/SEQ`) and shows
+  its body, headers, exact raw bytes (as text or hex) and details, with a copy-as-curl for reading it back.
+  Everything a sender wrote is drawn as text, with a reminder that it is untrusted.
+
 - **Admin console, second part.** The console now has an overview (inbox count, messages received,
   the last 24 hours, the last retention run, and an activity line per inbox), an inbox list with a
   filter, and a Tokens page that issues tokens (shown once, with a ready curl line) and revokes them.

@@ -5,6 +5,7 @@ import SignIn from './components/SignIn.vue'
 import { href, link, route } from './router'
 import { signedIn } from './session'
 import InboxesView from './views/InboxesView.vue'
+import InboxView from './views/InboxView.vue'
 import OverviewView from './views/OverviewView.vue'
 import TokensView from './views/TokensView.vue'
 
@@ -25,7 +26,8 @@ const view = computed(() => {
 <template>
   <SignIn v-if="!signedIn" />
   <AppShell v-else>
-    <component :is="view" v-if="view" :key="route.name" />
+    <InboxView v-if="route.name === 'inbox'" :key="route.slug" :slug="route.slug" :seq="route.seq" />
+    <component :is="view" v-else-if="view" :key="route.name" />
     <section v-else class="card missing">
       <h1>Not found</h1>
       <p class="muted">There is no such page in the console.</p>

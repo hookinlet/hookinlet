@@ -5,7 +5,12 @@ import { computed, ref } from 'vue'
 // /admin with the app).
 export const BASE = '/admin'
 
-export type Route = { name: 'overview' } | { name: 'inboxes' } | { name: 'tokens' } | { name: 'notfound' }
+export type Route =
+  | { name: 'overview' }
+  | { name: 'inboxes' }
+  | { name: 'inbox'; slug: string; seq: number | null }
+  | { name: 'tokens' }
+  | { name: 'notfound' }
 
 export function parse(pathname: string): Route {
   const p = pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname
@@ -17,8 +22,11 @@ export function parse(pathname: string): Route {
       return { name: 'inboxes' }
     case '/tokens':
       return { name: 'tokens' }
-    default:
+    default: {
+      const m = /^\/inboxes\/([a-z0-9-]{1,64})(?:\/messages\/(\d{1,15}))?$/.exec(clean)
+      if (m) return { name: 'inbox', slug: m[1]!, seq: m[2] ? Number(m[2]) : null }
       return { name: 'notfound' }
+    }
   }
 }
 
