@@ -20,10 +20,15 @@ git clone -q --no-local --single-branch --branch main --no-tags "$src" "$dst"
 cd "$dst"
 args=(--force --invert-paths)
 for f in "${notes[@]}"; do args+=(--path "$f"); done
-git filter-repo "${args[@]}" --message-callback 'import re
+callback=$(mktemp)
+trap 'rm -f "$callback"' EXIT
+cat > "$callback" <<'PY'
+import re
 m = message.decode("utf-8")
-m = re.sub(r"^Merge pull request #\d+ from [^/\s]+/(\S+)", r"Merge branch \x27\1\x27", m)
-return m.encode("utf-8")'
+m = re.sub(r"^Merge pull request #\d+ from [^/\s]+/(\S+)", r"Merge branch '\1'", m)
+return m.encode("utf-8")
+PY
+git filter-repo "${args[@]}" --message-callback "$(cat "$callback")"
 
 [ "$(git rev-parse 'HEAD^{tree}')" = "$(git -C "$src" rev-parse 'main^{tree}')" ] ||
   { echo "public-history: the tip of the copy differs from main's; do not publish it" >&2; exit 1; }
