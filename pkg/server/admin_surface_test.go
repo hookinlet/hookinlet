@@ -194,6 +194,13 @@ func TestTheConsoleIsServedWithTheAdminAPI(t *testing.T) {
 	if code, _ := status(on, "/admin/inboxes/some-screen"); code != 200 {
 		t.Errorf("a screen of the app: %d", code)
 	}
+	base := serveOn(t, on)
+	if code, _ := do2(t, "POST", base+"/admin", nil, ""); code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /admin: %d, want 405", code)
+	}
+	if code, body := do2(t, "GET", base+"/admin/assets/", nil, ""); code != http.StatusNotFound || strings.Contains(body, "<a href") {
+		t.Errorf("a directory of the console's files: %d", code)
+	}
 	for name, mods := range map[string][]func(*Options){
 		"switched off":     {withAuth, func(o *Options) { o.DisableUI = true }},
 		"admin API off":    {withAuth, func(o *Options) { o.DisableAdmin = true }},

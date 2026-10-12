@@ -401,7 +401,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 // ServeAdmin is Serve for a server with Options.AdminAddr set, given a listener
-// for each address. The admin API is served on adminLn and nothing else is.
+// for each address. The admin API, and the console if it is on, are served on adminLn and nothing else is.
 func (s *Server) ServeAdmin(ctx context.Context, ln, adminLn net.Listener) error {
 	if ln == nil || adminLn == nil {
 		if ln != nil {

@@ -57,11 +57,15 @@ func handler(files fs.FS) http.Handler {
 		if name == "" {
 			name = "index.html"
 		}
-		if _, err := fs.Stat(files, name); err != nil {
-			if path.Ext(name) != "" {
-				http.NotFound(w, r) // a missing file is not a screen
-				return
-			}
+		fi, err := fs.Stat(files, name)
+		switch {
+		case err == nil && fi.IsDir():
+			http.NotFound(w, r) // a directory of files is not listed, and is not a screen
+			return
+		case err != nil && path.Ext(name) != "":
+			http.NotFound(w, r) // a missing file is not a screen
+			return
+		case err != nil:
 			name = "index.html"
 		}
 		if strings.HasPrefix(name, "assets/") {

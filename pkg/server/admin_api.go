@@ -390,7 +390,7 @@ func (a *adminAPI) Metrics(ctx context.Context, _ api.MetricsRequestObject) (api
 // AdminStatus reports the server's own state for the admin console.
 func (a *adminAPI) AdminStatus(ctx context.Context, _ api.AdminStatusRequestObject) (api.AdminStatusResponseObject, error) {
 	s := a.s
-	out := api.AdminStatus{Version: s.opts.Version, RetentionIntervalSeconds: max(0, int(s.opts.RetentionInterval/time.Second))}
+	out := api.AdminStatus{Version: s.opts.Version, RetentionIntervalSeconds: int((max(0, s.opts.RetentionInterval) + time.Second - 1) / time.Second)}
 	if rep, ok := s.opts.Store.(inbox.StatusReporter); ok {
 		st, err := rep.Status(ctx)
 		if err != nil {

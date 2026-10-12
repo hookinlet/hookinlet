@@ -14,10 +14,10 @@ export class ApiError extends Error {
 // request calls the admin API with the admin token. The token lives in the caller's
 // memory only; it is never put in a URL.
 export async function request<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { ...init.headers, Authorization: `Bearer ${token}`, Accept: 'application/json' },
-  })
+  const headers = new Headers(init.headers)
+  headers.set('Authorization', `Bearer ${token}`)
+  headers.set('Accept', 'application/json')
+  const res = await fetch(path, { ...init, headers })
   if (!res.ok) {
     let message = res.statusText
     try {

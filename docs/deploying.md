@@ -211,7 +211,7 @@ lists them all.
 | `HOOKINLET_SSE_HEARTBEAT` | `15s` | Ping interval on idle streams. |
 | `HOOKINLET_SSE_RECHECK_INTERVAL` | `0` (off) | Re-read the store this often even without a wake-up. Needed only by a notifier that can drop signals; the built-in one does not. |
 | `HOOKINLET_ADMIN_ENABLED` | `true` | Serve the admin API (`/v1/admin/...`). `false` leaves inboxes and tokens to the command line. |
-| `HOOKINLET_ADMIN_LISTEN_ADDR` | none | Serve the admin API on this address instead of `HOOKINLET_LISTEN_ADDR`, and nothing else there. |
+| `HOOKINLET_ADMIN_LISTEN_ADDR` | none | Serve the admin API on this address instead of `HOOKINLET_LISTEN_ADDR`. Only the admin API and the console (`/admin`) are served there. |
 | `HOOKINLET_MCP_ENABLED` | `true` | Serve `/mcp`. |
 | `HOOKINLET_ADMIN_UI` | `true` | Serve the admin console at `/admin`, on the same listener as the admin API. It needs the admin API on (`HOOKINLET_ADMIN_ENABLED`). |
 | `HOOKINLET_MCP_INLINE_BODY_BYTES` | `16384` | Largest body MCP tools return inline (at most 65536). |

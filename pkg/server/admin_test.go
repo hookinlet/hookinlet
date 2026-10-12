@@ -1041,6 +1041,14 @@ func TestManualRetentionStopsWhenShutdownBegins(t *testing.T) {
 
 // The status endpoint reports the release, the schema, the database, and the last
 // retention run once there has been one.
+func TestAdminStatusReportsAShortIntervalAsOnSecond(t *testing.T) {
+	a := newAdminEnv(t, func(o *Options) { o.RetentionInterval = 400 * time.Millisecond })
+	got := unjson[map[string]any](t, a.mustAdmin("GET", "/v1/admin/status", nil, 200))
+	if got["retention_interval_seconds"] != float64(1) {
+		t.Errorf("retention_interval_seconds = %v; a schedule that is on must not read as 0", got["retention_interval_seconds"])
+	}
+}
+
 func TestAdminStatusReportsTheServer(t *testing.T) {
 	a := newAdminEnv(t, func(o *Options) { o.Version = "9.9.9"; o.RetentionInterval = 90 * time.Minute })
 	type status struct {

@@ -18,7 +18,11 @@ func (s *Server) mountConsole(mux *http.ServeMux, surface surface) {
 		return
 	}
 	mux.Handle(ui.Prefix+"/", ui.Handler())
-	mux.HandleFunc("GET "+ui.Prefix, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(ui.Prefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			ui.Handler().ServeHTTP(w, r) // answers 405, with the console's headers
+			return
+		}
 		http.Redirect(w, r, ui.Prefix+"/", http.StatusMovedPermanently)
 	})
 }

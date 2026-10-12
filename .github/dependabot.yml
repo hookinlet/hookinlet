@@ -18,8 +18,9 @@ updates:
       actions:
         patterns: ["*"]
     open-pull-requests-limit: 5
-  # The console's build tools and runtime. Production changes to the built files are part
-  # of the pull request, because CI rebuilds and compares them.
+  # The console's build tools and runtime. CI rebuilds internal/ui/dist and the licence
+  # file from the lockfile and fails on any difference, so a bump of a package that is in
+  # the bundle needs a person to run `make web` on the branch and push the result.
   - package-ecosystem: npm
     directory: /web
     schedule: { interval: weekly }

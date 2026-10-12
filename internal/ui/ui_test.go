@@ -46,6 +46,9 @@ func TestAScreenGetsTheIndexAndAMissingFileDoesNot(t *testing.T) {
 			t.Errorf("%s: the index must be revalidated, got %q", target, rec.Header().Get("Cache-Control"))
 		}
 	}
+	if rec := get(t, http.MethodGet, "/admin/assets/"); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "app-1a2b.js") {
+		t.Errorf("a directory listing: %d %q", rec.Code, rec.Body.String())
+	}
 	if rec := get(t, http.MethodGet, "/admin/assets/gone.js"); rec.Code != http.StatusNotFound {
 		t.Errorf("a missing script: %d", rec.Code)
 	}
