@@ -308,10 +308,17 @@ func (r *remoteAdmin) Backup(ctx context.Context) (io.ReadCloser, int64, error) 
 	if err != nil {
 		return nil, 0, err
 	}
-	size, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
-	if err != nil || size < 0 {
-		_ = resp.Body.Close()
-		return nil, 0, errors.New("the server did not say how big the backup is")
+	// A server whose store streams the snapshot may not say how big it is (-1). The
+	// body is then chunked, and a connection that breaks part way is an error from
+	// the read, not a short file.
+	size := int64(-1)
+	if h := resp.Header.Get("Content-Length"); h != "" {
+		n, err := strconv.ParseInt(h, 10, 64)
+		if err != nil || n < 0 {
+			_ = resp.Body.Close()
+			return nil, 0, errors.New("the server sent a Content-Length for the backup that is not a size")
+		}
+		size = n
 	}
 	return resp.Body, size, nil
 }

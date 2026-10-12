@@ -275,7 +275,7 @@ func TestOpenAPISecurityMatchesTheServer(t *testing.T) {
 		var want []string
 		switch {
 		case open[id]:
-		case strings.HasPrefix(o.path, "/admin/"):
+		case strings.HasPrefix(o.path, "/admin/") || o.path == "/metrics":
 			want = []string{"adminToken"}
 		default:
 			want = []string{"adminToken", "agentToken"}
@@ -477,6 +477,7 @@ func rawBrokenBodyAs(t *testing.T, addr, method, path, auth string, declared int
 type faulty struct {
 	inbox.Store
 	fail, conflict, pingFail bool
+	noRoom                   bool // Append says the disk is full
 	mu                       sync.Mutex
 }
 
@@ -492,6 +493,22 @@ func (f *faulty) set(fail, conflict, ping bool) {
 	f.mu.Lock()
 	f.fail, f.conflict, f.pingFail = fail, conflict, ping
 	f.mu.Unlock()
+}
+
+func (f *faulty) setNoRoom(v bool) {
+	f.mu.Lock()
+	f.noRoom = v
+	f.mu.Unlock()
+}
+
+func (f *faulty) Append(ctx context.Context, id inbox.ID, m *inbox.NewMessage) (*inbox.Message, bool, error) {
+	f.mu.Lock()
+	full := f.noRoom
+	f.mu.Unlock()
+	if full {
+		return nil, false, inbox.ErrStorageFull
+	}
+	return f.Store.Append(ctx, id, m)
 }
 
 func (f *faulty) ResolveIngestKey(ctx context.Context, k string) (*inbox.Inbox, error) {

@@ -140,7 +140,7 @@ func TestAdminAPIRequiresTheAdminToken(t *testing.T) {
 		{"PATCH", "/admin/inboxes/agent-a"}, {"DELETE", "/admin/inboxes/agent-a"},
 		{"PUT", "/admin/inboxes/agent-a/secret"}, {"POST", "/admin/inboxes/agent-a/rotate-ingest-key"},
 		{"POST", "/admin/tokens"}, {"GET", "/admin/tokens"}, {"DELETE", "/admin/tokens/1"},
-		{"POST", "/admin/retention/run"}, {"GET", "/admin/backup"},
+		{"POST", "/admin/retention/run"}, {"GET", "/admin/backup"}, {"GET", "/metrics"},
 	}
 	for _, r := range routes {
 		for name, tok := range map[string]string{"no token": "", "bad token": "nope", "an agent token": a.tokenA} {
@@ -170,7 +170,7 @@ func TestAdminAPIWrongMethodIsJSON405(t *testing.T) {
 	a := newAdminEnv(t)
 	for path, allow := range map[string]string{
 		"/admin/inboxes": "GET, POST", "/admin/inboxes/agent-a": "DELETE, GET, PATCH", "/admin/inboxes/agent-a/secret": "PUT",
-		"/admin/inboxes/agent-a/rotate-ingest-key": "POST", "/admin/tokens": "GET, POST", "/admin/tokens/1": "DELETE", "/admin/retention/run": "POST", "/admin/backup": "GET",
+		"/admin/inboxes/agent-a/rotate-ingest-key": "POST", "/admin/tokens": "GET, POST", "/admin/tokens/1": "DELETE", "/admin/retention/run": "POST", "/admin/backup": "GET", "/metrics": "GET",
 	} {
 		status, hdr, body := a.call("OPTIONS", path, nil, testAdminToken)
 		if status != http.StatusMethodNotAllowed || hdr.Get("Allow") != allow || errorCodeOfBody(t, body) != "method_not_allowed" {

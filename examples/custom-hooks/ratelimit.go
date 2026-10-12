@@ -57,7 +57,8 @@ func NewRateLimiter(perSecond float64, burst int) *RateLimiter {
 // inbox.ErrRateLimited makes the server answer 429.
 //
 // The hook is called concurrently, from every request, so it locks.
-func (r *RateLimiter) BeforeIngest(_ context.Context, in *inbox.Inbox, _ int64) error {
+func (r *RateLimiter) BeforeIngest(_ context.Context, req *inbox.IngestRequest) error {
+	in := req.Inbox
 	now := r.now()
 
 	r.mu.Lock()

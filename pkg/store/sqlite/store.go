@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,6 +64,9 @@ type Store struct {
 	closeErr  error
 
 	log       *slog.Logger
+	fullUntil atomic.Int64 // unix nanoseconds: Ping reports the Store full until then, after a write failed for lack of room
+	freeSpace func(dir string) (uint64, error)
+	lock      *os.File     // held for the life of a Store opened with WithExclusiveLock
 	clockWarn atomic.Int64 // when a stepped-back clock was last logged, in unix seconds
 }
 
@@ -72,18 +76,57 @@ var _ inbox.Store = (*Store)(nil)
 type Option func(*config)
 
 type config struct {
-	now     func() time.Time
-	readers int
-	log     *slog.Logger
+	now       func() time.Time
+	readers   int
+	log       *slog.Logger
+	lock      bool
+	freeSpace func(dir string) (uint64, error)
+	walLimit  int64
 }
 
 // WithClock sets the clock used for every timestamp the Store assigns. It
 // exists so tests can control time; the default is time.Now.
 func WithClock(now func() time.Time) Option { return func(c *config) { c.now = now } }
 
+// DefaultWALLimit is the size the write-ahead log is cut back to whenever it is
+// reset after a checkpoint. SQLite checkpoints on its own every 1000 pages, but
+// never shrinks the file, so one burst of writes (or one long read that held a
+// checkpoint back) would leave a log that size for good. The limit is on what stays;
+// a log may be larger than it between checkpoints.
+const DefaultWALLimit = 64 << 20
+
+// WithWALLimit sets the size the write-ahead log is cut back to (DefaultWALLimit).
+func WithWALLimit(bytes int64) Option { return func(c *config) { c.walLimit = bytes } }
+
+// LockFileName is the file in the data directory that WithExclusiveLock locks.
+const LockFileName = "hookinlet.lock"
+
 // WithLogger sets where the Store reports things an operator should know, such as
 // a clock that stepped back. The default discards them.
 func WithLogger(l *slog.Logger) Option { return func(c *config) { c.log = l } }
+
+// WithExclusiveLock makes Open take a lock on the data directory that no other
+// exclusive Open can share, and fails with *LockedError if another holds it. A
+// server uses it, so that a second server started on the same directory stops at
+// once and not after it has done harm; so do the commands that must not run beside
+// one (rekey, renew-epochs). Stores opened without it are not blocked by it, which
+// is what lets the command line work in the data directory of a running server. The
+// lock goes when the Store is closed or the process ends.
+func WithExclusiveLock() Option { return func(c *config) { c.lock = true } }
+
+// LockedError means the data directory is locked by another process.
+type LockedError struct {
+	Path   string
+	Holder string // the pid it wrote, if it could be read
+}
+
+func (e *LockedError) Error() string {
+	who := ""
+	if h := strings.TrimSpace(e.Holder); h != "" {
+		who = " (process " + h + ")"
+	}
+	return "sqlite: another hookinlet process" + who + " holds the lock on this data directory (" + e.Path + "): a second server cannot share it, and the commands that need the server stopped cannot run beside one"
+}
 
 // WithReaders sets the size of the read-connection pool. The default is 4.
 func WithReaders(n int) Option { return func(c *config) { c.readers = n } }
@@ -91,10 +134,13 @@ func WithReaders(n int) Option { return func(c *config) { c.readers = n } }
 // Open opens (creating if necessary) the database in dir and applies any
 // pending migrations. It makes no network calls. It fails if the database was
 // written by a newer version of hookinlet.
-func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
-	cfg := config{now: time.Now, readers: defaultReaders}
+func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error) {
+	cfg := config{now: time.Now, readers: defaultReaders, freeSpace: freeBytes, walLimit: DefaultWALLimit}
 	for _, o := range opts {
 		o(&cfg)
+	}
+	if cfg.log == nil {
+		cfg.log = slog.New(slog.DiscardHandler)
 	}
 	if cfg.readers < 1 {
 		return nil, errors.New("sqlite: readers must be at least 1")
@@ -106,6 +152,22 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: %w", err)
 	}
+
+	var lock *os.File
+	if cfg.lock {
+		switch lock, err = lockFile(filepath.Join(filepath.Dir(abs), LockFileName)); {
+		case errors.Is(err, errLockUnsupported):
+			cfg.log.Warn("the data directory could not be locked, so nothing stops a second server from using it; make sure only one does", "reason", err.Error())
+			lock, err = nil, nil
+		case err != nil:
+			return nil, err
+		}
+	}
+	defer func() {
+		if err != nil && lock != nil {
+			unlockFile(lock)
+		}
+	}()
 
 	// Create the database file ourselves so it is private to the owner. SQLite
 	// gives the -wal and -shm files the same permissions as the main file.
@@ -120,7 +182,7 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
 	// The writer is opened first: it creates the file and switches it to WAL.
 	// _txlock=immediate makes every write transaction take the write lock when
 	// it begins, so a transaction never fails halfway with SQLITE_BUSY.
-	wdb, err := openDB(abs, cfg.readers, false)
+	wdb, err := openDB(abs, cfg.readers, false, cfg.walLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -129,10 +191,7 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
 	wdb.SetConnMaxLifetime(0)
 
 	removeStaleBackups(filepath.Dir(abs), time.Now())
-	if cfg.log == nil {
-		cfg.log = slog.New(slog.DiscardHandler)
-	}
-	s := &Store{path: abs, wdb: wdb, now: cfg.now, log: cfg.log}
+	s := &Store{path: abs, wdb: wdb, now: cfg.now, log: cfg.log, lock: lock, freeSpace: cfg.freeSpace}
 	if err := wdb.PingContext(ctx); err != nil {
 		_ = wdb.Close()
 		return nil, fmt.Errorf("sqlite: open %s: %w", abs, err)
@@ -158,7 +217,10 @@ func Open(ctx context.Context, dir string, opts ...Option) (*Store, error) {
 	return s, nil
 }
 
-func openDB(path string, _ int, readOnly bool) (*sql.DB, error) {
+// walLimit, for a connection that writes, is the size the write-ahead log is cut back
+// to when it is reset. It is part of the connection string, so a connection that the
+// pool replaces has it too.
+func openDB(path string, _ int, readOnly bool, walLimit ...int64) (*sql.DB, error) {
 	q := url.Values{}
 	for _, p := range []string{
 		fmt.Sprintf("busy_timeout(%d)", busyTimeout),
@@ -174,6 +236,9 @@ func openDB(path string, _ int, readOnly bool) (*sql.DB, error) {
 	if readOnly {
 		q.Add("_pragma", "query_only(1)")
 	} else {
+		if len(walLimit) > 0 {
+			q.Add("_pragma", fmt.Sprintf("journal_size_limit(%d)", walLimit[0]))
+		}
 		q.Set("_txlock", "immediate")
 	}
 	u := url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}
@@ -203,6 +268,9 @@ func (s *Store) Close() error {
 			_, _ = s.wdb.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)")
 			errs = append(errs, s.wdb.Close())
 		}
+		if s.lock != nil {
+			unlockFile(s.lock) // last: nothing else may open the directory until it is closed
+		}
 		s.closeErr = errors.Join(errs...)
 	})
 	return s.closeErr
@@ -218,6 +286,17 @@ func (s *Store) Ping(ctx context.Context) error {
 	}
 	if err := s.wdb.PingContext(ctx); err != nil {
 		return s.ctxErr(ctx, fmt.Errorf("sqlite: ping writer: %w", err))
+	}
+	free, measured := uint64(0), false
+	if f, err := s.freeSpace(filepath.Dir(s.path)); err == nil {
+		free, measured = f, true
+	}
+	switch {
+	case measured && free < MinFreeBytes:
+		return fmt.Errorf("%w: %d bytes are left on the data directory's volume", inbox.ErrStorageFull, free)
+	case s.now().UnixNano() < s.fullUntil.Load():
+		// The volume may report room (a quota, a size limit) while writes fail.
+		return fmt.Errorf("%w: a write failed for lack of room a moment ago", inbox.ErrStorageFull)
 	}
 	return nil
 }
@@ -248,10 +327,10 @@ func (s *Store) writeTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	}
 	if err := fn(tx); err != nil {
 		_ = tx.Rollback()
-		return s.ctxErr(ctx, err)
+		return s.ctxErr(ctx, s.full(err))
 	}
 	if err := tx.Commit(); err != nil {
-		return s.ctxErr(ctx, fmt.Errorf("sqlite: commit: %w", err))
+		return s.ctxErr(ctx, s.full(fmt.Errorf("sqlite: commit: %w", err)))
 	}
 	return nil
 }

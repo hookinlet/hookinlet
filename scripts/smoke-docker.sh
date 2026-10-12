@@ -233,6 +233,11 @@ case $(admin GET /admin/inboxes/made-by-api) in
   200*'"message_count":1'*) echo "ok   show reports the message" ;; *) fail "unexpected show" ;;
 esac
 expect "retention runs on demand" '200 {"deleted":0}' "$(admin POST /admin/retention/run)"
+case $(admin GET /metrics) in
+  200*'hookinlet_deliveries_total{result="stored"}'*) echo "ok   /metrics reports the deliveries" ;; *) fail "unexpected /metrics" ;;
+esac
+docker exec "$name" /hookinlet healthcheck >/dev/null || fail "the image's own healthcheck does not pass"
+echo "ok   hookinlet healthcheck passes inside the image"
 cli() { docker exec -e HOOKINLET_URL=http://127.0.0.1:8080 -e HOOKINLET_ADMIN_TOKEN="$admin_token" "$name" /hookinlet "$@"; }
 case $(cli inbox list) in *made-by-api*demo*|*demo*made-by-api*) echo "ok   the command line lists inboxes through the admin API" ;; *) fail "unexpected inbox list" ;; esac
 old_token=$(printf '%s' "$created" | sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p')

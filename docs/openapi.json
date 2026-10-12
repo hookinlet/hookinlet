@@ -471,6 +471,9 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
             "content": {
@@ -692,6 +695,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
           },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
@@ -916,6 +922,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
           },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
@@ -1147,6 +1156,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
           },
           "default": {
             "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
@@ -3480,10 +3492,11 @@
             "description": "A SQLite database file holding every inbox, message, token hash, and sealed secret. Useless without the master key; protect it accordingly.",
             "headers": {
               "Content-Length": {
-                "required": true,
+                "required": false,
                 "schema": {
                   "type": "integer"
-                }
+                },
+                "description": "Absent when the store streams its snapshot and cannot say how big it is; the body then ends when the connection says it does (chunked transfer encoding)."
               },
               "Content-Disposition": {
                 "required": true,
@@ -3930,6 +3943,79 @@
           }
         ]
       }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "summary": "Prometheus metrics",
+        "tags": [
+          "Admin"
+        ],
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "description": "Counters and gauges in the Prometheus text exposition format: deliveries by how they ended, requests by route and status, the ingest memory budget, open streams, and retention. No series is labelled with anything a client chooses (no inbox, path, or query), so the number of series is fixed. Scrape it with the admin token as a bearer token; where the admin API is on its own address (`--admin-listen-addr`), that is where it is.",
+        "responses": {
+          "200": {
+            "description": "The metrics.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "# HELP hookinlet_info The server's version.\n# TYPE hookinlet_info gauge\nhookinlet_info{version=\"0.1.0\"} 1\n"
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4361,9 +4447,10 @@
               "code": {
                 "type": "string",
                 "enum": [
-                  "overloaded"
+                  "overloaded",
+                  "storage_full"
                 ],
-                "description": "A stable, machine-readable code."
+                "description": "A stable, machine-readable code. `storage_full` means the server has no room to store the delivery; `overloaded` that it is too busy to take it now."
               },
               "message": {
                 "type": "string",
@@ -5481,7 +5568,7 @@
         }
       },
       "Overloaded": {
-        "description": "Too many reads, streams, or waits are in progress. Retry shortly.",
+        "description": "The server cannot take the request now and the sender should try again: too many reads, streams, or waits are in progress, too many deliveries are being received at once, or (`storage_full`) there is no room to store a delivery. `Retry-After` says when.",
         "content": {
           "application/json": {
             "schema": {

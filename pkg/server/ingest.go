@@ -29,6 +29,7 @@ type ingestResult struct {
 	code, msg string
 	seq       int64
 	challenge []byte // set for a handshake answered instead of stored
+	duplicate bool   // a repeat of a delivery already stored
 }
 
 func refuse(status int, code, msg string) ingestResult {
@@ -80,9 +81,18 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	// connection and its buffer open indefinitely. Servers that cannot set a
 	// deadline (such as a test recorder) just do without one.
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.opts.ReadBodyTimeout))
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, in.MaxBodyBytes))
+	// The body is held in memory until the delivery is stored, whoever sent it, and
+	// the signature has not been checked yet. How much may be held at once is
+	// bounded: the bytes are counted as they arrive, and a delivery that would take
+	// the total over is told to come back.
+	br := &budgetReader{r: http.MaxBytesReader(w, r.Body, in.MaxBodyBytes), b: &s.ingestBudget}
+	defer br.release()
+	body, err := io.ReadAll(br)
+	s.metrics.bodyBytes.Add(int64(len(body)))
 	var tooLarge *http.MaxBytesError
 	switch {
+	case errors.Is(err, errOverBudget):
+		return refuse(http.StatusServiceUnavailable, "overloaded", "too many deliveries are being received at once; retry shortly")
 	case errors.As(err, &tooLarge):
 		return refuse(http.StatusRequestEntityTooLarge, "payload_too_large", "the request body is too large")
 	case err != nil:
@@ -90,7 +100,10 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 
 	// 3. Let the embedder reject the delivery (rate limit, quota, policy).
-	if err := s.opts.Hooks.BeforeIngest(ctx, in, int64(len(body))); err != nil {
+	if err := s.opts.Hooks.BeforeIngest(ctx, &inbox.IngestRequest{
+		Inbox: in, Size: int64(len(body)), SourceIP: clientIP(r, s.opts.TrustedProxies),
+		Method: r.Method, PathSuffix: r.PathValue("rest"), Headers: r.Header,
+	}); err != nil {
 		return s.rejected(ctx, in, err)
 	}
 
@@ -170,6 +183,10 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	switch {
 	case errors.Is(err, inbox.ErrNotFound): // deleted while we were verifying
 		return refuse(http.StatusNotFound, "not_found", "not found")
+	case errors.Is(err, inbox.ErrStorageFull):
+		// Not stored, so not acknowledged: the sender keeps it and tries again.
+		s.log.LogAttrs(ctx, slog.LevelError, "delivery refused: no room to store it", slog.String("slug", in.Slug), slog.String("err", err.Error()))
+		return refuse(http.StatusServiceUnavailable, "storage_full", "the server has no room to store the delivery; retry later")
 	case err != nil:
 		return s.internalFailure(ctx, "append", err)
 	}
@@ -181,7 +198,7 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery",
 		slog.String("slug", in.Slug), slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
 		slog.Bool("verified", verified), slog.Bool("duplicate", !created))
-	return ingestResult{status: http.StatusOK, seq: msg.Seq}
+	return ingestResult{status: http.StatusOK, seq: msg.Seq, duplicate: !created}
 }
 
 // dedupeKey is what a repeated delivery is recognised by. A delivery id that the

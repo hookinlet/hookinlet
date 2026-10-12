@@ -33,6 +33,10 @@ const masterKeyLen = 32
 // random source is 192 bits or more; it rules out anything a person would type.
 const minAdminTokenLen = 32
 
+// minIngestBudget is the smallest ingest memory budget: the largest body an inbox
+// may be set to take, so that a delivery that is allowed can always be received.
+const minIngestBudget = 10 << 20
+
 // minAdminTokenDistinct is how many different characters an admin token must
 // use. A random 32-character token has about 28; this only turns away values
 // such as a long run of one letter or a repeated word.
@@ -86,6 +90,8 @@ type Config struct {
 	AdminEnabled       bool
 	AdminListenAddr    string
 	MCPInlineBodyBytes int
+	IngestMemoryBudget int64
+	DrainDelay         time.Duration
 	RetentionInterval  time.Duration
 	ShutdownTimeout    time.Duration
 }
@@ -109,6 +115,7 @@ func (c *Config) LogValue() slog.Value {
 		slog.Bool("admin_enabled", c.AdminEnabled),
 		slog.String("admin_listen_addr", c.AdminListenAddr),
 		slog.Int("mcp_inline_body_bytes", c.MCPInlineBodyBytes),
+		slog.Int64("ingest_memory_budget", c.IngestMemoryBudget),
 		slog.Duration("retention_interval", c.RetentionInterval),
 		slog.Duration("shutdown_timeout", c.ShutdownTimeout),
 	)
@@ -138,6 +145,8 @@ var specs = []spec{
 	{name: "admin-listen-addr", usage: "serve the admin API on its own address (such as 127.0.0.1:9090) and not on --listen-addr; empty serves it on --listen-addr"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
 	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},
+	{name: "ingest-memory-budget", def: "268435456", usage: "most bytes of request bodies held in memory at once by deliveries being received; more are answered 503 with Retry-After (0 turns the bound off)"},
+	{name: "drain-delay", def: "0", usage: "after being told to stop, keep serving for this long while /readyz answers 503, so a load balancer can take the instance out of rotation before the listener closes; 0 stops at once"},
 	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps, at least 1s; \"off\" turns the schedule off (sweeps still run on request)"},
 	{name: "shutdown-timeout", def: "10s", usage: "time allowed for in-flight requests to finish on shutdown"},
 }
@@ -351,6 +360,9 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 	} else if c.RetentionInterval < time.Second {
 		collect(fieldErr("retention-interval", "must be at least 1s, or \"off\""))
 	}
+	if c.DrainDelay, err = parseDuration(vals, "drain-delay", false); err != nil {
+		collect(err)
+	}
 	if c.ShutdownTimeout, err = parseDuration(vals, "shutdown-timeout", true); err != nil {
 		collect(err)
 	}
@@ -366,6 +378,11 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 		collect(fieldErr("admin-listen-addr", "is set but --admin-enabled is false"))
 	case c.AdminListenAddr != "" && c.AdminListenAddr == c.ListenAddr:
 		collect(fieldErr("admin-listen-addr", "is the same as --listen-addr; leave it empty to serve both there"))
+	}
+	if c.IngestMemoryBudget, err = strconv.ParseInt(vals["ingest-memory-budget"], 10, 64); err != nil || c.IngestMemoryBudget < 0 {
+		collect(fieldErr("ingest-memory-budget", "must be zero (no bound) or a number of bytes"))
+	} else if c.IngestMemoryBudget > 0 && c.IngestMemoryBudget < minIngestBudget {
+		collect(fieldErr("ingest-memory-budget", "must be at least %d bytes (10 MiB), the largest body an inbox may take, or zero for no bound", minIngestBudget))
 	}
 	if c.MaxStreams, err = strconv.Atoi(vals["max-streams"]); err != nil || c.MaxStreams < 1 {
 		collect(fieldErr("max-streams", "must be a positive integer"))

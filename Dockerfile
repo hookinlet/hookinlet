@@ -21,6 +21,9 @@ ENV HOOKINLET_LISTEN_ADDR=:8080 \
     HOOKINLET_DATA_DIR=/data
 VOLUME /data
 EXPOSE 8080
+# Ready, not merely alive: a server that has not finished migrating, or cannot open its
+# secrets, should not be sent traffic. The start period is for a long migration.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["/hookinlet", "healthcheck"]
 USER 65532:65532
 ENTRYPOINT ["/hookinlet"]
 CMD ["serve"]

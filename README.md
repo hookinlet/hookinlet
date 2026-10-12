@@ -266,6 +266,7 @@ HOOKINLET_LISTEN_ADDR=:8080
 HOOKINLET_DATA_DIR=./data           # one SQLite file; one instance per directory
 HOOKINLET_RETENTION_INTERVAL=1h     # how often retention runs; "off" for never
 HOOKINLET_TRUSTED_PROXIES=10.0.0.0/8   # whose X-Forwarded-For is believed
+HOOKINLET_MASTER_KEY_FILE=/run/secrets/master_key   # a secret may be a file instead (also ADMIN_TOKEN)
 ```
 
 Inboxes live in the database. Create them with the command line or the [admin API](docs/admin.md); retention is

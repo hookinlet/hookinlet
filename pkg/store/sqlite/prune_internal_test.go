@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -244,5 +245,77 @@ func TestASlugHeldByAnUnfinishedDeleteSaysWhy(t *testing.T) {
 	err := s.CreateInbox(t.Context(), &inbox.Inbox{Slug: in.Slug, IngestKey: "another-key-entirely", Name: "n", Verifier: "none"})
 	if !errors.Is(err, inbox.ErrConflict) || !strings.Contains(err.Error(), "being deleted") {
 		t.Errorf("creating over an unfinished delete: %v", err)
+	}
+}
+
+// A write that fails for lack of room is inbox.ErrStorageFull, readiness says so,
+// and everything recovers when there is room again.
+func TestAFullDiskIsErrStorageFull(t *testing.T) {
+	s, in := internalStore(t)
+	// The volume says there is room, as it does for a quota or a size limit: it is the
+	// failed write that marks the Store full.
+	s.freeSpace = func(string) (uint64, error) { return math.MaxUint64, nil }
+	clock := time.Now()
+	s.now = func() time.Time { return clock }
+	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("x"), Verified: true}); err != nil {
+		t.Fatal(err)
+	}
+	var pages int
+	if err := s.wdb.QueryRowContext(t.Context(), `PRAGMA page_count`).Scan(&pages); err != nil {
+		t.Fatal(err)
+	}
+	// The database may grow no more: the same error SQLite gives for a full disk.
+	if _, err := s.wdb.ExecContext(t.Context(), `PRAGMA max_page_count = `+strconv.Itoa(pages)); err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte("x"), 1<<20)
+	_, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: big, Verified: true})
+	if !errors.Is(err, inbox.ErrStorageFull) {
+		t.Fatalf("an append with no room: %v", err)
+	}
+	if err := s.Ping(t.Context()); !errors.Is(err, inbox.ErrStorageFull) {
+		t.Errorf("Ping while out of room: %v", err)
+	}
+	// Nothing half-written was left behind.
+	if st, err := s.Stats(t.Context(), in.ID); err != nil || st.MessageCount != 1 || st.LatestSeq != 1 {
+		t.Errorf("stats after the failed append: %+v, %v", st, err)
+	}
+
+	// A small write that succeeds does not make it believed.
+	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: []byte("small"), Verified: true}); err == nil {
+		_ = err // (it may fit in the page that was free; the point is Ping below)
+	}
+	if err := s.Ping(t.Context()); !errors.Is(err, inbox.ErrStorageFull) {
+		t.Errorf("Ping after a small write: %v", err)
+	}
+	if _, err := s.wdb.ExecContext(t.Context(), `PRAGMA max_page_count = 1073741823`); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(roomRetryWindow + time.Second)
+	if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: big, Verified: true}); err != nil {
+		t.Fatalf("an append once there is room: %v", err)
+	}
+	if err := s.Ping(t.Context()); err != nil {
+		t.Errorf("Ping once there is room: %v", err)
+	}
+}
+
+func TestPingFailsWhenTheVolumeIsNearlyFull(t *testing.T) {
+	free := uint64(1 << 30)
+	s, err := Open(t.Context(), t.TempDir(), WithFreeSpace(func(string) (uint64, error) { return free, nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.Ping(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	free = MinFreeBytes - 1
+	if err := s.Ping(t.Context()); !errors.Is(err, inbox.ErrStorageFull) {
+		t.Errorf("Ping on a nearly full volume: %v", err)
+	}
+	free = MinFreeBytes
+	if err := s.Ping(t.Context()); err != nil {
+		t.Errorf("Ping with exactly the minimum: %v", err)
 	}
 }

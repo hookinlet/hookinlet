@@ -80,12 +80,15 @@ type recHooks struct {
 	mu         sync.Mutex
 	before     func(in *inbox.Inbox, size int64) error
 	beforeSeen []string // "slug:size"
+	requests   []inbox.IngestRequest
 	afterSeen  []afterCall
 	afterBoom  bool
 }
 
-func (h *recHooks) BeforeIngest(_ context.Context, in *inbox.Inbox, size int64) error {
+func (h *recHooks) BeforeIngest(_ context.Context, req *inbox.IngestRequest) error {
+	in, size := req.Inbox, req.Size
 	h.mu.Lock()
+	h.requests = append(h.requests, *req)
 	h.beforeSeen = append(h.beforeSeen, fmt.Sprintf("%s:%d", in.Slug, size))
 	f := h.before
 	h.mu.Unlock()

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -587,5 +588,42 @@ func TestRenewEpochs(t *testing.T) {
 	}
 	if code, _, e := runCmd(t, map[string]string{"HOOKINLET_DATA_DIR": filepath.Join(dir, "typo")}, "renew-epochs"); code != exitRuntime || !strings.Contains(e, "no database") {
 		t.Errorf("a mistyped directory: %d %q", code, e)
+	}
+}
+
+// The secrets can come from files, which is how containers are given them.
+func TestSecretsFromFilesReachTheCommands(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	env := map[string]string{
+		"HOOKINLET_DATA_DIR":             filepath.Join(dir, "data"),
+		"HOOKINLET_MASTER_KEY_FILE":      write("master", masterKey()+"\n"),
+		"HOOKINLET_VERIFIER_SECRET_FILE": write("verifier", "file-given-secret\n"),
+	}
+	if code, _, e := runCmd(t, env, "inbox", "create", "--slug", "from-files", "--verifier", "token"); code != 0 {
+		t.Fatalf("create: %d %q", code, e)
+	}
+	s, err := sqlite.Open(t.Context(), filepath.Join(dir, "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	in, err := s.GetInboxBySlug(t.Context(), "from-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, _ := secretbox.New(bytes.Repeat([]byte{9}, 32))
+	if pt, err := box.Open(in.VerifierSecret, inbox.VerifierSecretContext("from-files")); err != nil || string(pt) != "file-given-secret" {
+		t.Errorf("the stored secret: %q, %v", pt, err)
+	}
+	bad := map[string]string{"HOOKINLET_MASTER_KEY": masterKey(), "HOOKINLET_MASTER_KEY_FILE": env["HOOKINLET_MASTER_KEY_FILE"]}
+	if code, _, e := runCmd(t, bad, "inbox", "list"); code != exitUsage || !strings.Contains(e, "both set") {
+		t.Errorf("both forms: %d %q", code, e)
 	}
 }

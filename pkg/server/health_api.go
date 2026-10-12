@@ -11,6 +11,7 @@ import (
 
 	"github.com/hookinlet/hookinlet/internal/admin"
 	"github.com/hookinlet/hookinlet/internal/api"
+	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
 // healthAPI serves the two health checks through the generated interface.
@@ -57,8 +58,14 @@ func (a *healthAPI) HeadReadyz(ctx context.Context, _ api.HeadReadyzRequestObjec
 // server whose key is not the one its data was sealed under accepts every
 // delivery and fails every one that needs a secret.
 func (s *Server) notReady(ctx context.Context) string {
+	if s.draining.Load() {
+		return "the server is shutting down"
+	}
 	if err := s.opts.Store.Ping(ctx); err != nil {
 		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready", slog.String("err", err.Error()))
+		if errors.Is(err, inbox.ErrStorageFull) {
+			return "there is no room left to store deliveries"
+		}
 		return "the store is not reachable"
 	}
 	switch err := s.secretsOK(ctx); {

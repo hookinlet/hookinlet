@@ -24,6 +24,11 @@ var (
 	// (see Inbox.Epoch). The server answers it with HTTP 409; a Store never
 	// returns it.
 	ErrEpochChanged = errors.New("epoch changed")
+	// ErrStorageFull means the Store has no room to write. A Store returns it from
+	// a write that failed for lack of space, and from Ping while it is short of it.
+	// The server answers a delivery with HTTP 503, since the sender should try again
+	// when there is room, and readiness fails.
+	ErrStorageFull = errors.New("storage full")
 	// ErrUnauthenticated is returned by Authenticator.Authenticate when the
 	// credentials are missing or wrong. It maps to HTTP 401.
 	ErrUnauthenticated = errors.New("unauthenticated")

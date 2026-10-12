@@ -399,6 +399,7 @@ beyond the inbox's [verifier](verifiers.md).
 | `429` | `rate_limited` | Refused by an embedder's hook. |
 | `431` | | The request line and headers exceed 64 KiB (plus a few KiB of slack). Headers are stored with the message and returned to agents, so their size is bounded at the door. |
 | `500` | `internal` | A server-side problem, including a misconfigured verifier. Details are in the server log, never in the response. |
+| `503` | `overloaded` or `storage_full` | Not stored, and not acknowledged: retry after `Retry-After`. `overloaded`: too many deliveries are being received at once for the server's memory (`HOOKINLET_INGEST_MEMORY_BUDGET`, 256 MiB by default; counted as bodies arrive, and the delivery is refused as soon as its bytes would go over). `storage_full`: there is no room to store it. Webhook senders retry a 503, which is what is wanted. |
 
 `seq` is the message's per-inbox sequence number, starting at 1. A duplicate
 delivery returns the `seq` of the message that is already stored.

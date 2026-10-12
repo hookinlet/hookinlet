@@ -182,7 +182,9 @@ type Backupper interface {
 	// Backup returns a snapshot of the Store as of a single moment: everything
 	// committed before the call is in it, and nothing in it is half-applied.
 	// size is the snapshot's length in bytes, and the reader yields exactly that
-	// many. The caller must Close the reader, which releases whatever the
+	// many; or -1 when the Store streams the snapshot and cannot know its length
+	// until it is read, in which case the reader ends it with io.EOF only when it
+	// is complete, and returns an error otherwise. The caller must Close the reader, which releases whatever the
 	// snapshot holds (a temporary file, for instance). Appends and reads continue
 	// while a backup is taken and while it is read.
 	//
@@ -271,14 +273,34 @@ type ScopedPrincipal interface {
 	InboxIDs() []ID
 }
 
+// IngestRequest describes a delivery that has been received and not yet verified,
+// for Hooks.BeforeIngest. Nothing in it has been checked: every field except Inbox
+// came from whoever sent the request. A hook must not modify it.
+type IngestRequest struct {
+	// Inbox is the inbox the delivery is for.
+	Inbox *Inbox
+	// Size is the body size in bytes.
+	Size int64
+	// SourceIP is where the delivery came from, as the server records it: the
+	// peer's address, or the client's behind a trusted proxy. It may be empty.
+	SourceIP string
+	// Method is POST or PUT, and PathSuffix is what followed the inbox key in the
+	// URL (without the leading slash).
+	Method, PathSuffix string
+	// Headers are the request headers as received. They are shared with the
+	// request: read them, do not change them.
+	Headers http.Header
+}
+
 // Hooks lets an embedder observe and gate ingest. The open-source default does
 // nothing.
 type Hooks interface {
 	// BeforeIngest may reject a delivery before it is verified or stored by
 	// returning an error wrapping ErrRateLimited (429), ErrQuotaExceeded (402),
-	// or ErrForbidden (403). size is the body size in bytes. Any other error is
-	// treated as an internal failure.
-	BeforeIngest(ctx context.Context, in *Inbox, size int64) error
+	// or ErrForbidden (403). Any other error is treated as an internal failure.
+	// The request is what is known of the delivery at that point; it grows by
+	// adding fields, which is why it is a struct.
+	BeforeIngest(ctx context.Context, req *IngestRequest) error
 
 	// AfterIngest runs after a delivery is committed or recognized as a
 	// duplicate. created is false for a duplicate, so a metering hook can

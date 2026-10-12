@@ -21,7 +21,9 @@ type ingestAPI struct {
 func (a *ingestAPI) run(ctx context.Context) ingestResult {
 	r, _ := ctx.Value(requestKey).(*http.Request)
 	w, _ := ctx.Value(writerKey).(http.ResponseWriter)
-	return a.s.ingest(ctx, w, r)
+	res := a.s.ingest(ctx, w, r)
+	a.s.metrics.delivery(deliveryResult(res))
+	return res
 }
 
 func (a *ingestAPI) Ingest(ctx context.Context, _ api.IngestRequestObject) (api.IngestResponseObject, error) {
@@ -60,6 +62,8 @@ func (a *ingestAPI) Ingest(ctx context.Context, _ api.IngestRequestObject) (api.
 		var b api.ErrorRateLimited
 		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
 		return api.Ingest429JSONResponse{Body: b, Headers: api.Ingest429ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusServiceUnavailable:
+		return api.Ingest503JSONResponse{OverloadedJSONResponse: overloadedResp(ctx, res)}, nil
 	}
 	return api.Ingest500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 }
@@ -100,6 +104,8 @@ func (a *ingestAPI) IngestWithPath(ctx context.Context, _ api.IngestWithPathRequ
 		var b api.ErrorRateLimited
 		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
 		return api.IngestWithPath429JSONResponse{Body: b, Headers: api.IngestWithPath429ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusServiceUnavailable:
+		return api.IngestWithPath503JSONResponse{OverloadedJSONResponse: overloadedResp(ctx, res)}, nil
 	}
 	return api.IngestWithPath500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 }
@@ -140,6 +146,8 @@ func (a *ingestAPI) IngestPut(ctx context.Context, _ api.IngestPutRequestObject)
 		var b api.ErrorRateLimited
 		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
 		return api.IngestPut429JSONResponse{Body: b, Headers: api.IngestPut429ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusServiceUnavailable:
+		return api.IngestPut503JSONResponse{OverloadedJSONResponse: overloadedResp(ctx, res)}, nil
 	}
 	return api.IngestPut500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 }
@@ -180,6 +188,8 @@ func (a *ingestAPI) IngestPutWithPath(ctx context.Context, _ api.IngestPutWithPa
 		var b api.ErrorRateLimited
 		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
 		return api.IngestPutWithPath429JSONResponse{Body: b, Headers: api.IngestPutWithPath429ResponseHeaders{XRequestId: id}}, nil
+	case http.StatusServiceUnavailable:
+		return api.IngestPutWithPath503JSONResponse{OverloadedJSONResponse: overloadedResp(ctx, res)}, nil
 	}
 	return api.IngestPutWithPath500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
 }
@@ -202,4 +212,11 @@ func tooLarge(ctx context.Context, msg string) api.TooLargeJSONResponse {
 	var b api.ErrorTooLarge
 	b.Error.Code, b.Error.Message = api.PayloadTooLarge, msg
 	return api.TooLargeJSONResponse{Body: b, Headers: api.TooLargeResponseHeaders{XRequestId: requestIDOf(ctx)}}
+}
+
+// overloadedResp is the 503 for a delivery the server cannot take now.
+func overloadedResp(ctx context.Context, res ingestResult) api.OverloadedJSONResponse {
+	var b api.ErrorOverloaded
+	b.Error.Code, b.Error.Message = api.ErrorOverloadedErrorCode(res.code), res.msg
+	return api.OverloadedJSONResponse{Body: b, Headers: api.OverloadedResponseHeaders{RetryAfter: "30", XRequestId: requestIDOf(ctx)}}
 }

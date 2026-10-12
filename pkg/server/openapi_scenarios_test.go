@@ -225,6 +225,11 @@ func ordinaryUse(t *testing.T, c *contract) {
 	cl.call("revokeToken", "DELETE", "/admin/tokens/1", nil, agent)
 	cl.call("revokeToken", "DELETE", "/admin/tokens/1", nil, "")
 	cl.call("revokeToken", "GET", "/admin/tokens/1", nil, admin)
+	cl.call("metrics", "GET", "/metrics", nil, admin)
+	cl.call("metrics", "GET", "/metrics?bogus=1", nil, admin)
+	cl.call("metrics", "GET", "/metrics", nil, agent)
+	cl.call("metrics", "GET", "/metrics", nil, "")
+	cl.call("metrics", "POST", "/metrics", nil, admin)
 	cl.call("rotateIngestKey", "POST", "/admin/inboxes/contract-test/rotate-ingest-key", nil, admin)
 	cl.call("rotateIngestKey", "POST", "/admin/inboxes/contract-test/rotate-ingest-key?bogus=1", nil, admin)
 	cl.call("rotateIngestKey", "POST", "/admin/inboxes/nope-nope/rotate-ingest-key", nil, admin)
@@ -296,6 +301,14 @@ func storeFails(t *testing.T, c *contract) {
 	f.set(false, false, true)
 	cl.call("readyz", "GET", "/readyz", nil, "")
 	cl.call("headReadyz", "HEAD", "/readyz", nil, "")
+
+	// No room to store a delivery: a 503 the sender retries.
+	f.setNoRoom(true)
+	cl.call("ingest", "POST", "/in/agent-a", "x", "")
+	cl.call("ingestPut", "PUT", "/in/agent-a", "x", "")
+	cl.call("ingestWithPath", "POST", "/in/agent-a/p", "x", "")
+	cl.call("ingestPutWithPath", "PUT", "/in/agent-a/p", "x", "")
+	f.setNoRoom(false)
 
 	f.set(true, false, false)
 	cl.call("ingest", "POST", "/in/agent-a", "x", "")

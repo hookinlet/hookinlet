@@ -96,11 +96,15 @@ notarized: one downloaded through a browser is quarantined, and
   (The same command with no old key brings secrets written by an older release up to
   the current format; they work meanwhile.) A secret sealed under a key you no longer
   have cannot be recovered: set it again with `hookinlet inbox set-secret`.
-- **SIGTERM or SIGINT to stop it.** It stops accepting connections, ends streams
+- **Secrets from files.** `HOOKINLET_ADMIN_TOKEN`, `HOOKINLET_MASTER_KEY`, `HOOKINLET_OLD_MASTER_KEY` and `HOOKINLET_VERIFIER_SECRET` may each be given as `..._FILE`, the path of a file holding the value (one trailing newline is dropped), the way Docker, Kubernetes and systemd hand secrets over. Giving both forms is an error.
+- <a id="stopping"></a>**SIGTERM or SIGINT to stop it.** With `HOOKINLET_DRAIN_DELAY` set, it first reports itself not ready for that long while still serving. It stops accepting connections, ends streams
   and waits, and lets deliveries that are being stored finish, for up to
   `HOOKINLET_SHUTDOWN_TIMEOUT` (10 seconds by default); anything still running
   then is cut off. It then stops the retention sweep and checkpoints the database,
-  which is quick. A platform that waits less than the timeout before killing the
+  which is quick. With `HOOKINLET_DRAIN_DELAY` set, the platform must wait for the delay *and* the timeout
+  (Docker's default grace period of 10 seconds equals the default timeout alone, so give
+  `docker stop --time` or the orchestrator's termination grace period their sum). A second
+  signal ends the process at once. A platform that waits less than the timeout before killing the
   process risks cutting off a delivery; killing it at once never damages the data
   (SQLite recovers from the log), but the delivery in flight is lost, and the
   sender, who got no answer, will normally retry.
@@ -130,6 +134,8 @@ lists them all.
 | `HOOKINLET_ADMIN_LISTEN_ADDR` | none | Serve the admin API on this address instead of `HOOKINLET_LISTEN_ADDR`, and nothing else there. |
 | `HOOKINLET_MCP_ENABLED` | `true` | Serve `/mcp`. |
 | `HOOKINLET_MCP_INLINE_BODY_BYTES` | `16384` | Largest body MCP tools return inline (at most 65536). |
+| `HOOKINLET_INGEST_MEMORY_BUDGET` | `268435456` | Most bytes of request bodies held in memory at once by deliveries being received; more get 503. `0` turns the bound off. |
+| `HOOKINLET_DRAIN_DELAY` | `0` | After being told to stop, keep serving for this long with `/readyz` at 503, so a load balancer takes the instance out of rotation first. |
 | `HOOKINLET_RETENTION_INTERVAL` | `1h` | How often retention runs; `off` for never. |
 | `HOOKINLET_SHUTDOWN_TIMEOUT` | `10s` | How long shutdown waits. |
 
@@ -138,10 +144,54 @@ A bad setting is reported, all of them at once, and the server does not start.
 ## Health checks
 
 - `GET /healthz` answers `200` while the process is up.
-- `GET /readyz` answers `200` when the database is reachable and `503` when it
-  is not. Use it for readiness, and `/healthz` for liveness.
+- `GET /readyz` answers `200` when the server can do its work, and `503` when it
+  cannot: the database is unreachable, the volume it is on has under 32 MiB free
+  (or the last write failed for lack of room), the stored verifier secrets do not
+  open with the master key, or the server has been told to stop and is
+  [draining](#stopping). Use it for readiness, and `/healthz` for liveness.
 
-Neither needs a credential.
+Neither needs a credential. The image has no `curl`, so it carries
+`hookinlet healthcheck` (it asks `/readyz` of this machine, at `HOOKINLET_LISTEN_ADDR`;
+`--live` asks `/healthz`; `--url` asks another address), and the `Dockerfile` uses it
+as its `HEALTHCHECK` with a start period of 60 seconds for a long migration. It finds
+the server from the environment, so set `HOOKINLET_LISTEN_ADDR` rather than passing
+`--listen-addr` in the command if you change the port.
+
+## Metrics
+
+`GET /metrics` serves counters and gauges in the Prometheus text format, with the
+admin token as a bearer token (so, where the admin API is on its own address, there):
+deliveries by how they ended, requests by route and status, the ingest memory budget
+in use, open streams, retention sweeps, and a few process figures. No series is
+labelled with anything a client chooses (no inbox, path or query), so a scanner cannot
+add series. A scrape job:
+
+```yaml
+scrape_configs:
+  - job_name: hookinlet
+    authorization: { credentials_file: /run/secrets/hookinlet_admin_token }
+    static_configs: [{ targets: ["hookinlet:8080"] }]
+```
+
+## Disk space
+
+A delivery that cannot be stored because the volume is full is answered `503`
+(`storage_full`, with `Retry-After`) and is not acknowledged, so a sender that retries
+loses nothing, and `/readyz` fails until there is room again, so a load balancer
+stops sending. Free space is checked against a floor of 32 MiB. The write-ahead log is
+cut back to 64 MiB whenever SQLite resets it, so one burst of writes does not leave a
+large file behind.
+
+## One server per data directory
+
+A server takes a lock on the data directory (`hookinlet.lock`, an advisory lock the
+operating system drops when the process ends, so there is nothing to clean up after a
+crash). A second server started on the same directory stops at once and says which
+process holds it, instead of two writers corrupting each other's work. `hookinlet
+rekey` and `renew-epochs`, which must not run beside a server, take the same lock.
+The other commands do not, so `hookinlet inbox ...` still works in the directory of a
+running server. On a file system that does not support locks (some network and FUSE
+mounts) the server starts anyway and logs a warning: nothing then stops a second one.
 
 ## Starting, and how fast
 
@@ -170,7 +220,14 @@ Linux. Each open SSE stream costs about 50 KiB, so 500 of them come to about
 reads are limited to 16 at a time. Deliveries are not limited in number: each one
 is held in memory while it is read and checked, up to the inbox's body limit
 (1 MiB by default, at most 10 MiB), so a burst of large deliveries uses that much
-each. Put a rate limit in front, or in a hook (see [extending](extending.md)). Disk is
+each. The total is bounded: deliveries being received hold at most
+`HOOKINLET_INGEST_MEMORY_BUDGET` bytes of bodies between them (256 MiB by default; at
+least 10 MiB, the largest body an inbox may take). The bytes are counted as they
+arrive, so a connection that has promised a large body and sent none costs nothing,
+and a delivery whose bytes would take the total over is answered `503` with
+`Retry-After` and not stored. The memory the process uses is a small multiple of the
+bytes counted (buffers grow, and the body is copied into the database). Put a
+rate limit in front, or in a hook (see [extending](extending.md)). Disk is
 what grows: size the volume for the messages you keep, and set retention on
 inboxes that receive a lot. A backup needs free space in the data directory for a
 second copy of the database while it runs. Each stream or wait holds a file

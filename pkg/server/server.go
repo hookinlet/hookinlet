@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hookinlet/hookinlet/docs"
@@ -66,6 +67,21 @@ type Options struct {
 	// Now is the clock used for signature timestamp tolerance. Defaults to
 	// time.Now.
 	Now func() time.Time
+	// DrainDelay is how long the server goes on serving, but reports itself not
+	// ready (/readyz answers 503), after it is told to stop and before it stops
+	// listening. A load balancer that polls readiness takes the instance out of
+	// rotation in that time, so that no request is sent to a listener that is
+	// closing. Zero (the default) stops at once. It comes out of the time before
+	// ShutdownTimeout begins, not out of it.
+	DrainDelay time.Duration
+	// IngestMemoryBudget bounds the bytes of request bodies held in memory at once by
+	// deliveries being received. The bytes are counted as they arrive and held until
+	// the delivery is stored or refused, so a connection that has promised a body and
+	// not sent it costs nothing; a delivery whose bytes would take the total over is
+	// answered 503 with Retry-After. The memory used is a small multiple of the bytes
+	// counted. Defaults to 256 MiB, must be at least the largest body an inbox may take
+	// (10 MiB), and a negative value turns the bound off.
+	IngestMemoryBudget int64
 	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
 	// to the ingest endpoint. Defaults to 60s.
 	ReadBodyTimeout time.Duration
@@ -141,6 +157,10 @@ type Server struct {
 	adminHTTP    *http.Server
 	reads        chan struct{} // a slot per read request being served
 
+	metrics      metrics
+	draining     atomic.Bool // set when the server is told to stop: /readyz fails
+	ingestBudget byteBudget  // body bytes held by deliveries being received
+
 	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
 	mux        *http.ServeMux
 	mcpSDK     http.Handler // the MCP SDK's handler, which the mcp operation hands calls to
@@ -195,6 +215,12 @@ func New(opts Options) (*Server, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	if opts.IngestMemoryBudget == 0 {
+		opts.IngestMemoryBudget = 256 << 20
+	}
+	if opts.IngestMemoryBudget > 0 && opts.IngestMemoryBudget < inbox.MaxBodyBytesCeiling {
+		return nil, fmt.Errorf("server: Options.IngestMemoryBudget must be at least %d bytes, the largest body an inbox may take, or a delivery that is allowed could never be received", inbox.MaxBodyBytesCeiling)
+	}
 	if opts.ReadBodyTimeout <= 0 {
 		opts.ReadBodyTimeout = 60 * time.Second
 	}
@@ -246,6 +272,7 @@ func New(opts Options) (*Server, error) {
 		log:          opts.Logger,
 		reads:        make(chan struct{}, opts.MaxConcurrentReads),
 		streams:      make(chan struct{}, opts.MaxStreams),
+		ingestBudget: byteBudget{limit: opts.IngestMemoryBudget},
 		streamCounts: make(map[inbox.ID]int),
 		closeCtx:     closeCtx,
 		closeCancel:  closeCancel,
@@ -280,7 +307,7 @@ func (s *Server) build(surface surface) http.Handler {
 	// Outermost first. accessLog must see the same *http.Request the mux
 	// annotates with r.Pattern, so nothing between it and the mux may clone
 	// the request.
-	return requestID(accessLog(s.log, recoverer(s.log, protective(mux))))
+	return requestID(accessLog(s.log, recoverer(s.log, s.counting(protective(mux)))))
 }
 
 func (s *Server) newHTTP(h http.Handler) *http.Server {
@@ -372,6 +399,25 @@ func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
 	case <-ctx.Done():
 	}
 
+	pending := servers // listeners that have not yet reported on errCh
+	if d := s.opts.DrainDelay; d > 0 {
+		s.draining.Store(true)
+		s.log.Info("draining: reporting not ready before closing", "delay", d.String())
+		select {
+		case <-time.After(d):
+		case err := <-errCh:
+			// A listener ended meanwhile: failed, or closed by an embedder's call to
+			// Shutdown. Either way stop waiting out the delay.
+			pending--
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				_ = s.http.Close()
+				if s.adminHTTP != nil {
+					_ = s.adminHTTP.Close()
+				}
+				return err
+			}
+		}
+	}
 	s.log.Info("shutting down", "timeout", s.opts.ShutdownTimeout.String())
 	// Tell long-lived streams to finish. This is separate from cancelling request
 	// contexts, which would also cut off deliveries that are in the middle of
@@ -386,7 +432,7 @@ func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
 		}
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	for range servers {
+	for ; pending > 0; pending-- {
 		<-errCh // each returns http.ErrServerClosed once Shutdown completes
 	}
 	return nil
@@ -429,6 +475,8 @@ func (s *Server) retentionLoop() {
 	sweep := func() {
 		start := time.Now()
 		n, err := s.adm.SweepRetention(s.closeCtx)
+		s.metrics.sweeps.Add(1)
+		s.metrics.retention.Add(n)
 		switch {
 		case err != nil && s.closeCtx.Err() != nil:
 			// Shutting down: the sweep stopped part way, and the next one resumes.
