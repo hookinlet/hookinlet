@@ -30,6 +30,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -50,11 +51,22 @@ FATAL = (401, 403, 404)  # the credential or the inbox is wrong: asking again wi
 
 def poll(base, token, inbox, after, interval, limit):
     seen = 0
+    epoch = ""  # which life of the inbox the cursor is in; known from the first page
     while True:
+        path = "/v1/inboxes/%s/messages?after=%d&limit=50" % (inbox, after)
+        if epoch:
+            path += "&epoch=" + urllib.parse.quote(epoch)
         try:
-            with request(base, token, "/v1/inboxes/%s/messages?after=%d&limit=50" % (inbox, after)) as resp:
+            with request(base, token, path) as resp:
                 page = json.load(resp)
         except urllib.error.HTTPError as err:
+            if err.code == 409:
+                # epoch_changed: the inbox was deleted and made again, or the server was
+                # restored. A seq means nothing across lives; carrying on from the old
+                # one would skip the new inbox's first messages.
+                print("the inbox was deleted and made again, or the server was restored; reading it from its beginning", file=sys.stderr)
+                after, epoch = 0, ""
+                continue
             if err.code in FATAL:
                 sys.exit("the server answered %d: is the token right, and the inbox there?" % err.code)
             print("the server answered %d; retrying" % err.code, file=sys.stderr)
@@ -64,6 +76,7 @@ def poll(base, token, inbox, after, interval, limit):
             print("cannot reach the server (%s); retrying" % err, file=sys.stderr)
             time.sleep(interval)
             continue
+        epoch = epoch or page.get("epoch", "")
         for message in page["messages"]:
             handle(message)
             after = message["seq"]
@@ -79,9 +92,13 @@ def poll(base, token, inbox, after, interval, limit):
 def stream(base, token, inbox, after, limit):
     seen = 0
     last_id = str(after)
+    epoch = ""
     while True:
+        path = "/v1/inboxes/%s/stream" % inbox
+        if epoch:
+            path += "?epoch=" + urllib.parse.quote(epoch)  # a reconnect is refused if the inbox has changed lives
         try:
-            with request(base, token, "/v1/inboxes/%s/stream" % inbox, {"Last-Event-ID": last_id}, timeout=90) as resp:
+            with request(base, token, path, {"Last-Event-ID": last_id}, timeout=90) as resp:
                 event_id, data = None, []
                 for raw in resp:  # the server sends a ping comment every 15 s, so silence means a dead connection
                     line = raw.decode("utf-8").rstrip("\n")
@@ -90,12 +107,18 @@ def stream(base, token, inbox, after, limit):
                     elif line.startswith("data:"):
                         data.append(line[5:].lstrip())
                     elif line == "" and data:
-                        handle(json.loads("\n".join(data)))
+                        message = json.loads("\n".join(data))
+                        handle(message)
+                        epoch = epoch or message.get("epoch", "")
                         last_id = event_id or last_id
                         data, seen = [], seen + 1
                         if limit and seen >= limit:
                             return
         except urllib.error.HTTPError as err:
+            if err.code == 409:
+                print("the inbox was deleted and made again, or the server was restored; reading it from its beginning", file=sys.stderr)
+                last_id, epoch = "0", ""
+                continue
             if err.code in FATAL:
                 sys.exit("the server answered %d: is the token right, and the inbox there?" % err.code)
             print("the server answered %d; reconnecting from %s" % (err.code, last_id), file=sys.stderr)
