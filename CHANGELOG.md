@@ -55,6 +55,9 @@ Everything below is the detail behind the summary above, phase by phase: what ch
 Go packages, the API, and the configuration, in the order it happened. The newest is first.
 
 ### Release review fixes
+- **A clock that jumps forward no longer makes retention delete messages early.** A retention run that
+  finds the wall clock more than ten minutes ahead of the monotonic clock since the last run uses the time
+  that really passed, and logs it; the next run accepts the clock as it reads.
 - **A database restored with a wide file mode is made private when it is opened** (and its `-wal` and
   `-shm` files), with a warning in the log. Before, the server kept whatever mode the copy came with.
 - **`/readyz` no longer fails for the whole server because one inbox's secret does not open.**
