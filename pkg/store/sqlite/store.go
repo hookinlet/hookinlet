@@ -132,8 +132,10 @@ func (e *LockedError) Error() string {
 // WithReaders sets the size of the read-connection pool. The default is 4.
 func WithReaders(n int) Option { return func(c *config) { c.readers = n } }
 
-// Open opens (creating if necessary) the database in dir and applies any
-// pending migrations. It makes no network calls. It fails if the database was
+// Open opens (creating if necessary) the database in dir. A server must pass
+// WithExclusiveLock: pending migrations are applied only by an Open that holds the lock,
+// and an Open without it fails with *NeedsMigrationError on a database that needs them.
+// It makes no network calls. It fails if the database was
 // written by a newer version of hookinlet.
 func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error) {
 	cfg := config{now: time.Now, readers: defaultReaders, freeSpace: freeBytes, walLimit: DefaultWALLimit}

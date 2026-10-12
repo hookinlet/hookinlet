@@ -56,6 +56,16 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 
 ### Release review fixes
 
+- **Changes to the public packages:** `sqlite.Open` applies migrations only when given
+  `WithExclusiveLock()`; without it, a database that needs migrating fails with the new
+  `*sqlite.NeedsMigrationError` (servers built on the package should pass the option, as
+  `examples/custom-hooks` now does). `Server.Serve` refuses a nil listener and a server with
+  `Options.AdminAddr` set (use `ServeAdmin` or `Run`, or mount `AdminHandler`), and `ServeAdmin`
+  refuses nil listeners. `verify.Registry.New` fails when a factory returns no verifier.
+  `inboxtest.AuthenticatorSuite` requires `CanReadInbox(nil)` to be false and has a `Revoke`
+  fixture field. `hookinlet backup --data-dir` on a database that needs migrating refuses: back
+  up with the old binary first, or upgrade (a copy is kept).
+
 - **A command that does not hold the data-directory lock no longer migrates the database.** It
   refuses and says to stop the server and run `hookinlet migrate` (which takes the lock). Before,
   `inbox show` run with the new binary beside the old server upgraded the schema under it.

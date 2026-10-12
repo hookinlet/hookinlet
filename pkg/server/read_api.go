@@ -405,15 +405,9 @@ func rawContentType(m *inbox.Message) string {
 // the answer when none came free; err is set when the caller went away first, and
 // then there is nobody to answer.
 func (a *readAPI) slot(ctx context.Context) (release func(), busy *api.OverloadedJSONResponse, err error) {
-	release, err = a.s.readSlot(ctx)
+	release, err = a.s.holdSlot(ctx)
 	switch {
 	case err == nil:
-		// The handler releases (defer release()) when it returns, which is before its answer
-		// has been written; the slot is kept until enforce says the response is done.
-		if rr, ok := ctx.Value(readKey).(*readRequest); ok && rr.hold == nil {
-			rr.hold = release
-			return func() {}, nil, nil
-		}
 		return release, nil, nil
 	case errors.Is(err, errBusy):
 		b := overloaded(ctx, "1", "the server is busy; retry shortly")

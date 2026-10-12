@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -484,8 +483,8 @@ func TestASlowReaderKeepsItsReadSlotUntilTheResponseIsWritten(t *testing.T) {
 	}
 
 	// A client with a tiny receive buffer that never reads.
-	dialer := net.Dialer{Control: func(_, _ string, c syscall.RawConn) error {
-		return c.Control(func(fd uintptr) { _ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_RCVBUF, 4096) })
+	dialer := net.Dialer{Control: func(_, _ string, c rawConn) error {
+		return smallReceiveBuffer(c)
 	}}
 	conn, err := dialer.DialContext(t.Context(), "tcp", strings.TrimPrefix(base, "http://"))
 	if err != nil {
@@ -511,5 +510,31 @@ func TestASlowReaderKeepsItsReadSlotUntilTheResponseIsWritten(t *testing.T) {
 	}
 	if status != http.StatusOK {
 		t.Errorf("after the response timeout: %d, want 200", status)
+	}
+}
+
+// ResponseTimeout is for answers being read, not for the time a sender takes to deliver
+// or a handler takes to work: a slow upload that finishes is stored and acknowledged.
+func TestTheResponseTimeoutDoesNotCutOffASlowIngest(t *testing.T) {
+	e := newAgentEnv2(t, func(o *Options) { o.ResponseTimeout = 200 * time.Millisecond })
+	base := serveOn(t, e.env)
+	pr, pw := io.Pipe()
+	go func() {
+		_, _ = pw.Write([]byte("slow "))
+		time.Sleep(500 * time.Millisecond)
+		_, _ = pw.Write([]byte("sender"))
+		_ = pw.Close()
+	}()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+"/in/agent-a", pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("a slow ingest that finished: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status %d", resp.StatusCode)
 	}
 }

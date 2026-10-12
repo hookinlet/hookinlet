@@ -181,6 +181,10 @@ type readRequest struct {
 	// been written, not when the handler returns: the answer (a page, a raw body) sits in
 	// memory until the client has taken it, and the slots are what bound how much.
 	hold func()
+	// deadline starts the response timeout. It is started when the answer begins to
+	// be built, not when the request arrives: ingest and admin calls may run long
+	// before they answer, and the time a handler spends is not the client's.
+	deadline func()
 }
 
 const (
@@ -267,8 +271,10 @@ func (s *Server) enforce(next http.Handler) http.Handler {
 			return
 		}
 		// A client that asks and does not read must not keep the answer in memory for
-		// ever. Operations that run long on purpose set their own deadlines.
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.opts.ResponseTimeout))
+		// ever (see holdSlot). Operations that run long on purpose set their own deadlines.
+		rr.deadline = func() {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.opts.ResponseTimeout))
+		}
 		// However the handler ends, even by aborting the connection, the slot goes back.
 		defer func() {
 			if rr.hold != nil {

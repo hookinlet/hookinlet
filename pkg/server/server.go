@@ -90,8 +90,11 @@ type Options struct {
 	// ResponseTimeout bounds how long a response may take to be written to the client,
 	// from the moment the request has been checked. A client that sends a request and
 	// does not read the answer would otherwise keep the answer (a page of messages, a
-	// raw body) in memory for as long as it likes. Streams, MCP waits and backups manage
-	// their own deadlines. Defaults to 2 minutes.
+	// raw body) in memory for as long as it likes. It is a fixed budget for the whole
+	// answer from when the server starts building it, so a client must read at roughly
+	// 16 MiB per ResponseTimeout to take the largest page. Ingest, the admin API, streams
+	// and backups are not bound by it (streams and backups manage their own deadlines).
+	// Defaults to 2 minutes; it must exceed the longest MCP wait (1 minute).
 	ResponseTimeout time.Duration
 	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
 	// to the ingest endpoint. Defaults to 60s.
@@ -376,8 +379,9 @@ func (s *Server) Run(ctx context.Context) error {
 	return s.ServeAdmin(ctx, ln, adminLn)
 }
 
-// Serve is like Run but accepts an existing listener. With Options.AdminAddr
-// set it serves only the public surface; ServeAdmin takes the second listener.
+// Serve is like Run but accepts an existing listener. It refuses a server with
+// Options.AdminAddr set (the admin API is then on a second listener: use ServeAdmin or
+// Run). To put the admin API on a server of your own, mount AdminHandler beside Handler.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	if ln == nil {
 		return errors.New("server: Serve needs a listener")
@@ -393,6 +397,12 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 // for each address. The admin API is served on adminLn and nothing else is.
 func (s *Server) ServeAdmin(ctx context.Context, ln, adminLn net.Listener) error {
 	if ln == nil || adminLn == nil {
+		if ln != nil {
+			_ = ln.Close()
+		}
+		if adminLn != nil {
+			_ = adminLn.Close()
+		}
 		return errors.New("server: ServeAdmin needs a listener for each address")
 	}
 	if s.adminHTTP == nil {

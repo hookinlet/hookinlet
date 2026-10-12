@@ -397,3 +397,35 @@ func TestARolledBackUpgradeGetsAFreshCopyNextTime(t *testing.T) {
 		t.Errorf("the stale copy was kept: %q, %v", b, err)
 	}
 }
+
+// An upgrade killed before its first migration committed finds the data as the copy
+// left it, and keeps that copy rather than copying again on every restart.
+func TestARestartedUpgradeKeepsACopyOfUnchangedData(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+	raw, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stamp string
+	if err := raw.QueryRowContext(t.Context(), `SELECT (SELECT COALESCE(MAX(id),0) FROM messages) || '/' ||
+		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes)`).Scan(&stamp); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+	kept := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"2.bak")
+	if err := os.WriteFile(kept, []byte("made before the first attempt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, sqlite.DBFileName+".migrating"), []byte("2 "+stamp+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	if b, err := os.ReadFile(kept); err != nil || string(b) != "made before the first attempt" { //nolint:gosec // this test's own temp directory
+		t.Errorf("the copy was replaced: %q, %v", b, err)
+	}
+}

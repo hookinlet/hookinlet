@@ -32,7 +32,7 @@ read API, the admin API, SSE and MCP are served only when there is an
 `Authenticator`, since there is no safe default for who may read.
 
 ```go
-store, err := sqlite.Open(ctx, "./data")        // or your own inbox.Store
+store, err := sqlite.Open(ctx, "./data", sqlite.WithExclusiveLock()) // or your own inbox.Store; the lock also lets it migrate
 box, err := secretbox.New(masterKey)            // 32 bytes
 
 srv, err := server.New(server.Options{

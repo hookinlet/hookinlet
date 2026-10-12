@@ -144,3 +144,20 @@ func TestServeRefusesAServerWithAnAdminAddress(t *testing.T) {
 		t.Error("ServeAdmin accepted nil listeners")
 	}
 }
+
+// A refusal does not leave the caller's port bound.
+func TestServeAdminClosesTheListenerItRefuses(t *testing.T) {
+	e := newEnv(t, withAuth, func(o *Options) { o.AdminAddr = "127.0.0.1:1" })
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.server.ServeAdmin(t.Context(), l, nil); err == nil {
+		t.Fatal("ServeAdmin accepted a nil admin listener")
+	}
+	if c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", l.Addr().String()); err == nil {
+		_ = c.Close()
+		t.Error("the listener was left open")
+	}
+}

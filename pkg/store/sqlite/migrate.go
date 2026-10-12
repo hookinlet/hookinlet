@@ -100,16 +100,24 @@ func migrate(ctx context.Context, db *sql.DB, dbPath string, mayMigrate bool, lo
 	if current > 0 && current < len(migs) {
 		_, markerErr := os.Stat(marker)
 		haveCopy, _ := filepath.Glob(filepath.Join(filepath.Dir(dbPath), MigrationSnapshotPrefix+"*.bak"))
-		// A marker left by an upgrade that was rolled back (the copy put back, nothing
-		// applied since) says the copy is stale: take a new one.
+		// The marker records the schema version and a fingerprint of the data when the
+		// copy was made. An upgrade that was killed before its first migration committed
+		// finds both unchanged, and keeps the copy. A rolled-back one has had the copy put
+		// back and may have taken deliveries since, so the copy is no longer a way back to
+		// what is there now: take a new one.
+		stamp, err := fingerprint(ctx, db)
+		if err != nil {
+			return nil, err
+		}
 		started, _ := os.ReadFile(marker) //nolint:gosec // beside the database, in the data directory
-		untouched := strings.TrimSpace(string(started)) == strconv.Itoa(current)
-		if markerErr != nil || len(haveCopy) == 0 || untouched {
+		same := strings.TrimSpace(string(started)) == strconv.Itoa(current)+" "+stamp
+		fresh := strings.TrimSpace(string(started)) == strconv.Itoa(current) || strings.HasPrefix(string(started), strconv.Itoa(current)+" ")
+		if markerErr != nil || len(haveCopy) == 0 || (fresh && !same) {
 			if err := snapshotBeforeMigrating(ctx, db, dbPath, current); err != nil {
 				return nil, err
 			}
 			log.Info("kept a copy of the database before migrating it", "from_version", current, "to_version", len(migs), "dir", filepath.Dir(dbPath))
-			if err := os.WriteFile(marker, []byte(strconv.Itoa(current)+"\n"), 0o600); err != nil {
+			if err := os.WriteFile(marker, []byte(strconv.Itoa(current)+" "+stamp+"\n"), 0o600); err != nil {
 				return nil, fmt.Errorf("sqlite: %w", err)
 			}
 		}
@@ -140,6 +148,18 @@ func migrate(ctx context.Context, db *sql.DB, dbPath string, mayMigrate bool, lo
 		_ = os.Remove(marker) // the upgrade finished
 	}
 	return applied, nil
+}
+
+// fingerprint summarises what a delivery or an inbox change would alter, cheaply enough
+// to take on a large database.
+func fingerprint(ctx context.Context, db *sql.DB) (string, error) {
+	var s string
+	err := db.QueryRowContext(ctx, `SELECT (SELECT COALESCE(MAX(id),0) FROM messages) || '/' ||
+		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes)`).Scan(&s)
+	if err != nil {
+		return "", fmt.Errorf("sqlite: fingerprint the database: %w", err)
+	}
+	return s, nil
 }
 
 // NeedsMigrationError means the database is at an older schema than this build and

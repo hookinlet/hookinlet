@@ -12,6 +12,26 @@ import (
 // errBusy means no read slot came free within ReadWaitTimeout.
 var errBusy = errors.New("server: too many reads in progress")
 
+// holdSlot is readSlot for a handler whose answer is built in memory: the slot is kept
+// until the answer has been written to the client (or ResponseTimeout has passed), not
+// until the handler returns, so that the slots bound the answers in memory.
+func (s *Server) holdSlot(ctx context.Context) (release func(), err error) {
+	release, err = s.readSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if rr, ok := ctx.Value(readKey).(*readRequest); ok {
+		if rr.deadline != nil {
+			rr.deadline()
+		}
+		if rr.hold == nil {
+			rr.hold = release
+			return func() {}, nil
+		}
+	}
+	return release, nil
+}
+
 // readSlot takes one of the limited read slots, waiting up to ReadWaitTimeout.
 // It fails with errBusy if none comes free and with the context's error if the
 // caller goes away first.
