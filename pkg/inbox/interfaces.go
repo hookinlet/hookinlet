@@ -313,8 +313,8 @@ type Hooks interface {
 // SecretBox seals secrets for storage at rest.
 type SecretBox interface {
 	// Seal encrypts plaintext and binds it to context: the same context must be
-	// given to Open. The caller chooses what the value belongs to (the inbox's slug,
-	// for a verifier secret), so that a sealed value copied onto another row does not
+	// given to Open. The caller chooses what the value belongs to (for a verifier
+	// secret, VerifierSecretContext(slug)), so that a sealed value copied onto another row does not
 	// open there. Sealing the same plaintext twice yields different ciphertexts.
 	Seal(plaintext, context []byte) ([]byte, error)
 	// Open decrypts ciphertext produced by Seal, given the context it was sealed

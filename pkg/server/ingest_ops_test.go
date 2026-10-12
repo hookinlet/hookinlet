@@ -464,3 +464,77 @@ func TestAnAdminNextLinkCarriesTheEffectiveLimit(t *testing.T) {
 		}
 	}
 }
+
+// A client that asks for a big answer and does not read it holds the answer in memory;
+// the read slot stays taken until it has been written or given up on, so such clients
+// are bounded by the slots (and by the response timeout) and not by how many
+// connections they open.
+func TestASlowReaderKeepsItsReadSlotUntilTheResponseIsWritten(t *testing.T) {
+	e := newAgentEnv2(t, func(o *Options) {
+		o.MaxConcurrentReads = 1
+		o.ReadWaitTimeout = 150 * time.Millisecond
+		o.ResponseTimeout = 1500 * time.Millisecond
+	})
+	e.tokenA = e.tokenFor(e.a)
+	base := serveOn(t, e.env)
+	big := strings.Repeat("x", 400<<10)
+	for range 24 {
+		e.post("/in/agent-a", big)
+	}
+
+	// A client with a tiny receive buffer that never reads.
+	dialer := net.Dialer{Control: func(_, _ string, c rawConn) error {
+		return smallReceiveBuffer(c)
+	}}
+	conn, err := dialer.DialContext(t.Context(), "tcp", strings.TrimPrefix(base, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := fmt.Fprintf(conn, "GET /v1/inboxes/agent-a/messages?after=0&limit=100 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\n\r\n", e.tokenA); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond) // the server has built the page and is stuck writing it
+
+	status, _ := do2(t, "GET", base+"/v1/inboxes/agent-a", http.Header{"Authorization": {"Bearer " + e.tokenA}}, "")
+	if status != http.StatusServiceUnavailable {
+		t.Errorf("while a slow reader holds the only slot: %d, want 503", status)
+	}
+	// Once its response timeout passes the slot is free again.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if status, _ = do2(t, "GET", base+"/v1/inboxes/agent-a", http.Header{"Authorization": {"Bearer " + e.tokenA}}, ""); status == http.StatusOK {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if status != http.StatusOK {
+		t.Errorf("after the response timeout: %d, want 200", status)
+	}
+}
+
+// ResponseTimeout is for answers being read, not for the time a sender takes to deliver
+// or a handler takes to work: a slow upload that finishes is stored and acknowledged.
+func TestTheResponseTimeoutDoesNotCutOffASlowIngest(t *testing.T) {
+	e := newAgentEnv2(t, func(o *Options) { o.ResponseTimeout = 200 * time.Millisecond })
+	base := serveOn(t, e.env)
+	pr, pw := io.Pipe()
+	go func() {
+		_, _ = pw.Write([]byte("slow "))
+		time.Sleep(500 * time.Millisecond)
+		_, _ = pw.Write([]byte("sender"))
+		_ = pw.Close()
+	}()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, base+"/in/agent-a", pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("a slow ingest that finished: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status %d", resp.StatusCode)
+	}
+}

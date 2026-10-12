@@ -36,6 +36,15 @@ database first, and there was no room for a second copy. Free space (about three
 the database's size for the upgrade that moves message bodies) and start again. Nothing
 was changed.
 
+**`the database is at schema version N and this release needs M`.** A command that does not
+hold the data directory's lock will not upgrade a database. Stop the server and run
+`hookinlet migrate`.
+
+**`/readyz` says there is no room, though pruning freed a lot.** Pages that pruning
+empties stay inside the database file and are reused by new writes, and they count as room.
+The file itself does not shrink. Admin calls that write answer `500` while the volume is
+completely full (the log says `storage full`); deliveries answer `503`.
+
 **`database schema version N is newer than this build supports`.** The data was
 written by a newer hookinlet. Run the newer version, or restore a backup taken by an
 older one.

@@ -20,6 +20,7 @@ inbox=${1:?usage: poll.sh INBOX_SLUG}
 base=${HOOKINLET_URL:-http://localhost:8080}
 : "${HOOKINLET_AGENT_TOKEN:?set HOOKINLET_AGENT_TOKEN to the agent token of the inbox}"
 after=${AFTER:-0}
+epoch=""       # which life of the inbox the cursor is in; the first page says
 interval=${INTERVAL:-2}
 polls=0
 
@@ -27,10 +28,18 @@ body=$(mktemp)
 trap 'rm -f "$body"' EXIT
 
 while :; do
-  code=$(curl -sS -o "$body" -w '%{http_code}' "$base/v1/inboxes/$inbox/messages?after=$after&limit=50" \
+  code=$(curl -sS -o "$body" -w '%{http_code}' "$base/v1/inboxes/$inbox/messages?after=$after&limit=50${epoch:+&epoch=$epoch}" \
     -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN") || code=000
   case $code in
     200) page=$(cat "$body") ;;
+    409)
+      # epoch_changed: the inbox was deleted and made again, or the server was restored.
+      # A seq means nothing across lives; carrying on from the old one would skip the new
+      # inbox's first messages.
+      echo "the inbox was deleted and made again, or the server was restored; reading it from its beginning" >&2
+      after=0
+      epoch=""
+      continue ;;
     401|403|404)
       echo "the server answered $code: is the token right, and the inbox there?" >&2
       exit 1 ;;
@@ -48,6 +57,7 @@ while :; do
   # Keep the cursor. The "next" link is the same query one step on, and it is
   # still there when the page is empty.
   after=$(printf '%s' "$page" | jq -r '.next | split("after=")[1] | split("&")[0]')
+  epoch=${epoch:-$(printf '%s' "$page" | jq -r '.epoch')}
 
   polls=$((polls + 1))
   if [ -n "${MAX_POLLS:-}" ] && [ "$polls" -ge "$MAX_POLLS" ]; then

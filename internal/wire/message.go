@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -91,6 +92,14 @@ func optional(s string) *string {
 	return &s
 }
 
+// MaxEmbeddedNumberLen is the longest number literal a body may have and still be
+// embedded as JSON. A number of thousands of digits is valid JSON, and a parser may
+// refuse it (Python raises ValueError past 4,300 digits), as it may a number that
+// does not fit a float64 (1e400, which Go's decoder refuses): one such body would make
+// every page that contains it unreadable. Past this length the body is delivered as
+// text, which loses nothing.
+const MaxEmbeddedNumberLen = 100
+
 // MaxEmbeddedJSONDepth is the deepest JSON nesting a body may have and still be
 // embedded as JSON. encoding/json accepts 10,000 levels, but many clients do not
 // (Python's json module raises RecursionError at roughly 1,000), and a single
@@ -109,7 +118,7 @@ func (m *Message) setBody(body []byte) {
 	case !utf8.Valid(body):
 		s := base64.StdEncoding.EncodeToString(body)
 		m.BodyBase64 = &s
-	case json.Valid(body) && jsonDepth(body) <= MaxEmbeddedJSONDepth:
+	case json.Valid(body) && jsonDepth(body) <= MaxEmbeddedJSONDepth && jsonParsesEverywhere(body):
 		m.Body = json.RawMessage(bytes.Clone(body))
 	default:
 		s := string(body)
@@ -221,4 +230,63 @@ func jsonStringLen(s string) int64 {
 		}
 	}
 	return n
+}
+
+// jsonParsesEverywhere reports whether a document that is already known to be valid
+// JSON holds only what common parsers accept: no number literal that is very long or
+// outside the range of a float64, and no unpaired UTF-16 surrogate in a \u escape
+// (which strict parsers refuse, and lenient ones turn into a replacement character,
+// altering the sender's text).
+func jsonParsesEverywhere(b []byte) bool {
+	inString := false
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if inString {
+			switch c {
+			case '"':
+				inString = false
+			case '\\':
+				i++
+				if i < len(b) && b[i] == 'u' && i+4 < len(b) {
+					r, err := strconv.ParseUint(string(b[i+1:i+5]), 16, 32)
+					if err != nil {
+						return false
+					}
+					i += 4
+					switch {
+					case r >= 0xD800 && r < 0xDC00: // a high surrogate needs its low one next
+						if i+6 >= len(b) || b[i+1] != '\\' || b[i+2] != 'u' {
+							return false
+						}
+						lo, err := strconv.ParseUint(string(b[i+3:i+7]), 16, 32)
+						if err != nil || lo < 0xDC00 || lo >= 0xE000 {
+							return false
+						}
+						i += 6
+					case r >= 0xDC00 && r < 0xE000: // a low one alone
+						return false
+					}
+				}
+			}
+			continue
+		}
+		switch {
+		case c == '"':
+			inString = true
+		case c == '-' || (c >= '0' && c <= '9'):
+			j := i
+			for j < len(b) && (b[j] == '-' || b[j] == '+' || b[j] == '.' || b[j] == 'e' || b[j] == 'E' || (b[j] >= '0' && b[j] <= '9')) {
+				j++
+			}
+			lit := b[i:j]
+			if len(lit) > MaxEmbeddedNumberLen {
+				return false
+			}
+			if _, err := strconv.ParseFloat(string(lit), 64); err != nil {
+				return false // out of range for a float64 (1e400), which Go's decoder refuses
+			}
+			i = j - 1
+		}
+	}
+	return true
 }

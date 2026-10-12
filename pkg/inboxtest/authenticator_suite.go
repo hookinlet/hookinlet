@@ -24,6 +24,11 @@ type AuthFixture struct {
 	// TokenBoth, if non-empty, reads InboxA and InboxB and cannot administer.
 	// TokenAll, if non-empty, reads every inbox and cannot administer.
 	TokenBoth, TokenAll string
+	// Revoke, if set, withdraws a token (one of TokenA, TokenB, TokenBoth, TokenAll) so
+	// that it no longer authenticates, as the Store's DeleteToken does for the default
+	// implementation. The suite checks that the very next Authenticate refuses it: an
+	// Authenticator that remembers who it has seen would not.
+	Revoke func(token string)
 	// AdminToken, if non-empty, can read every inbox and administer. An
 	// implementation without an admin credential leaves it empty.
 	AdminToken string
@@ -89,6 +94,9 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 			if p.CanAdmin() || !p.CanReadInbox(f.InboxA) || !p.CanReadInbox(f.InboxB) {
 				t.Error("a token for both inboxes should read both and not administer")
 			}
+			if p.CanReadInbox(nil) {
+				t.Error("a nil inbox must not be readable")
+			}
 			if sc, ok := p.(inbox.ScopedPrincipal); ok && len(sc.InboxIDs()) != 2 {
 				t.Errorf("InboxIDs = %v, want both inboxes", sc.InboxIDs())
 			}
@@ -103,6 +111,9 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 			}
 			if !p.CanReadInbox(f.InboxA) || !p.CanReadInbox(f.InboxB) {
 				t.Errorf("the %s credential should read every inbox", name)
+			}
+			if p.CanReadInbox(nil) {
+				t.Errorf("a nil inbox must not be readable by the %s credential", name)
 			}
 			if name == "all-inboxes" && p.CanAdmin() {
 				t.Error("a token for all inboxes must not be able to administer")
@@ -206,6 +217,25 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/inboxes/x/messages?access_token="+f.TokenA+"&token="+f.TokenA, nil)
 		if p, err := f.Authenticator.Authenticate(r); p != nil || !errors.Is(err, inbox.ErrUnauthenticated) {
 			t.Errorf("a token in the query string authenticated: %v, %v", p, err)
+		}
+	})
+
+	t.Run("ARevokedTokenIsRefusedAtOnce", func(t *testing.T) {
+		f := newFixture(t)
+		if f.Revoke == nil {
+			t.Skip("this implementation cannot revoke a token through the fixture")
+		}
+		for range 2 { // the first use must not make it remembered
+			if _, err := authenticate(t, f, bearer(f.TokenA)...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.Revoke(f.TokenA)
+		if p, err := authenticate(t, f, bearer(f.TokenA)...); p != nil || !errors.Is(err, inbox.ErrUnauthenticated) {
+			t.Errorf("a revoked token: principal %v, error %v; want a nil principal and ErrUnauthenticated", p, err)
+		}
+		if _, err := authenticate(t, f, bearer(f.TokenB)...); err != nil {
+			t.Errorf("revoking one token stopped another: %v", err)
 		}
 	})
 

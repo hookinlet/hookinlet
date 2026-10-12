@@ -405,7 +405,7 @@ func rawContentType(m *inbox.Message) string {
 // the answer when none came free; err is set when the caller went away first, and
 // then there is nobody to answer.
 func (a *readAPI) slot(ctx context.Context) (release func(), busy *api.OverloadedJSONResponse, err error) {
-	release, err = a.s.readSlot(ctx)
+	release, err = a.s.holdSlot(ctx)
 	switch {
 	case err == nil:
 		return release, nil, nil

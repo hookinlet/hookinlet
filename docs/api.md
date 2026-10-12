@@ -123,8 +123,8 @@ Exactly one of these fields is present, chosen by what the body is:
 
 | Field | When |
 |---|---|
-| `body` | The body is valid UTF-8 **and** valid JSON **and** nested no deeper than 64 levels. It appears as JSON, not as a string containing JSON. |
-| `body_text` | It is valid UTF-8 but not JSON (or is JSON nested deeper than 64 levels). This includes the empty body (`""`) and form-encoded data. |
+| `body` | The body is valid UTF-8 **and** valid JSON **and** nested no deeper than 64 levels **and** holds only what common parsers accept (see below). It appears as JSON, not as a string containing JSON. |
+| `body_text` | It is valid UTF-8 but not JSON (or is JSON that is not embedded, see below). This includes the empty body (`""`) and form-encoded data. |
 | `body_base64` | It is not valid UTF-8. Base64 decodes to the exact original bytes. |
 
 A client that needs the original bytes of a JSON body exactly as sent (for
@@ -136,6 +136,11 @@ thousands of levels deep is valid, but common parsers fail on it (Python's
 `json` module raises `RecursionError` at roughly 1,000 levels), and one such body
 embedded in a page would make every page containing it unreadable, leaving a
 polling agent stuck on it for good. Deeper bodies are delivered as text instead.
+The same goes for a number literal of more than 100 characters, a number outside the
+range of a 64-bit float (`1e400`), and a `\u` escape of half a surrogate pair: all valid
+JSON, all refused by some common parser (Python rejects integers over 4,300 digits, Go
+refuses `1e400`), and all in the sender's hands. Those bodies come as `body_text`,
+exactly as sent.
 
 With `fields=summary`, none of the three is present.
 

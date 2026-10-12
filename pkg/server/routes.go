@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/hookinlet/hookinlet/internal/api"
 	"github.com/hookinlet/hookinlet/internal/specvalidate"
@@ -176,6 +177,14 @@ type readRequest struct {
 	r         *http.Request
 	in        *inbox.Inbox
 	principal inbox.Principal
+	// hold is the read slot a handler handed over to be released once the response has
+	// been written, not when the handler returns: the answer (a page, a raw body) sits in
+	// memory until the client has taken it, and the slots are what bound how much.
+	hold func()
+	// deadline starts the response timeout. It is started when the answer begins to
+	// be built, not when the request arrives: ingest and admin calls may run long
+	// before they answer, and the time a handler spends is not the client's.
+	deadline func()
 }
 
 const (
@@ -261,6 +270,17 @@ func (s *Server) enforce(next http.Handler) http.Handler {
 		if !s.secure(w, r, op, rr) || !s.checkRequest(w, r, op) {
 			return
 		}
+		// A client that asks and does not read must not keep the answer in memory for
+		// ever (see holdSlot). Operations that run long on purpose set their own deadlines.
+		rr.deadline = func() {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.opts.ResponseTimeout))
+		}
+		// However the handler ends, even by aborting the connection, the slot goes back.
+		defer func() {
+			if rr.hold != nil {
+				rr.hold()
+			}
+		}()
 		next.ServeHTTP(w, r.WithContext(rr.context(r.Context())))
 	})
 }

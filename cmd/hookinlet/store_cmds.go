@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,7 @@ func migrateCmd(args []string, getenv func(string) string, stdout, stderr io.Wri
 	}
 
 	ctx := context.Background()
-	store, err := sqlite.Open(ctx, data.DataDir)
+	store, err := sqlite.Open(ctx, data.DataDir, sqlite.WithExclusiveLock(), sqlite.WithLogger(slog.New(slog.NewTextHandler(stderr, nil))))
 	if err != nil {
 		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
 		return exitRuntime

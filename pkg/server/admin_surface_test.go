@@ -123,3 +123,41 @@ func TestAdminActionsAreLoggedWithTheCallersAddress(t *testing.T) {
 		t.Error("an empty slug was logged")
 	}
 }
+
+// Serve has no second listener to give the admin API, so it refuses a server that
+// has one configured instead of quietly serving admin on the public address.
+func TestServeRefusesAServerWithAnAdminAddress(t *testing.T) {
+	e := newEnv(t, withAuth, func(o *Options) { o.AdminAddr = "127.0.0.1:1" })
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	if err := e.server.Serve(t.Context(), l); err == nil || !strings.Contains(err.Error(), "ServeAdmin") {
+		t.Errorf("Serve with AdminAddr set: %v; want an error pointing at ServeAdmin", err)
+	}
+	if err := e.server.Serve(t.Context(), nil); err == nil {
+		t.Error("Serve accepted a nil listener")
+	}
+	if err := e.server.ServeAdmin(t.Context(), nil, nil); err == nil {
+		t.Error("ServeAdmin accepted nil listeners")
+	}
+}
+
+// A refusal does not leave the caller's port bound.
+func TestServeAdminClosesTheListenerItRefuses(t *testing.T) {
+	e := newEnv(t, withAuth, func(o *Options) { o.AdminAddr = "127.0.0.1:1" })
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.server.ServeAdmin(t.Context(), l, nil); err == nil {
+		t.Fatal("ServeAdmin accepted a nil admin listener")
+	}
+	if c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", l.Addr().String()); err == nil {
+		_ = c.Close()
+		t.Error("the listener was left open")
+	}
+}

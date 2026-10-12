@@ -266,7 +266,7 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 	ctx, done := t.bind(ctx)
 	defer done()
 	out := listInboxesOutput{Inboxes: []inboxSummary{}}
-	release, err := t.s.readSlot(ctx)
+	release, err := t.s.holdSlot(ctx)
 	if err != nil {
 		return nil, nil, t.fail(ctx, "list inboxes", err)
 	}
@@ -424,7 +424,7 @@ func pageRequest(after, before *int64, limit *int, types []string, since, until 
 
 // fetch reads one page, holding a read slot only while it does.
 func (t *mcpTools) fetch(ctx context.Context, in *inbox.Inbox, req wire.PageRequest) (*wire.Page, error) {
-	release, err := t.s.readSlot(ctx)
+	release, err := t.s.holdSlot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +509,7 @@ func (t *mcpTools) getMessage(ctx context.Context, _ *mcp.CallToolRequest, args 
 	if err := wire.CheckEpoch(in, stringOf(args.Epoch)); err != nil {
 		return nil, nil, t.fail(ctx, "get", err)
 	}
-	release, err := t.s.readSlot(ctx)
+	release, err := t.s.holdSlot(ctx)
 	if err != nil {
 		return nil, nil, t.fail(ctx, "get", err)
 	}

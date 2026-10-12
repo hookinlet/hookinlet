@@ -306,8 +306,8 @@ func TestARestartCarriesOnWithoutRepeatingOrLosingAnything(t *testing.T) {
 	// be a moment behind the last body the destination saw.
 	var saved string
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		b, _ := os.ReadFile(state) //nolint:gosec // a temp path
-		if saved = strings.TrimSpace(string(b)); saved == "2" {
+		b, _ := os.ReadFile(state)                                                      //nolint:gosec // a temp path
+		if saved, _, _ = strings.Cut(strings.TrimSpace(string(b)), " "); saved == "2" { // "SEQ EPOCH"
 			break
 		}
 	}
@@ -421,5 +421,55 @@ func TestAWrongTokenIsReportedAndRetriedNotSilentlySkipped(t *testing.T) {
 	}
 	if d.requests() != 0 {
 		t.Error("something was forwarded with a bad token")
+	}
+}
+
+// An inbox that is deleted and made again starts at seq 1 again. A relay that kept
+// only the number would carry on at the old position and never relay the new
+// inbox's first messages.
+func TestARecreatedInboxIsRelayedFromItsBeginning(t *testing.T) {
+	h := newHookinlet(t)
+	state := filepath.Join(t.TempDir(), "state")
+	h.send(t, "old-1", "text/plain")
+	h.send(t, "old-2", "text/plain")
+	h.send(t, "old-3", "text/plain")
+	d := newDestination(t, nil)
+	runUntil(t, relayFor(t, h, d, state), func() bool { return len(d.bodies()) == 3 })
+	var saved []byte
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		saved, _ = os.ReadFile(state) //nolint:gosec // a temp path
+		if strings.HasPrefix(string(saved), "3 ") {
+			break
+		}
+	}
+	if !strings.HasPrefix(string(saved), "3 ") {
+		t.Fatalf("the state file does not record the epoch with the position: %q", saved)
+	}
+
+	// The same slug, a new life.
+	sealed := h.in.VerifierSecret
+	if err := h.store.DeleteInbox(t.Context(), h.in.ID); err != nil {
+		t.Fatal(err)
+	}
+	in := &inbox.Inbox{Slug: "relayed", IngestKey: "relayed", Name: "relayed", Verifier: "token", VerifierSecret: sealed}
+	if err := h.store.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	tok, hash, err := token.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.CreateToken(t.Context(), &inbox.Token{Name: "again", Hash: hash, InboxIDs: []inbox.ID{in.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	h.in, h.token = in, tok
+	for i := 1; i <= 5; i++ {
+		h.send(t, "new-"+string(rune('0'+i)), "text/plain")
+	}
+
+	runUntil(t, relayFor(t, h, d, state), func() bool { return len(d.bodies()) == 8 })
+	got := strings.Join(d.bodies(), ",")
+	if got != "old-1,old-2,old-3,new-1,new-2,new-3,new-4,new-5" {
+		t.Errorf("relayed %s: the new inbox's first messages must not be skipped", got)
 	}
 }

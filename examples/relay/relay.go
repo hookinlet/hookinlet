@@ -52,6 +52,11 @@ type Relay struct {
 
 	Log    *slog.Logger
 	Client *http.Client // used for both sides; nil means a default
+
+	// epoch is the inbox's epoch the cursor belongs to (see docs/api.md). A seq only
+	// means something within one epoch: if the inbox is deleted and made again, or
+	// the server is restored from a backup, the same numbers name other messages.
+	epoch string
 }
 
 // hopHeaders are not passed on: they describe one connection, or are set by the
@@ -99,6 +104,7 @@ type message struct {
 type page struct {
 	Messages  []message `json:"messages"`
 	LatestSeq int64     `json:"latest_seq"`
+	Epoch     string    `json:"epoch"`
 }
 
 func (r *Relay) client() *http.Client {
@@ -125,6 +131,16 @@ func (r *Relay) Run(ctx context.Context) error {
 
 	for ctx.Err() == nil {
 		pg, err := r.fetchPage(ctx, cursor)
+		if errors.Is(err, errEpochChanged) {
+			// The cursor is from an earlier life of the inbox. What it names now is
+			// not what it named, so it is not trusted: begin this inbox again.
+			r.Log.Warn("the inbox was deleted and made again, or the server was restored; relaying it from its beginning")
+			cursor, r.epoch = 0, ""
+			if err := r.saveCursor(cursor); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -178,24 +194,42 @@ func (r *Relay) get(ctx context.Context, path string) (*http.Response, error) {
 }
 
 func (r *Relay) fetchPage(ctx context.Context, after int64) (*page, error) {
-	resp, err := r.get(ctx, fmt.Sprintf("/v1/inboxes/%s/messages?after=%d&limit=50&fields=summary", url.PathEscape(r.Inbox), after))
+	resp, err := r.get(ctx, fmt.Sprintf("/v1/inboxes/%s/messages?after=%d&limit=50&fields=summary%s", url.PathEscape(r.Inbox), after, r.epochParam("&")))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
+	switch {
+	case resp.StatusCode == http.StatusConflict:
+		return nil, errEpochChanged
+	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("the inbox answered %d", resp.StatusCode)
 	}
 	var pg page
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&pg); err != nil {
 		return nil, fmt.Errorf("reading the page: %w", err)
 	}
+	if r.epoch == "" {
+		r.epoch = pg.Epoch // the first page says which life of the inbox the cursor is in
+	}
 	return &pg, nil
+}
+
+// errEpochChanged means the server refused the cursor: it is from another epoch.
+var errEpochChanged = errors.New("the cursor is from an earlier epoch of the inbox")
+
+// epochParam is the query parameter that pins a request to the epoch the cursor
+// came from, with sep ("&" or "?") in front, or "" before the epoch is known.
+func (r *Relay) epochParam(sep string) string {
+	if r.epoch == "" {
+		return ""
+	}
+	return sep + "epoch=" + url.QueryEscape(r.epoch)
 }
 
 // raw returns the exact bytes the sender posted, and the content type it used.
 func (r *Relay) raw(ctx context.Context, seq int64) ([]byte, string, error) {
-	resp, err := r.get(ctx, fmt.Sprintf("/v1/inboxes/%s/messages/%d/raw", url.PathEscape(r.Inbox), seq))
+	resp, err := r.get(ctx, fmt.Sprintf("/v1/inboxes/%s/messages/%d/raw%s", url.PathEscape(r.Inbox), seq, r.epochParam("?")))
 	if err != nil {
 		return nil, "", err
 	}
@@ -203,6 +237,8 @@ func (r *Relay) raw(ctx context.Context, seq int64) ([]byte, string, error) {
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, "", errGone
+	case resp.StatusCode == http.StatusConflict:
+		return nil, "", errEpochChanged
 	case resp.StatusCode != http.StatusOK:
 		return nil, "", fmt.Errorf("the inbox answered %d", resp.StatusCode)
 	}
@@ -247,8 +283,8 @@ const (
 func (r *Relay) attempt(ctx context.Context, m message) (outcome, error) {
 	body, contentType, err := r.raw(ctx, m.Seq)
 	switch {
-	case errors.Is(err, errGone):
-		return dropped, err
+	case errors.Is(err, errGone), errors.Is(err, errEpochChanged):
+		return dropped, err // the next look at the inbox notices a changed epoch
 	case err != nil:
 		return retry, err
 	}
@@ -325,9 +361,17 @@ func (r *Relay) loadCursor(ctx context.Context) (int64, error) {
 	b, err := os.ReadFile(r.StateFile)
 	switch {
 	case err == nil:
-		n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+		// "SEQ" (an older file) or "SEQ EPOCH".
+		fields := strings.Fields(string(b))
+		if len(fields) < 1 || len(fields) > 2 {
+			return 0, fmt.Errorf("%s does not hold a position: %q", r.StateFile, strings.TrimSpace(string(b)))
+		}
+		n, err := strconv.ParseInt(fields[0], 10, 64)
 		if err != nil || n < 0 {
 			return 0, fmt.Errorf("%s does not hold a position: %q", r.StateFile, strings.TrimSpace(string(b)))
+		}
+		if len(fields) == 2 {
+			r.epoch = fields[1]
 		}
 		return n, nil
 	case !errors.Is(err, os.ErrNotExist):
@@ -337,32 +381,34 @@ func (r *Relay) loadCursor(ctx context.Context) (int64, error) {
 		return 0, nil
 	}
 	// Start from now: ask for the newest message and begin after it.
-	pg, err := r.fetchLatest(ctx)
+	latest, epoch, err := r.fetchLatest(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("finding the end of the inbox: %w", err)
 	}
-	if err := r.saveCursor(pg); err != nil {
+	r.epoch = epoch
+	if err := r.saveCursor(latest); err != nil {
 		return 0, err
 	}
-	return pg, nil
+	return latest, nil
 }
 
-func (r *Relay) fetchLatest(ctx context.Context) (int64, error) {
+func (r *Relay) fetchLatest(ctx context.Context) (int64, string, error) {
 	resp, err := r.get(ctx, "/v1/inboxes/"+url.PathEscape(r.Inbox))
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("the inbox answered %d (is the token right?)", resp.StatusCode)
+		return 0, "", fmt.Errorf("the inbox answered %d (is the token right?)", resp.StatusCode)
 	}
 	var info struct {
-		LatestSeq int64 `json:"latest_seq"`
+		LatestSeq int64  `json:"latest_seq"`
+		Epoch     string `json:"epoch"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&info); err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return info.LatestSeq, nil
+	return info.LatestSeq, info.Epoch, nil
 }
 
 // saveCursor writes the position atomically, so a crash leaves the old one or
@@ -374,7 +420,11 @@ func (r *Relay) saveCursor(seq int64) error {
 		return err
 	}
 	name := tmp.Name()
-	_, err = fmt.Fprintf(tmp, "%d\n", seq)
+	if r.epoch != "" {
+		_, err = fmt.Fprintf(tmp, "%d %s\n", seq, r.epoch)
+	} else {
+		_, err = fmt.Fprintf(tmp, "%d\n", seq)
+	}
 	if err == nil {
 		err = tmp.Sync()
 	}

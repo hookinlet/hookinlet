@@ -72,7 +72,7 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 		return fmt.Errorf("EXAMPLE_BURST: %w", err)
 	}
 
-	store, err := sqlite.Open(ctx, orDefault(getenv("HOOKINLET_DATA_DIR"), "./data"))
+	store, err := sqlite.Open(ctx, orDefault(getenv("HOOKINLET_DATA_DIR"), "./data"), sqlite.WithExclusiveLock())
 	if err != nil {
 		return err
 	}

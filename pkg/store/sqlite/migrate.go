@@ -9,6 +9,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -60,7 +61,7 @@ func loadMigrations() ([]migration, error) {
 // the versions it applied. It refuses to run against a database that has
 // migrations this binary does not know, since that means the data was written
 // by a newer version.
-func migrate(ctx context.Context, db *sql.DB, dbPath string) ([]int, error) {
+func migrate(ctx context.Context, db *sql.DB, dbPath string, mayMigrate bool, log *slog.Logger) ([]int, error) {
 	migs, err := loadMigrations()
 	if err != nil {
 		return nil, err
@@ -82,6 +83,13 @@ func migrate(ctx context.Context, db *sql.DB, dbPath string) ([]int, error) {
 		return nil, fmt.Errorf("sqlite: database schema version %d is newer than this build supports (%d); upgrade hookinlet", current, len(migs))
 	}
 
+	// Migrating changes the schema under any process that has the database open, so
+	// it is left to the process that holds the lock on the data directory: a command
+	// that merely looks at the data, run beside an older server, must not do it.
+	if current > 0 && current < len(migs) && !mayMigrate {
+		return nil, &NeedsMigrationError{From: current, To: len(migs)}
+	}
+
 	// Migrations only move forward, so before changing a database that has data in
 	// it, keep a copy of it as it was: if an upgrade turns out badly, that copy and
 	// the previous release are the way back. A database that has never been migrated
@@ -92,11 +100,24 @@ func migrate(ctx context.Context, db *sql.DB, dbPath string) ([]int, error) {
 	if current > 0 && current < len(migs) {
 		_, markerErr := os.Stat(marker)
 		haveCopy, _ := filepath.Glob(filepath.Join(filepath.Dir(dbPath), MigrationSnapshotPrefix+"*.bak"))
-		if markerErr != nil || len(haveCopy) == 0 {
+		// The marker records the schema version and a fingerprint of the data when the
+		// copy was made. An upgrade that was killed before its first migration committed
+		// finds both unchanged, and keeps the copy. A rolled-back one has had the copy put
+		// back and may have taken deliveries since, so the copy is no longer a way back to
+		// what is there now: take a new one.
+		stamp, err := fingerprint(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		started, _ := os.ReadFile(marker) //nolint:gosec // beside the database, in the data directory
+		same := strings.TrimSpace(string(started)) == strconv.Itoa(current)+" "+stamp
+		fresh := strings.TrimSpace(string(started)) == strconv.Itoa(current) || strings.HasPrefix(string(started), strconv.Itoa(current)+" ")
+		if markerErr != nil || len(haveCopy) == 0 || (fresh && !same) {
 			if err := snapshotBeforeMigrating(ctx, db, dbPath, current); err != nil {
 				return nil, err
 			}
-			if err := os.WriteFile(marker, []byte(strconv.Itoa(current)+"\n"), 0o600); err != nil {
+			log.Info("kept a copy of the database before migrating it", "from_version", current, "to_version", len(migs), "dir", filepath.Dir(dbPath))
+			if err := os.WriteFile(marker, []byte(strconv.Itoa(current)+" "+stamp+"\n"), 0o600); err != nil {
 				return nil, fmt.Errorf("sqlite: %w", err)
 			}
 		}
@@ -121,11 +142,32 @@ func migrate(ctx context.Context, db *sql.DB, dbPath string) ([]int, error) {
 			return applied, fmt.Errorf("sqlite: commit migration %s: %w", m.name, err)
 		}
 		applied = append(applied, m.version)
+		log.Info("applied migration", "name", m.name)
 	}
 	if len(applied) > 0 {
 		_ = os.Remove(marker) // the upgrade finished
 	}
 	return applied, nil
+}
+
+// fingerprint summarises what a delivery or an inbox change would alter, cheaply enough
+// to take on a large database.
+func fingerprint(ctx context.Context, db *sql.DB) (string, error) {
+	var s string
+	err := db.QueryRowContext(ctx, `SELECT (SELECT COALESCE(MAX(id),0) FROM messages) || '/' ||
+		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes)`).Scan(&s)
+	if err != nil {
+		return "", fmt.Errorf("sqlite: fingerprint the database: %w", err)
+	}
+	return s, nil
+}
+
+// NeedsMigrationError means the database is at an older schema than this build and
+// the Store was opened without the data-directory lock that applying migrations needs.
+type NeedsMigrationError struct{ From, To int }
+
+func (e *NeedsMigrationError) Error() string {
+	return fmt.Sprintf("sqlite: the database is at schema version %d and this release needs %d; stop the server and run `hookinlet migrate` to upgrade it", e.From, e.To)
 }
 
 // SchemaVersion returns the newest applied migration version.
@@ -165,6 +207,7 @@ func snapshotBeforeMigrating(ctx context.Context, db *sql.DB, dbPath string, fro
 	// One consistent copy, in one read transaction.
 	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, partial); err != nil {
 		_ = os.Remove(partial)
+		_ = os.Remove(partial + "-journal")
 		return fmt.Errorf("sqlite: could not keep a copy of the database before migrating it (is there room for a second copy in %s?); nothing was changed: %w", dir, err)
 	}
 	if err := os.Rename(partial, name); err != nil {

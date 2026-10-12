@@ -540,6 +540,13 @@ func TestRegistryExtensibility(t *testing.T) {
 			t.Errorf("registered invalid name %q", bad)
 		}
 	}
+	nilVerifier := func(json.RawMessage) (verify.Verifier, error) { return nil, nil }
+	if err := reg.Register("returns-nil", nilVerifier); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.New("returns-nil", nil); !errors.Is(err, verify.ErrConfig) {
+		t.Errorf("a factory returning no verifier: %v; want ErrConfig", err)
+	}
 	if err := reg.Register("nil-factory", nil); err == nil {
 		t.Error("registered a nil factory")
 	}

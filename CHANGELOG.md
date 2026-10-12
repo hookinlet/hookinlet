@@ -54,6 +54,36 @@ keep working; run `hookinlet rekey` once to bring them up to the current format.
 Everything below is the detail behind the summary above, phase by phase: what changed in the public
 Go packages, the API, and the configuration, in the order it happened. The newest is first.
 
+### Release review fixes
+
+- **Changes to the public packages:** `sqlite.Open` applies migrations only when given
+  `WithExclusiveLock()`; without it, a database that needs migrating fails with the new
+  `*sqlite.NeedsMigrationError` (servers built on the package should pass the option, as
+  `examples/custom-hooks` now does). `Server.Serve` refuses a nil listener and a server with
+  `Options.AdminAddr` set (use `ServeAdmin` or `Run`, or mount `AdminHandler`), and `ServeAdmin`
+  refuses nil listeners. `verify.Registry.New` fails when a factory returns no verifier.
+  `inboxtest.AuthenticatorSuite` requires `CanReadInbox(nil)` to be false and has a `Revoke`
+  fixture field. `hookinlet backup --data-dir` on a database that needs migrating refuses: back
+  up with the old binary first, or upgrade (a copy is kept).
+
+- **A command that does not hold the data-directory lock no longer migrates the database.** It
+  refuses and says to stop the server and run `hookinlet migrate` (which takes the lock). Before,
+  `inbox show` run with the new binary beside the old server upgraded the schema under it.
+- **A rolled-back upgrade no longer keeps a stale pre-migration copy.** If the marker says no
+  migration was applied, the next upgrade takes a fresh copy. Migrations are logged, with the
+  place the copy was kept, and a copy that fails leaves no `-journal` behind.
+- **`/readyz` counts pages the database can reuse as room**, so it recovers after retention
+  has freed space on a volume that is still nearly full.
+
+- **A client that asks for a big answer and never reads it can no longer pin memory.**
+  Responses have a write deadline (`server.Options.ResponseTimeout`, 2 minutes), and a read slot
+  is kept until the response has been written, so at most 16 pages are in flight (it was 16
+  being built and any number waiting on slow clients).
+- **A JSON body with a number or escape that common parsers refuse is delivered as `body_text`**
+  (number literals over 100 characters or outside float64, unpaired surrogate escapes), so one
+  such body cannot make every page that holds it unreadable.
+- The example clients keep the epoch with the cursor (see the Phase 14 notes).
+
 ### Phase 16: the public face
 
 #### Changed

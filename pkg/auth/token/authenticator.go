@@ -48,7 +48,7 @@ func NewAuthenticator(store inbox.Store, adminToken string) *Authenticator {
 type Admin struct{}
 
 // CanReadInbox implements inbox.Principal: the admin reads every inbox.
-func (Admin) CanReadInbox(*inbox.Inbox) bool { return true }
+func (Admin) CanReadInbox(in *inbox.Inbox) bool { return in != nil }
 
 // CanAdmin implements inbox.Principal.
 func (Admin) CanAdmin() bool { return true }

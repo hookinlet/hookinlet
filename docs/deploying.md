@@ -297,7 +297,9 @@ wait for hookinlet.
 One instance is small. Idle, the process uses about 10 to 12 MiB of memory on
 Linux. Each open SSE stream costs about 50 KiB, so 500 of them come to about
 35 MiB. A page of messages is built in memory and bounded (16 MiB at most), and
-reads are limited to 16 at a time. Deliveries are not limited in number: each one
+reads are limited to 16 at a time, a slot being held until the response has been written
+to the client or `ResponseTimeout` (2 minutes) has passed, so a client that asks and never
+reads cannot pin more than 16 pages. Deliveries are not limited in number: each one
 is held in memory while it is read and checked, up to the inbox's body limit
 (1 MiB by default, at most 10 MiB), so a burst of large deliveries uses that much
 each. The total is bounded: deliveries being received hold at most
@@ -316,16 +318,22 @@ descriptor; the default of 1000 needs a limit comfortably above that.
 ## Upgrading
 
 Start the new version on the same data directory. It applies any database
-migrations itself, once, before it listens (`hookinlet migrate` does only that,
-and reports the schema version). Migrations only move forward: a database whose schema is newer than
+migrations itself, once, before it listens, and logs each one. A large database can take
+minutes to migrate (the move of the message body, 0007, took about two and a half on
+a million rows), during which nothing listens, so a health check that restarts the process
+will restart the migration too: run `hookinlet migrate` as its own step first (it applies
+the migrations and reports the schema version) or give the health check a generous
+start period. Only the process that holds the data directory's lock migrates: a command
+such as `hookinlet inbox show` run against an old database refuses and tells you to stop
+the server and run `hookinlet migrate`, so run those after upgrading, not before. Migrations only move forward: a database whose schema is newer than
 a version knows (one that added a migration) is refused by that older version.
 
 **A copy is kept for you.** When there are migrations to apply to a database that
 already holds data, the server first writes a complete copy of it as it was to
 `hookinlet.db.before-migration-N.bak` in the data directory (`N` is the schema
 version it was at; mode 0600). If the upgrade goes badly, stop the server, put that
-file back as `hookinlet.db` (remove any `-wal` and `-shm` beside it), and start the
-previous release. If the copy cannot be made (no room for a second copy of the
+file back as `hookinlet.db` (remove any `-wal` and `-shm` beside it, and
+`hookinlet.db.migrating`), and start the previous release. If the copy cannot be made (no room for a second copy of the
 database), the server refuses to migrate and changes nothing. If an upgrade is cut
 short (killed, out of disk, a start timeout), the next start keeps the copy that was
 made before it began: the database is then partly upgraded, and the copy of that would
