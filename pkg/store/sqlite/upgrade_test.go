@@ -500,10 +500,14 @@ func TestOpeningTightensTheModeOfADatabaseThatCameFromElsewhere(t *testing.T) {
 	_ = s.Close()
 	db := filepath.Join(dir, sqlite.DBFileName)
 	for _, p := range []string{db, db + "-wal", db + "-shm"} {
-		if err := os.WriteFile(p, mustRead(t, p), 0o644); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
+			if err := os.WriteFile(p, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Chmod(p, 0o644); err != nil { //nolint:gosec // the point of the test: a wide mode
 			t.Fatal(err)
 		}
-		_ = os.Chmod(p, 0o644)
 	}
 	s, err = sqlite.Open(t.Context(), dir)
 	if err != nil {
@@ -519,13 +523,4 @@ func TestOpeningTightensTheModeOfADatabaseThatCameFromElsewhere(t *testing.T) {
 			t.Errorf("%s is %v", filepath.Base(p), fi.Mode().Perm())
 		}
 	}
-}
-
-func mustRead(t *testing.T, p string) []byte {
-	t.Helper()
-	b, err := os.ReadFile(p) //nolint:gosec // this test's own temp directory
-	if err != nil {
-		return nil
-	}
-	return b
 }
