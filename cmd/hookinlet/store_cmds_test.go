@@ -163,7 +163,7 @@ func TestInboxCreateSealsTheVerifierSecret(t *testing.T) {
 		t.Error("the verifier secret is stored in plaintext")
 	}
 	box, _ := secretbox.New(bytes.Repeat([]byte{9}, 32))
-	if pt, err := box.Open(in.VerifierSecret); err != nil || string(pt) != "whsec_plaintext_marker" {
+	if pt, err := box.Open(in.VerifierSecret, []byte(in.Slug)); err != nil || string(pt) != "whsec_plaintext_marker" {
 		t.Errorf("sealed secret does not open with the master key: %q, %v", pt, err)
 	}
 	if err := s.Close(); err != nil {

@@ -191,7 +191,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 			return nil, err
 		}
 	}
-	sealed, err := s.seal(p.VerifierSecret)
+	sealed, err := s.seal(p.Slug, p.VerifierSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +386,7 @@ func (s *Service) SetSecret(ctx context.Context, slug, secret string) (View, err
 	if secret == "" {
 		return View{}, inbox.Invalidf("secret must not be empty")
 	}
-	sealed, err := s.seal(secret)
+	sealed, err := s.seal(slug, secret)
 	if err != nil {
 		return View{}, err
 	}
@@ -470,7 +470,10 @@ func (s *Service) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 	return b.Backup(ctx)
 }
 
-func (s *Service) seal(secret string) ([]byte, error) {
+// seal seals a verifier secret for the inbox with this slug, which is the context
+// it is bound to: the slug never changes, and a sealed value copied onto another
+// inbox's row does not open there.
+func (s *Service) seal(slug, secret string) ([]byte, error) {
 	if secret == "" {
 		return nil, nil
 	}
@@ -480,7 +483,7 @@ func (s *Service) seal(secret string) ([]byte, error) {
 	if s.Box == nil {
 		return nil, ErrNoSecretBox
 	}
-	return s.Box.Seal([]byte(secret))
+	return s.Box.Seal([]byte(secret), []byte(slug))
 }
 
 // checkVerifier makes sure the verifier exists and accepts its configuration,

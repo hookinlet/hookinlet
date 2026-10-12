@@ -60,7 +60,7 @@ func newHookinlet(t *testing.T) *hookinlet {
 		t.Fatal(err)
 	}
 	// A relay forwards only what a verifier checked, so the inbox checks a shared token.
-	sealed, err := box.Seal([]byte(relaySecret))
+	sealed, err := box.Seal([]byte(relaySecret), []byte("relayed"))
 	if err != nil {
 		t.Fatal(err)
 	}
