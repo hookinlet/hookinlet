@@ -39,6 +39,16 @@ type SecretReport struct {
 // OK reports whether every secret can be opened.
 func (r SecretReport) OK() bool { return !r.NoKey && len(r.WrongKey) == 0 && len(r.Damaged) == 0 }
 
+// Unreadable counts the secrets that cannot be opened.
+func (r SecretReport) Unreadable() int { return len(r.WrongKey) + len(r.Damaged) }
+
+// Systemic reports whether the master key itself looks wrong, not one inbox: there are
+// secrets and none of them opens (or there is no key at all). One secret that does not
+// open among others that do is that inbox's problem alone.
+func (r SecretReport) Systemic() bool {
+	return r.NoKey || (r.Checked > 0 && r.Unreadable() == r.Checked)
+}
+
 // Err describes what is wrong, or is nil. It lists at most a few slugs.
 func (r SecretReport) Err() error {
 	if r.OK() {
