@@ -10,7 +10,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "test": "vitest run",
     "types": "openapi-typescript ../docs/openapi.json -o src/api/schema.d.ts",
-    "e2e": "go build -ldflags '-X main.version=0.1.0' -o ../bin/hookinlet-e2e ../cmd/hookinlet && playwright test",
+    "e2e": "node --eval \"import('node:fs').then((fs) => fs.rmSync('test-results/e2e-data', { recursive: true, force: true }))\" && go build -ldflags '-X main.version=0.1.0' -o ../bin/hookinlet-e2e ../cmd/hookinlet && playwright test",
     "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {

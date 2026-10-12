@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { ApiError, deleteInbox, patchInbox, rotateIngestKey, setSecret, type Inbox, type PatchInbox } from '../api/client'
 import { guard } from '../session'
 import { inboxes } from '../store'
-import { buildConfig, missing, presetOf, valuesOf } from '../verifiers'
+import { mergeConfig, buildConfig, missing, presetOf, sameConfig, valuesOf } from '../verifiers'
 import CopyField from './CopyField.vue'
 import RetentionFields from './RetentionFields.vue'
 import VerifierFields from './VerifierFields.vue'
@@ -14,7 +14,7 @@ const emit = defineEmits<{ updated: [Inbox]; deleted: [] }>()
 const name = ref('')
 const disabled = ref(false)
 const pointer = ref('')
-const maxBody = ref(0)
+const maxBody = ref('')
 const days = ref(0)
 const count = ref(0)
 const onFail = ref<'reject' | 'store'>('reject')
@@ -27,42 +27,68 @@ function fill(i: Inbox) {
   name.value = i.name
   disabled.value = i.disabled
   pointer.value = i.event_type_pointer
-  maxBody.value = i.max_body_bytes
+  maxBody.value = String(i.max_body_bytes)
   days.value = i.retention_days
   count.value = i.retention_max_count
   onFail.value = i.on_verify_fail as 'reject' | 'store'
   verifier.value = i.verifier
   values.value = valuesOf(i.verifier_config as Record<string, unknown>)
 }
-watch(() => props.inbox, fill, { immediate: true })
+fill(props.inbox) // once; after a save the form takes what the server answered, and other changes leave it alone
 
 const preset = computed(() => presetOf(verifier.value))
 const gaps = computed(() => (preset.value ? missing(preset.value, values.value) : []))
 const verifierChanged = computed(() => verifier.value !== props.inbox.verifier)
+const known = computed(() => preset.value !== undefined) // a verifier an embedder registered has no form here
 const saving = ref(false)
 const saved = ref('')
+const warnings = ref<string[]>([])
 const error = ref('')
 
+const number = (t: string) => {
+  const n = Math.floor(Number(t))
+  return Number.isFinite(n) && n >= 0 ? n : 0
+}
+
+// What would change, and only that: the server merges a PATCH field by field, so a field sent
+// without being changed here could undo a change made somewhere else in the meantime.
+const changes = computed<PatchInbox>(() => {
+  const o = props.inbox
+  const p: PatchInbox = {}
+  if (name.value.trim() !== o.name) p.name = name.value.trim()
+  if (disabled.value !== o.disabled) p.disabled = disabled.value
+  if (pointer.value.trim() !== o.event_type_pointer) p.event_type_pointer = pointer.value.trim()
+  if (number(maxBody.value) !== o.max_body_bytes) p.max_body_bytes = number(maxBody.value)
+  if (days.value !== o.retention_days) p.retention_days = days.value
+  if (count.value !== o.retention_max_count) p.retention_max_count = count.value
+  if (onFail.value !== o.on_verify_fail) p.on_verify_fail = onFail.value
+  const pr = preset.value
+  if (pr) {
+    const existing = o.verifier_config as Record<string, unknown>
+    if (verifier.value !== o.verifier) {
+      p.verifier = verifier.value
+      p.verifier_config = buildConfig(pr, values.value) as unknown as PatchInbox['verifier_config']
+    } else {
+      const merged = mergeConfig(pr, existing, values.value)
+      if (!sameConfig(merged, existing)) p.verifier_config = merged as unknown as PatchInbox['verifier_config']
+    }
+  }
+  return p
+})
+const dirty = computed(() => Object.keys(changes.value).length > 0)
+
 async function save() {
-  if (!preset.value) return
+  if (!dirty.value) return
   saving.value = true
   error.value = ''
   saved.value = ''
-  const body: PatchInbox = {
-    name: name.value.trim(),
-    disabled: disabled.value,
-    event_type_pointer: pointer.value.trim(),
-    max_body_bytes: maxBody.value,
-    retention_days: days.value,
-    retention_max_count: count.value,
-    on_verify_fail: onFail.value,
-    verifier: verifier.value,
-    verifier_config: buildConfig(preset.value, values.value) as unknown as PatchInbox['verifier_config'],
-  }
+  warnings.value = []
   try {
-    const updated = await guard((t) => patchInbox(t, props.inbox.slug, body))
+    const updated = await guard((t) => patchInbox(t, props.inbox.slug, changes.value))
     emit('updated', updated)
-    saved.value = verifierChanged.value ? 'Saved. Changing the verifier removed its secret: set a new one below.' : 'Saved.'
+    fill(updated)
+    saved.value = 'Saved.'
+    warnings.value = updated.warnings ?? []
     void inboxes.refresh()
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Could not save.'
@@ -147,7 +173,7 @@ async function remove() {
       </div>
       <div class="field">
         <label for="s-max">Largest body (bytes)</label>
-        <input id="s-max" v-model.number="maxBody" class="input" type="number" min="0" max="10485760" />
+        <input id="s-max" v-model="maxBody" class="input" type="number" min="0" max="10485760" inputmode="numeric" />
         <p class="muted help">0 means the default, 1 MiB.</p>
       </div>
       <RetentionFields v-model:days="days" v-model:count="count" id-prefix="s" />
@@ -158,12 +184,14 @@ async function remove() {
       </fieldset>
 
       <h2>Verification</h2>
-      <VerifierFields v-model:verifier="verifier" v-model:values="values" :with-secret="false" id-prefix="s" />
-      <p v-if="verifierChanged" class="warn small">Changing the verifier removes the secret it had. Set a new one after saving.</p>
+      <VerifierFields v-if="known" v-model:verifier="verifier" v-model:values="values" :with-secret="false" id-prefix="s" />
+      <p v-if="verifierChanged && inbox.has_verifier_secret" class="warn small">Changing the verifier removes the secret it had.{{ preset?.secret ? ' Set a new one after saving.' : '' }}</p>
+      <p v-if="!known" class="muted small">This inbox uses a verifier the console does not know (one this server was extended with). Its other settings can be changed here; its verification is changed with the admin API.</p>
 
       <p v-if="error" class="err" role="alert">{{ error }}</p>
       <p v-if="saved" class="ok" role="status">{{ saved }}</p>
-      <div><button type="submit" class="btn primary" :disabled="saving || !name.trim() || gaps.length > 0">{{ saving ? 'Saving…' : 'Save changes' }}</button></div>
+      <ul v-if="warnings.length" class="warn small" role="status"><li v-for="w in warnings" :key="w">{{ w }}</li></ul>
+      <div><button type="submit" class="btn primary" :disabled="saving || !dirty || !name.trim() || gaps.length > 0">{{ saving ? 'Saving…' : 'Save changes' }}</button></div>
     </form>
 
     <section v-if="preset && preset.secret" class="card sect">

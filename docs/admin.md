@@ -218,6 +218,8 @@ inbox's page has a Settings tab (name, retention, verification, replacing its se
 deleting it after typing its name), and a Maintenance page runs retention and downloads a backup. `⌘K` (or `Ctrl K`)
 opens a command palette to go anywhere or do anything by name.
 
+![An inbox's Settings tab](images/console-settings.png)
+
 It adds no new way to change anything: whatever
 it does goes through the endpoints in this document. `GET /v1/admin/status` is the one endpoint it
 needed that did not exist (version, schema, database size, free space, last retention run).

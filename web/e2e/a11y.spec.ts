@@ -1,10 +1,10 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page } from '@playwright/test'
-import { githubSignature, signIn } from './helpers'
+import { expect, test, type Locator, type Page } from '@playwright/test'
+import { deliver, makeInbox, signIn } from './helpers'
 
-// Every screen, in both themes, has no serious or critical accessibility violation that axe can find.
-// (axe cannot judge everything, so this is a floor, not a verdict.)
-const PAGES = ['/admin/', '/admin/inboxes', '/admin/new', '/admin/tokens', '/admin/maintenance', '/admin/inboxes/a11y-demo', '/admin/inboxes/a11y-demo/messages/1', '/admin/inboxes/a11y-demo/settings']
+// Every screen, and the states that have their own layout (the created-inbox panel, the open
+// palette, a sender's own fields), in both themes and on a phone, has no serious or critical
+// accessibility violation that axe can find. axe cannot judge everything, so this is a floor.
 
 async function scan(page: Page, label: string) {
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
@@ -12,29 +12,68 @@ async function scan(page: Page, label: string) {
   expect(bad.map((v) => `${label}: ${v.id} (${v.nodes.length}): ${v.help}: ${v.nodes.map((n) => `${n.target.join(' ')} ${n.any[0]?.message ?? ''}`).join(' | ')}`)).toEqual([])
 }
 
-test('every screen passes axe in the dark and light themes', async ({ page, request }) => {
-  // an inbox with a message to show (signing in on the new-inbox page keeps the token in memory)
-  await signIn(page, '/admin/new')
-  await page.getByLabel('Slug').fill('a11y-demo')
-  await page.getByText('GitHub', { exact: true }).click()
-  await page.getByLabel('Webhook secret').fill('s')
-  await page.getByRole('button', { name: 'Create inbox' }).click()
-  const url = await page.getByLabel('Ingest URL').innerText()
-  const body = '{"a":1}'
-  await request.post(url, { data: body, headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': githubSignature('s', body), 'X-GitHub-Event': 'ping' } })
+// goTo moves inside the app (a reload would sign out) and waits for what is specific to the page,
+// so the scan never runs on a blank or an error page.
+async function goTo(page: Page, path: string, ready: Locator) {
+  await page.evaluate((p) => {
+    window.history.pushState({}, '', p)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, path)
+  await expect(ready).toBeVisible()
+}
 
-  for (const theme of ['dark', 'light'] as const) {
-    await page.emulateMedia({ colorScheme: theme })
-    for (const path of PAGES) {
-      // moving inside the app keeps the token in memory
-      await page.evaluate((p) => {
-        window.history.pushState({}, '', p)
-        window.dispatchEvent(new PopStateEvent('popstate'))
-      }, path)
-      await page.waitForLoadState('networkidle')
-      await page.getByRole('main').waitFor()
-      await page.waitForTimeout(300)
-      await scan(page, `${theme} ${path}`)
+test('every screen passes axe in the dark and light themes, and on a phone', async ({ page, request }) => {
+  const { ingestUrl } = await makeInbox(request, 'a11y-demo')
+  await deliver(request, ingestUrl, { a: 1, note: 'hello' }, 'ping')
+  await signIn(page, '/admin/')
+
+  const screens: [string, Locator][] = [
+    ['/admin/', page.getByRole('heading', { name: 'Overview' })],
+    ['/admin/inboxes', page.getByRole('link', { name: 'a11y-demo' })],
+    ['/admin/new', page.getByRole('heading', { name: 'New inbox' })],
+    ['/admin/tokens', page.getByRole('heading', { name: 'Tokens' })],
+    ['/admin/maintenance', page.getByText('Database schema')],
+    ['/admin/inboxes/a11y-demo', page.getByRole('button', { name: /#1 ping/ })],
+    ['/admin/inboxes/a11y-demo/messages/1', page.getByText('Everything below was written by the sender')],
+    ['/admin/inboxes/a11y-demo/settings', page.getByRole('heading', { name: 'General' })],
+    ['/admin/nothing-here', page.getByRole('heading', { name: 'Not found' })],
+  ]
+
+  for (const scheme of ['dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme: scheme })
+    for (const [path, ready] of screens) {
+      await goTo(page, path, ready)
+      await scan(page, `${scheme} ${path}`)
     }
+
+    // a sender with fields of its own
+    await goTo(page, '/admin/new', page.getByRole('heading', { name: 'New inbox' }))
+    await page.getByText('HMAC', { exact: true }).click()
+    await expect(page.getByLabel('Signature header')).toBeVisible()
+    await scan(page, `${scheme} new inbox, HMAC fields`)
+
+    // the palette
+    await page.keyboard.press('Control+k')
+    await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible()
+    await scan(page, `${scheme} command palette`)
+    await page.keyboard.press('Escape')
   }
+
+  // the created-inbox panel
+  await goTo(page, '/admin/new', page.getByRole('heading', { name: 'New inbox' }))
+  await page.getByLabel('Slug').fill('a11y-created')
+  await page.getByText('None', { exact: true }).click()
+  await page.getByRole('button', { name: 'Create inbox' }).click()
+  await expect(page.getByText('Created: a11y-created')).toBeVisible()
+  await scan(page, 'created inbox panel')
+
+  // a phone
+  await page.setViewportSize({ width: 375, height: 812 })
+  for (const [path, ready] of screens.slice(0, 8)) {
+    await goTo(page, path, ready)
+    await scan(page, `phone ${path}`)
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow, `phone ${path} scrolls sideways`).toBeLessThanOrEqual(0)
+  }
+  await page.evaluate(() => window.scrollTo(0, 0))
 })

@@ -1,6 +1,5 @@
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from '@playwright/test'
 
 // The end-to-end tests run the real hookinlet binary (built by `npm run e2e`, which builds it
@@ -10,6 +9,7 @@ export const ADMIN_TOKEN = 'e2e-admin-token-0123456789-abcdefghij'
 
 export default defineConfig({
   testDir: './e2e',
+  forbidOnly: !!process.env.CI, // a stray test.only must not pass CI
   fullyParallel: false,
   workers: 1, // one server, one database: the tests build on each other
   timeout: 30_000,
@@ -24,7 +24,8 @@ export default defineConfig({
     env: {
       HOOKINLET_ADMIN_TOKEN: ADMIN_TOKEN,
       HOOKINLET_MASTER_KEY: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
-      HOOKINLET_DATA_DIR: mkdtempSync(join(tmpdir(), 'hookinlet-e2e-')),
+      // under test-results (ignored by git), and emptied by `npm run e2e` before each run
+      HOOKINLET_DATA_DIR: join(dirname(fileURLToPath(import.meta.url)), 'test-results', 'e2e-data'),
       HOOKINLET_LISTEN_ADDR: `127.0.0.1:${PORT}`,
       HOOKINLET_LOG_LEVEL: 'warn',
     },

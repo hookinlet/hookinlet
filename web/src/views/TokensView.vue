@@ -156,7 +156,7 @@ onMounted(() => {
 h1 { font-size: 22px; }
 .grow { flex: 1; }
 .lead { margin-bottom: 20px; max-width: 62ch; }
-.reveal { padding: 20px; display: grid; gap: 14px; border-color: var(--accent); margin-bottom: 18px; justify-items: start; }
+.reveal { padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; border-color: var(--accent); margin-bottom: 18px; justify-items: start; }
 .reveal > * { max-width: 100%; }
 .reveal h2 { font-size: 17px; }
 .reveal :deep(.copy) { width: min(100%, 560px); }

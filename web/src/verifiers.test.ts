@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildConfig, missing, presetOf, PRESETS, valuesOf } from './verifiers'
+import { buildConfig, mergeConfig, missing, presetOf, PRESETS, sameConfig, valuesOf } from './verifiers'
 
 describe('verifier presets', () => {
   it('cover every verifier the server ships', () => {
@@ -32,5 +32,25 @@ describe('valuesOf', () => {
   it('turns a stored configuration back into form values', () => {
     expect(valuesOf({ header: 'X-Sig', tolerance_seconds: 120 })).toEqual({ header: 'X-Sig', tolerance_seconds: '120' })
     expect(valuesOf(undefined)).toEqual({})
+  })
+})
+
+describe('mergeConfig', () => {
+  const hmac = presetOf('hmac')!
+  it('keeps a setting the form has no field for', () => {
+    const existing = { header: 'X-Sig', timestamp_header: 'X-Ts', payload_template: 'v0:{timestamp}:{body}' }
+    const got = mergeConfig(hmac, existing, valuesOf(existing))
+    expect(got).toEqual(existing)
+  })
+  it('removes a field the person emptied', () => {
+    expect(mergeConfig(hmac, { header: 'X-Sig', prefix: 'sha256=', payload_template: 'x' }, { header: 'X-Sig', prefix: '' })).toEqual({ header: 'X-Sig', payload_template: 'x' })
+  })
+})
+
+describe('sameConfig', () => {
+  it('ignores key order and treats nothing as empty', () => {
+    expect(sameConfig({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true)
+    expect(sameConfig(undefined, {})).toBe(true)
+    expect(sameConfig({ a: 1 }, { a: 2 })).toBe(false)
   })
 })

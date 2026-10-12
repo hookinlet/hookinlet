@@ -149,7 +149,7 @@ fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width:
 .more > .field { margin-bottom: 14px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .warn { color: var(--warn); font-size: 13px; }
-.reveal { padding: 22px; display: grid; gap: 12px; border-color: var(--accent); max-width: 680px; justify-items: start; }
+.reveal { padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; border-color: var(--accent); max-width: 680px; justify-items: start; }
 .reveal > * { max-width: 100%; }
 .reveal h2 { font-size: 16px; margin-top: 4px; }
 .reveal :deep(.copy) { width: min(100%, 600px); }

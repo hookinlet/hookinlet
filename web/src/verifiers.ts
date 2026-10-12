@@ -79,3 +79,21 @@ export function valuesOf(config: Record<string, unknown> | undefined): Record<st
   for (const [k, v] of Object.entries(config ?? {})) out[k] = String(v)
   return out
 }
+
+// mergeConfig is the configuration to save for an inbox that keeps its verifier: what the form
+// shows, plus any setting the form has no field for (payload_template, say), which must survive
+// a save made from the console. Fields the form does show are what the person left in it, so a
+// field they emptied is removed.
+export function mergeConfig(preset: Preset, existing: Record<string, unknown> | undefined, values: Record<string, string>): Record<string, unknown> {
+  const known = new Set(preset.fields.map((f) => f.key))
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(existing ?? {})) if (!known.has(k)) out[k] = v
+  return { ...out, ...buildConfig(preset, values) }
+}
+
+// sameConfig says whether two configurations mean the same thing, whatever order their keys are in.
+export function sameConfig(a: Record<string, unknown> | undefined, b: Record<string, unknown> | undefined): boolean {
+  const x = Object.entries(a ?? {}).sort(([p], [q]) => p.localeCompare(q))
+  const y = Object.entries(b ?? {}).sort(([p], [q]) => p.localeCompare(q))
+  return JSON.stringify(x) === JSON.stringify(y)
+}
