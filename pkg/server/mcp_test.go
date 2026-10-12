@@ -1442,3 +1442,27 @@ func TestAnMCPWaitCanOutlastTheResponseTimeout(t *testing.T) {
 		t.Errorf("a wait that outlasted the response timeout: %q %s", o.err, o.text)
 	}
 }
+
+// The slot a wait reads its answer under is the one that is kept for it: with a single
+// slot, a woken wait is not made to win a second one after it already has the data.
+func TestAWokenMCPWaitKeepsTheSlotItReadUnder(t *testing.T) {
+	ae := newAgentEnv2(t, func(o *Options) {
+		o.MaxConcurrentReads = 1
+		o.ReadWaitTimeout = 200 * time.Millisecond
+		o.Notifier = local.New()
+	})
+	ae.tokenA = ae.tokenFor(ae.a)
+	base := serveOn(t, ae.env)
+	cs := connectMCP(t, base, ae.tokenA)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		ae.post("/in/agent-a", "wake")
+	}()
+	o := callTool(t, cs, "wait_for_messages", map[string]any{"inbox": "agent-a", "after": 0, "timeout_seconds": 5})
+	if o.err != "" || len(o.page(t).Messages) != 1 {
+		t.Errorf("a woken wait with one read slot: %q", o.err)
+	}
+	if got := len(ae.server.reads); got != 0 {
+		t.Errorf("%d read slots are still held after the answer was written", got)
+	}
+}

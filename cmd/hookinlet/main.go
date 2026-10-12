@@ -33,11 +33,18 @@ func init() {
 	if version != "dev" {
 		return
 	}
+	dirty := false
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range bi.Settings {
-			if s.Key == "vcs.revision" && len(s.Value) >= 12 {
+			switch {
+			case s.Key == "vcs.revision" && len(s.Value) >= 12:
 				version = "dev-" + s.Value[:12]
+			case s.Key == "vcs.modified" && s.Value == "true":
+				dirty = true
 			}
+		}
+		if dirty && version != "dev" {
+			version += "-dirty"
 		}
 	}
 }

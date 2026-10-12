@@ -38,6 +38,7 @@ archives:
       - docs/openapi.json
       - SECURITY.md
       - CONTRIBUTING.md
+      - examples/README.md
       - examples/**/*
 
 checksum:

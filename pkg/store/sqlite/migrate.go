@@ -176,7 +176,7 @@ func fingerprint(ctx context.Context, db *sql.DB) (string, error) {
 	var s string
 	err := db.QueryRowContext(ctx, `SELECT (SELECT COALESCE(MAX(id),0) FROM messages) || '/' ||
 		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes) || '/' ||
-		(SELECT COALESCE(SUM(version),0) FROM inboxes)`).Scan(&s)
+		(SELECT COALESCE(SUM(version),0) FROM inboxes) || '/' || (SELECT COALESCE(MAX(id),0) FROM inboxes)`).Scan(&s)
 	if err != nil {
 		return "", fmt.Errorf("sqlite: fingerprint the database: %w", err)
 	}

@@ -422,33 +422,24 @@ func pageRequest(after, before *int64, limit *int, types []string, since, until 
 	return wire.NewPageRequest(p)
 }
 
-// fetch reads one page, holding a read slot only while it does: the answer that is
-// finally returned is bounded by holdSlot (see hold), the looks of a wait are not.
-func (t *mcpTools) fetch(ctx context.Context, in *inbox.Inbox, req wire.PageRequest, hold bool) (*wire.Page, error) {
-	take := t.s.readSlot
-	if hold {
-		take = t.s.holdSlot
-	}
-	release, err := take(ctx)
+// fetch reads one page under a read slot, which it returns still held for the caller to
+// release or, if the page is the answer, to hand to the request with s.adopt: the slot
+// that bounds the answer is then the one the page was read under, never a second one
+// that could be lost to a busy server after the data is already in memory. A wait's
+// looks that find nothing release it at once, so idle waits hold none.
+func (t *mcpTools) fetch(ctx context.Context, in *inbox.Inbox, req wire.PageRequest) (*wire.Page, func(), error) {
+	release, err := t.s.readSlot(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer release()
 	req.Budget = mcpPageBudget
 	req.BodyCap = int64(t.s.opts.MCPInlineBodyBytes)
-	return wire.FetchPage(ctx, t.s.opts.Store, in, req)
-}
-
-// hold keeps a read slot until the answer being returned has been written, and starts
-// the response timeout. A wait calls it once, as it returns, not for each look: a slot
-// kept through a minute of waiting would let a few idle agents starve every read.
-func (t *mcpTools) hold(ctx context.Context) error {
-	release, err := t.s.holdSlot(ctx)
+	page, err := wire.FetchPage(ctx, t.s.opts.Store, in, req)
 	if err != nil {
-		return err
+		release()
+		return nil, nil, err
 	}
-	release()
-	return nil
+	return page, release, nil
 }
 
 func (t *mcpTools) queryMessages(ctx context.Context, _ *mcp.CallToolRequest, args api.McpQueryMessagesInput) (*mcp.CallToolResult, any, error) {
@@ -462,10 +453,11 @@ func (t *mcpTools) queryMessages(ctx context.Context, _ *mcp.CallToolRequest, ar
 	if err != nil {
 		return nil, nil, t.fail(ctx, "query", err)
 	}
-	page, err := t.fetch(ctx, in, req, true)
+	page, release, err := t.fetch(ctx, in, req)
 	if err != nil {
 		return nil, nil, t.fail(ctx, "query", err)
 	}
+	defer t.s.adopt(ctx, release)()
 	return t.reply(req, page)
 }
 
@@ -474,14 +466,6 @@ func (t *mcpTools) queryMessages(ctx context.Context, _ *mcp.CallToolRequest, ar
 // but escaping and the second copy can make a result an order of magnitude
 // bigger, so what is actually sent is measured. A message cut here is not lost:
 // the cursor continues from the last one kept.
-// replyHeld is reply for a wait that is ending: it takes the slot that bounds the answer.
-func (t *mcpTools) replyHeld(ctx context.Context, req wire.PageRequest, page *wire.Page) (*mcp.CallToolResult, any, error) {
-	if err := t.hold(ctx); err != nil {
-		return nil, nil, t.fail(ctx, "wait", err)
-	}
-	return t.reply(req, page)
-}
-
 func (t *mcpTools) reply(req wire.PageRequest, page *wire.Page) (*mcp.CallToolResult, any, error) {
 	out := t.output(req, page)
 	for {
@@ -604,13 +588,15 @@ func (t *mcpTools) waitForMessages(ctx context.Context, _ *mcp.CallToolRequest, 
 	stillAllowed := s.stillAllowed(t.caller.req, in.ID)
 
 	for {
-		page, err := t.fetch(ctx, in, req, false)
+		page, release, err := t.fetch(ctx, in, req)
 		if err != nil {
 			return nil, nil, t.fail(ctx, "wait", err)
 		}
 		if len(page.Messages) > 0 || wait == 0 || page.Gap {
-			return t.replyHeld(ctx, req, page)
+			defer s.adopt(ctx, release)()
+			return t.reply(req, page)
 		}
+		release() // nothing to return: an idle wait holds no slot
 		// Nothing matches yet. Skipping to the cursor means the next look does not
 		// read the rows that were just ruled out.
 		next := page.Cursor
@@ -631,9 +617,9 @@ func (t *mcpTools) waitForMessages(ctx context.Context, _ *mcp.CallToolRequest, 
 				return nil, nil, errToolNotFound
 			}
 		case <-deadline.C:
-			return t.replyHeld(ctx, req, page)
+			return t.reply(req, page)
 		case <-s.closing:
-			return t.replyHeld(ctx, req, page) // the agent asks again, and finds the server gone
+			return t.reply(req, page) // the agent asks again, and finds the server gone
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
 		}

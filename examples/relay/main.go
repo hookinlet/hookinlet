@@ -70,7 +70,7 @@ func run(args []string, getenv func(string) string, stderr *os.File) int {
 	token := getenv("HOOKINLET_AGENT_TOKEN") // never a flag: flags show up in process listings
 	switch {
 	case *source == "" || *inbox == "" || *to == "" || *state == "":
-		fmt.Fprintln(stderr, "relay: -url (or HOOKINLET_URL), -inbox, -to, and -state are required")
+		fmt.Fprintln(stderr, "relay: -inbox, -to, and -state are required")
 		return 2
 	case token == "":
 		fmt.Fprintln(stderr, "relay: set HOOKINLET_AGENT_TOKEN to the inbox's agent token")

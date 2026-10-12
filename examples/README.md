@@ -2,7 +2,9 @@
 
 Small programs that use hookinlet the way your own code would, using nothing but
 the standard library of their language. Every command on this page is run by
-`scripts/test-docs.sh`, and the Go programs have tests of their own.
+`scripts/test-docs.sh`, and the Go programs have tests of their own. The Go programs
+are built from a checkout of the repository (`go run ./examples/go-agent` needs its
+`go.mod`); the Python and shell ones run from anywhere, including the release archive.
 
 They share one setup: an inbox, its agent token, and a message in it. Start a
 server as in the [README](../README.md#send-a-signed-event-read-it-back), then:

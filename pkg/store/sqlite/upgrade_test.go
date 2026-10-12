@@ -410,7 +410,7 @@ func TestARestartedUpgradeKeepsACopyOfUnchangedData(t *testing.T) {
 	var stamp string
 	if err := raw.QueryRowContext(t.Context(), `SELECT (SELECT COALESCE(MAX(id),0) FROM messages) || '/' ||
 		(SELECT COUNT(*) FROM messages) || '/' || (SELECT COUNT(*) FROM inboxes) || '/' ||
-		(SELECT COALESCE(SUM(version),0) FROM inboxes)`).Scan(&stamp); err != nil {
+		(SELECT COALESCE(SUM(version),0) FROM inboxes) || '/' || (SELECT COALESCE(MAX(id),0) FROM inboxes)`).Scan(&stamp); err != nil {
 		t.Fatal(err)
 	}
 	_ = raw.Close()

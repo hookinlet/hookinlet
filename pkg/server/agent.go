@@ -20,16 +20,23 @@ func (s *Server) holdSlot(ctx context.Context) (release func(), err error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.adopt(ctx, release), nil
+}
+
+// adopt hands a slot that is already held to the request, to be kept until its answer
+// has been written, and starts the response timeout. It returns what the caller should
+// still call to release: nothing, if the request took the slot over.
+func (s *Server) adopt(ctx context.Context, release func()) func() {
 	if rr, ok := ctx.Value(readKey).(*readRequest); ok {
 		if rr.deadline != nil {
 			rr.deadline()
 		}
 		if rr.hold == nil {
 			rr.hold = release
-			return func() {}, nil
+			return func() {}
 		}
 	}
-	return release, nil
+	return release
 }
 
 // readSlot takes one of the limited read slots, waiting up to ReadWaitTimeout.
