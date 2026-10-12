@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -204,5 +205,28 @@ func TestADrainingServerReportsNotReadyBeforeItCloses(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Serve did not return")
+	}
+}
+
+// streamingStore has a Backupper that does not know how big its snapshot is.
+type streamingStore struct{ inbox.Store }
+
+func (streamingStore) Backup(context.Context) (io.ReadCloser, int64, error) {
+	return io.NopCloser(strings.NewReader(strings.Repeat("a snapshot of a size nobody knew. ", 10000))), -1, nil
+}
+
+func TestABackupThatStreamsHasNoContentLength(t *testing.T) {
+	a := newAdminEnv(t, func(o *Options) { o.Store = streamingStore{o.Store} })
+	status, hdr, body := a.call("GET", "/admin/backup", nil, testAdminToken)
+	if status != http.StatusOK || string(body) != strings.Repeat("a snapshot of a size nobody knew. ", 10000) {
+		t.Fatalf("%d, %d bytes", status, len(body))
+	}
+	// (A body that fits the server's first buffer is sent with a length anyway; one
+	// this size is not, which is what streaming is for.)
+	if cl := hdr.Get("Content-Length"); cl != "" {
+		t.Errorf("Content-Length = %q for a snapshot of unknown size", cl)
+	}
+	if hdr.Get("Content-Disposition") == "" {
+		t.Error("no filename")
 	}
 }

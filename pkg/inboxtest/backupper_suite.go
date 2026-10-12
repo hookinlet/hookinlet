@@ -40,7 +40,10 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 		if err := rc.Close(); err != nil {
 			t.Fatalf("closing the snapshot: %v", err)
 		}
-		if int64(len(data)) != size {
+		if size < -1 {
+			t.Errorf("size = %d: it is the length, or -1 for a snapshot that streams", size)
+		}
+		if size >= 0 && int64(len(data)) != size {
 			t.Errorf("the reader yielded %d bytes but size said %d", len(data), size)
 		}
 		return data

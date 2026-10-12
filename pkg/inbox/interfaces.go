@@ -182,7 +182,9 @@ type Backupper interface {
 	// Backup returns a snapshot of the Store as of a single moment: everything
 	// committed before the call is in it, and nothing in it is half-applied.
 	// size is the snapshot's length in bytes, and the reader yields exactly that
-	// many. The caller must Close the reader, which releases whatever the
+	// many; or -1 when the Store streams the snapshot and cannot know its length
+	// until it is read, in which case the reader ends it with io.EOF only when it
+	// is complete, and returns an error otherwise. The caller must Close the reader, which releases whatever the
 	// snapshot holds (a temporary file, for instance). Appends and reads continue
 	// while a backup is taken and while it is read.
 	//

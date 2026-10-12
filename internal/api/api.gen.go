@@ -2700,7 +2700,7 @@ type BackupResponseObject interface {
 
 type Backup200ResponseHeaders struct {
 	ContentDisposition string
-	ContentLength      int
+	ContentLength      *int
 	XRequestId         string
 }
 
@@ -2717,7 +2717,9 @@ func (response Backup200ApplicationvndSqlite3Response) VisitBackupResponse(w htt
 		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprint(response.Headers.ContentDisposition))
-	w.Header().Set("Content-Length", fmt.Sprint(response.Headers.ContentLength))
+	if response.Headers.ContentLength != nil {
+		w.Header().Set("Content-Length", fmt.Sprint(*response.Headers.ContentLength))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(200)
 

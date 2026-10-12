@@ -3492,10 +3492,11 @@
             "description": "A SQLite database file holding every inbox, message, token hash, and sealed secret. Useless without the master key; protect it accordingly.",
             "headers": {
               "Content-Length": {
-                "required": true,
+                "required": false,
                 "schema": {
                   "type": "integer"
-                }
+                },
+                "description": "Absent when the store streams its snapshot and cannot say how big it is; the body then ends when the connection says it does (chunked transfer encoding)."
               },
               "Content-Disposition": {
                 "required": true,

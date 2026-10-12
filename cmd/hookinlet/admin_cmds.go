@@ -786,9 +786,13 @@ data directory itself.
 	}
 	switch {
 	case err != nil:
-		fmt.Fprintf(stderr, "hookinlet: the backup was interrupted after %d of %d bytes: %v\n", n, size, err)
+		if size >= 0 {
+			fmt.Fprintf(stderr, "hookinlet: the backup was interrupted after %d of %d bytes: %v\n", n, size, err)
+		} else {
+			fmt.Fprintf(stderr, "hookinlet: the backup was interrupted after %d bytes: %v\n", n, err)
+		}
 		return exitRuntime
-	case n != size:
+	case size >= 0 && n != size:
 		fmt.Fprintf(stderr, "hookinlet: the backup is incomplete: %d of %d bytes\n", n, size)
 		return exitRuntime
 	}

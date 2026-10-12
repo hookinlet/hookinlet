@@ -425,14 +425,18 @@ func (a *adminAPI) Backup(ctx context.Context, _ api.BackupRequestObject) (api.B
 	if w, ok := ctx.Value(writerKey).(http.ResponseWriter); ok {
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	}
-	return api.Backup200ApplicationvndSqlite3Response{
-		Body:          &backupBody{s: s, ctx: bctx, cancel: cancel, snap: snap, size: size, start: start},
-		ContentLength: size,
+	resp := api.Backup200ApplicationvndSqlite3Response{
+		Body: &backupBody{s: s, ctx: bctx, cancel: cancel, snap: snap, size: size, start: start},
 		Headers: api.Backup200ResponseHeaders{
 			ContentDisposition: `attachment; filename="hookinlet-` + s.opts.Now().UTC().Format("20060102-150405") + `.db"`,
-			ContentLength:      int(size), XRequestId: requestIDOf(ctx),
+			XRequestId:         requestIDOf(ctx),
 		},
-	}, nil
+	}
+	if size >= 0 { // a Store that streams its snapshot may not know how big it will be
+		n := int(size)
+		resp.ContentLength, resp.Headers.ContentLength = size, &n
+	}
+	return resp, nil
 }
 
 // backupBody is the snapshot being sent. It releases the backup lock when the
