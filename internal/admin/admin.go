@@ -483,7 +483,7 @@ func (s *Service) retentionTime() time.Time {
 	wall, mono := s.now(), s.monotonic()
 	prevWall, prevMono, had := s.lastWall, s.lastMono, s.haveLast
 	s.lastWall, s.lastMono, s.haveLast = wall, mono, true
-	if !had || !(s.GuardClock || s.Monotonic != nil) {
+	if !had || (!s.GuardClock && s.Monotonic == nil) {
 		return wall
 	}
 	// Round(0) drops time.Time's own monotonic reading, so Sub compares wall clocks.
