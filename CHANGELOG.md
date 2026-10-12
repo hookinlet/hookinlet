@@ -55,6 +55,9 @@ Everything below is the detail behind the summary above, phase by phase: what ch
 Go packages, the API, and the configuration, in the order it happened. The newest is first.
 
 ### Release review fixes
+- **`hookinlet check`** verifies the database file (SQLite's integrity check, or `--quick`), for use after a
+  crash, a disk problem or a restore. The server still does not scan the file at startup. New in `pkg/`:
+  `sqlite.Store.Check`.
 - **Admin console, first part.** A web console is served at `/admin` (switch off with
   `HOOKINLET_ADMIN_UI=false`). This release carries the plumbing and a sign-in page that shows
   the server's status; the screens follow. New admin endpoint `GET /v1/admin/status`. New in

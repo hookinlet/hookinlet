@@ -238,3 +238,52 @@ func TestStoreCommandsDoNotLeakSecretsInErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckFindsADamagedDatabase(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{"HOOKINLET_DATA_DIR": dir}
+	if code, _, errOut := runCmd(t, env, "inbox", "create", "--slug", "checked", "--ingest-key", "checked", "--verifier", "none"); code != 0 {
+		t.Fatalf("create: %d %s", code, errOut)
+	}
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := s.GetInboxBySlug(t.Context(), "checked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := bytes.Repeat([]byte("webhook body "), 300)
+	for range 400 {
+		if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: body}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, out, errOut := runCmd(t, env, "check"); code != 0 || !strings.Contains(out, "sound") {
+		t.Fatalf("a sound database: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if code, _, _ := runCmd(t, env, "check", "--quick"); code != 0 {
+		t.Errorf("--quick on a sound database: code %d", code)
+	}
+
+	// Damage the middle of the file.
+	path := filepath.Join(dir, sqlite.DBFileName)
+	raw := readDB(t, dir)
+	for i := len(raw) / 2; i < len(raw)/2+100_000 && i < len(raw); i++ {
+		raw[i] = 0xAA
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := runCmd(t, env, "check")
+	if code != exitRuntime || !strings.Contains(errOut, "problems") {
+		t.Errorf("a damaged database: code %d, stderr %q", code, errOut)
+	}
+	if code, _, _ := runCmd(t, map[string]string{"HOOKINLET_DATA_DIR": t.TempDir()}, "check"); code != exitRuntime {
+		t.Errorf("no database: code %d", code)
+	}
+}

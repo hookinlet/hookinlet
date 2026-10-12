@@ -433,6 +433,9 @@ sensitive with it, so protect it like the data directory.
 `hookinlet.db-shm` beside the database, put the backup at `<data-dir>/hookinlet.db`,
 and start the server with the **same master key**. Check the copy first if you
 like: `sqlite3 backup.db 'PRAGMA integrity_check'` should print `ok`.
+`hookinlet check --data-dir DIR` does the same for a data directory (add `--quick` to skip comparing
+the indexes with their tables), and can run beside a server. The server does not scan the database when it
+starts, which is why starting is fast: run it after a crash, a disk problem, or a restore.
 
 **Epochs.** A restored server may hand out sequence numbers that differ from the
 ones the original handed out after the backup was taken, so cursors held from before

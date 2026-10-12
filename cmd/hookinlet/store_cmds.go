@@ -184,3 +184,46 @@ func configError(stderr io.Writer, err error) int {
 	fmt.Fprintf(stderr, "hookinlet: invalid configuration:\n  %s\n", strings.ReplaceAll(err.Error(), "\n", "\n  "))
 	return exitUsage
 }
+
+// checkCmd asks SQLite to verify the database file. It does not lock the data
+// directory, so it can run beside a server.
+func checkCmd(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("hookinlet check", flag.ContinueOnError)
+	usageWith(fs, "hookinlet check [--quick] [flags]\n\nReads the whole database file and reports damage: after a crash, a disk problem, or a restore.\nOn a large database it takes a while. It can run beside a server.")
+	fs.SetOutput(stderr)
+	resolve := config.AddDataFlags(fs, getenv)
+	quick := fs.Bool("quick", false, "skip comparing the indexes with their tables: faster, and still finds damaged pages")
+	if code, done := parseFlags(fs, args, stderr); done {
+		return code
+	}
+	data, err := resolve()
+	if err != nil {
+		return configError(stderr, err)
+	}
+	if _, err := os.Stat(filepath.Join(data.DataDir, sqlite.DBFileName)); err != nil {
+		fmt.Fprintf(stderr, "hookinlet: there is no database in %s; check --data-dir\n", data.DataDir)
+		return exitRuntime
+	}
+	ctx := context.Background()
+	store, err := sqlite.Open(ctx, data.DataDir, sqlite.WithLogger(slog.New(slog.NewTextHandler(stderr, nil))))
+	if err != nil {
+		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
+		return exitRuntime
+	}
+	defer func() { _ = store.Close() }()
+	problems, err := store.Check(ctx, *quick)
+	if err != nil {
+		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
+		return exitRuntime
+	}
+	if len(problems) == 0 {
+		fmt.Fprintln(stdout, "the database is sound")
+		return 0
+	}
+	fmt.Fprintf(stderr, "hookinlet: the database has problems:\n")
+	for _, p := range problems {
+		fmt.Fprintf(stderr, "  %s\n", p)
+	}
+	fmt.Fprintln(stderr, "\nRestore a backup (see docs/admin.md#backups), or stop the server and copy the data directory aside before trying anything else.")
+	return exitRuntime
+}
