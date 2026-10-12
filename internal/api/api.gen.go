@@ -812,13 +812,13 @@ type McpWaitForMessagesInput struct {
 
 // Message A stored delivery. Exactly one of `body`, `body_text`, and `body_base64` is present, or none with `fields=summary`.
 type Message struct {
-	// Body The body, when it is valid UTF-8, valid JSON, and nested no deeper than 64 levels. It is JSON here, not a string containing JSON.
+	// Body The body, when it is valid UTF-8, valid JSON, nested no deeper than 64 levels, and holding only what common parsers accept (no number literal over 100 characters or outside float64, no unpaired surrogate escape). It is JSON here, not a string containing JSON.
 	Body json.RawMessage `json:"body,omitempty"`
 
 	// BodyBase64 The body, base64-encoded, when it is not valid UTF-8.
 	BodyBase64 *string `json:"body_base64,omitempty"`
 
-	// BodyText The body, when it is valid UTF-8 but not JSON (or is too deeply nested).
+	// BodyText The body, when it is valid UTF-8 but not JSON (or is JSON that is not embedded: too deeply nested, or with a number or escape that parsers refuse).
 	BodyText    *string `json:"body_text,omitempty"`
 	ContentType string  `json:"content_type"`
 
