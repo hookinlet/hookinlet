@@ -110,9 +110,19 @@ func (s *Server) secretsOK(ctx context.Context) error {
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), secretsTimeout)
 	defer cancel()
-	err := s.CheckSecrets(cctx)
-	if err != nil && !errors.Is(err, ErrUnreadableSecrets) {
+	r, err := s.adm.CheckSecrets(cctx)
+	if err != nil {
 		return err // could not look: say so, and look again next time
+	}
+	// Only a master key that opens nothing takes the server out of rotation. One inbox
+	// whose secret does not open fails its own deliveries, and an operator is told which;
+	// the other inboxes still work, and a load balancer should keep sending to them.
+	err = nil
+	if r.Systemic() {
+		err = r.Err()
+	} else if !r.OK() {
+		s.log.LogAttrs(cctx, slog.LevelWarn, "some inboxes have a verifier secret that does not open; their deliveries will fail until it is set again",
+			slog.String("detail", r.Err().Error()))
 	}
 	s.secretsErr, s.secretsAt = err, now
 	return err
