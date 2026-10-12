@@ -59,6 +59,9 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - **A clock that jumps forward no longer makes retention delete messages early.** A retention run that
   finds the wall clock more than ten minutes ahead of the monotonic clock since the last run uses the time
   that really passed, and logs it; the next run accepts the clock as it reads.
+- **`/readyz` no longer fails for the whole server because one inbox's secret does not open.**
+  It fails when the master key opens none of the stored secrets (a wrong key), and logs a warning
+  naming the inboxes when only some do not open. Starting still refuses until they are fixed.
 
 - **Upgrading from rc.1: stop the old server first.** rc.1 takes no lock on the data directory, so
   a migration could run under it and leave message counts wrong. The migration now refuses when

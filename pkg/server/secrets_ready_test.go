@@ -118,3 +118,28 @@ type failingList struct{ inbox.Store }
 func (failingList) ListInboxes(context.Context, inbox.ListParams) ([]*inbox.Inbox, error) {
 	return nil, errors.New("boom")
 }
+
+// One inbox whose secret does not open is that inbox's problem: the server stays ready
+// for the others, while starting still refuses so that an operator sees it.
+func TestReadyzStaysUpWhenOnlyOneInboxHasASecretThatDoesNotOpen(t *testing.T) {
+	e := newEnv(t)
+	e.newInbox("good", "github", "a-secret")
+	foreign, err := secretbox.New(bytes.Repeat([]byte{77}, secretbox.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := foreign.Seal([]byte("another-secret"), inbox.VerifierSecretContext("foreign"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateInbox(t.Context(), &inbox.Inbox{Slug: "foreign", IngestKey: "foreign-key", Name: "f", Verifier: "github", VerifierSecret: sealed}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.server.CheckSecrets(t.Context()); !errors.Is(err, admin.ErrUnreadableSecrets) || !strings.Contains(err.Error(), "foreign") {
+		t.Fatalf("CheckSecrets with one foreign secret: %v", err)
+	}
+	if rec := e.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
+		t.Errorf("/readyz with one unreadable secret among readable ones: %d %s", rec.Code, rec.Body)
+	}
+}

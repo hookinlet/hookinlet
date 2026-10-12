@@ -215,6 +215,36 @@ curl -i -X POST http://localhost:8080/in/demo \
 
 Change one character of `$body` and send the same signature: you get a `401`.
 
+## Trying it with Stripe
+
+Stripe's CLI forwards test events with a real signature. This is the same loop against Stripe (it needs a Stripe
+account, so it is shown, not run by the tests):
+
+```sh
+# the signing secret Stripe will use, whsec_…
+secret=$(stripe listen --print-secret)
+
+# create the inbox with that secret
+curl -s -X POST localhost:8080/v1/admin/inboxes \
+  -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- > created.json <<EOF
+{"slug": "stripe", "verifier": "stripe", "verifier_secret": "$secret"}
+EOF
+# keep the agent token in HOOKINLET_AGENT_TOKEN, as in the README, and forward Stripe's test events to the inbox
+INGEST=$(sed -n 's/.*"ingest_path":"\([^"]*\)".*/\1/p' created.json)
+stripe listen --forward-to localhost:8080$INGEST &
+
+# send some events, then read the inbox
+stripe trigger invoice.paid
+curl -s 'localhost:8080/v1/inboxes/stripe/messages?after=0&fields=summary' \
+  -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN" | jq -c '.messages[] | {seq, event_type, verified}'
+```
+
+```
+{"seq":1,"event_type":"customer.created","verified":true}
+…
+{"seq":5,"event_type":"invoice.paid","verified":true}
+```
+
 ## Duplicate deliveries
 
 A verified delivery with a delivery id is a duplicate of an earlier one, and is

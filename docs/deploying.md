@@ -246,8 +246,9 @@ docker run --rm -v hookinlet-data:/data -e HOOKINLET_MASTER_KEY -e HOOKINLET_OLD
 - `GET /healthz` answers `200` while the process is up.
 - `GET /readyz` answers `200` when the server can do its work, and `503` when it
   cannot: the database is unreachable, the volume it is on has under 32 MiB free
-  (or the last write failed for lack of room), the stored verifier secrets do not
-  open with the master key, or the server has been told to stop and is
+  (or the last write failed for lack of room), none of the stored verifier secrets opens
+  with the master key (one inbox whose secret does not open is logged and fails
+  its own deliveries, but does not take the server out of rotation), or the server has been told to stop and is
   [draining](#stopping). Use it for readiness, and `/healthz` for liveness.
 
 Neither needs a credential. The image has no `curl`, so it carries
