@@ -43,12 +43,16 @@ jobs:
           sha256sum -c /tmp/first.sha
       - name: Our one changed generator template is still upstream's plus the recorded edits
         run: scripts/check-template.sh
+      - name: THIRD_PARTY_LICENSES is current, and every dependency has an allowed license
+        run: scripts/third-party-licenses.sh --check
       # The race detector doubles the time and is for main, not for every push to a
       # review.
       - name: Test (everything but pkg/server, which has its own job)
         env:
           RACE: ${{ github.event_name != 'pull_request' }}
-        run: go test $([ "$RACE" = true ] && echo -race) $(go list ./... | grep -v '/pkg/server$')
+        # A test that hangs fails with its goroutines in a few minutes, not after the
+        # job's whole budget.
+        run: go test -timeout 6m $([ "$RACE" = true ] && echo -race) $(go list ./... | grep -v '/pkg/server$')
 
   # pkg/server has several hundred tests that run one after another and takes as
   # long as all the rest together, so it runs alongside them, not after them.
@@ -63,7 +67,21 @@ jobs:
       - name: Test pkg/server
         env:
           RACE: ${{ github.event_name != 'pull_request' }}
-        run: go test $([ "$RACE" = true ] && echo -race) ./pkg/server/
+        run: go test -timeout 8m $([ "$RACE" = true ] && echo -race) ./pkg/server/
+
+  # Known vulnerabilities in the code we call, in the standard library we are built
+  # with, and in our dependencies. It also runs every night, because a vulnerability is
+  # published about code that has not changed.
+  vulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   lint:
     runs-on: ubuntu-latest

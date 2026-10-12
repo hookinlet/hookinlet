@@ -1,0 +1,24 @@
+# Keeps the pinned parts up to date: Go modules, the GitHub Actions (pinned by commit,
+# which Dependabot updates with their version comments), and the base images in the
+# Dockerfile (pinned by digest). A security update opens at once; the rest weekly, grouped,
+# so that a week's changes are one pull request to read and CI is the gate.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      go-dependencies:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 3

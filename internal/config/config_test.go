@@ -299,3 +299,33 @@ func TestAdminTokenMustBeStrong(t *testing.T) {
 		}
 	}
 }
+
+func TestServeHelpListsEverySettingReadably(t *testing.T) {
+	var out strings.Builder
+	if _, err := Load([]string{"-h"}, env(validEnv()), &out); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("-h: %v", err)
+	}
+	help := out.String()
+	for _, s := range specs {
+		for _, want := range []string{"--" + s.name, envName(s.name)} {
+			if !strings.Contains(help, want) {
+				t.Errorf("-h does not mention %s", want)
+			}
+		}
+	}
+	if strings.Contains(help, "`") || strings.Contains(help, " string\n") {
+		t.Errorf("-h has mangled flag-package output:\n%s", help)
+	}
+	if req, rest := strings.Index(help, "Required:"), strings.Index(help, "Settings:"); req < 0 || rest < req ||
+		strings.Index(help, "\n  --admin-token\n") > rest || strings.Index(help, "\n  --listen-addr\n") < rest {
+		t.Errorf("the required settings must come first:\n%s", help)
+	}
+	if !strings.Contains(help, "_FILE") {
+		t.Error("-h does not say the secrets can be files")
+	}
+	for _, line := range strings.Split(help, "\n") {
+		if len(line) > 100 {
+			t.Errorf("a line of %d characters: %q", len(line), line)
+		}
+	}
+}
