@@ -9,9 +9,10 @@
 [![docker](https://img.shields.io/badge/docker-ghcr.io%2Fhookinlet%2Fhookinlet-0E1112?labelColor=3A4245&style=flat-square)](https://github.com/hookinlet/hookinlet/pkgs/container/hookinlet)
 [![mcp](https://img.shields.io/badge/mcp-%2Fmcp-0E1112?labelColor=3A4245&style=flat-square)](docs/mcp.md)
 
-hookinlet is a single Go binary that receives webhooks into named inboxes, verifies their signatures, and keeps a
-queryable history. Agents read it three ways, REST, an SSE stream, or an MCP endpoint, using a per-inbox sequence
-number as the cursor. SQLite by default; runs anywhere.
+Your agent needs to know when Stripe, GitHub, or Slack says something, but it cannot hold a public URL and it must
+not trust what arrives. hookinlet is that URL: a single Go binary that receives webhooks into named inboxes,
+verifies their signatures, and keeps a queryable history. Agents read it three ways, REST, an SSE stream, or an
+MCP endpoint, using a per-inbox sequence number as the cursor. SQLite by default; runs anywhere.
 
 [Docs](docs) · [Quickstart](#quickstart) · [MCP tools](#read-from-an-agent) · [hookinlet Cloud (waitlist)](https://hookinlet.com/#cloud)
 
@@ -114,7 +115,7 @@ curl -s 'localhost:8080/v1/inboxes/github-demo/messages?after=0' -H "Authorizati
 ```
 
 ```json
-{"messages":[{"seq":1,"inbox":"github-demo","received_at":"2026-10-11T05:43:16.434979Z","method":"POST",
+{"messages":[{"seq":1,"inbox":"github-demo","received_at":"2026-01-15T09:30:00.000000Z","method":"POST",
   "headers":{"X-Github-Event":["pull_request"], "…":"…"},"content_type":"application/json","size":70,
   "verified":true,"verifier":"github","delivery_id":"demo-1","event_type":"pull_request","source_ip":"127.0.0.1",
   "body":{"action":"opened","number":42,"pull_request":{"title":"Add retries"}}, "…":"…"}],
@@ -129,37 +130,10 @@ the agent token.
 
 ### With a real sender
 
-Stripe's CLI forwards test events with a real signature. This is the same loop against Stripe (it needs a Stripe
-account, so it is shown, not run by the tests):
-
-```sh
-# the signing secret Stripe will use, whsec_…
-secret=$(stripe listen --print-secret)
-
-# create the inbox with that secret
-curl -s -X POST localhost:8080/v1/admin/inboxes \
-  -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- > created.json <<EOF
-{"slug": "stripe", "verifier": "stripe", "verifier_secret": "$secret"}
-EOF
-# keep the agent token in HOOKINLET_AGENT_TOKEN, as above, and forward Stripe's test events to the inbox
-INGEST=$(sed -n 's/.*"ingest_path":"\([^"]*\)".*/\1/p' created.json)
-stripe listen --forward-to localhost:8080$INGEST &
-
-# send some events, then read the inbox
-stripe trigger invoice.paid
-curl -s 'localhost:8080/v1/inboxes/stripe/messages?after=0&fields=summary' \
-  -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN" | jq -c '.messages[] | {seq, event_type, verified}'
-```
-
-```
-{"seq":1,"event_type":"customer.created","verified":true}
-…
-{"seq":5,"event_type":"invoice.paid","verified":true}
-```
-
-For GitHub, Slack, or your own service, give the sender the inbox's `ingest_url` (the admin API shows it; `HOOKINLET_PUBLIC_BASE_URL` sets the host part) and the same secret. The
-server must be reachable from the internet for that: put it behind TLS, or use a tunnel to try it from a laptop.
-[Deploying](docs/deploying.md) covers what it needs.
+For GitHub, Slack, Stripe, or your own service, give the sender the inbox's `ingest_url` (the admin API shows it;
+`HOOKINLET_PUBLIC_BASE_URL` sets the host part) and the same secret. The server must be reachable from the internet
+for that: put it behind TLS, or use a tunnel to try it from a laptop. [Verifiers](docs/verifiers.md#trying-it-with-stripe)
+shows the loop against Stripe's CLI, and [Deploying](docs/deploying.md) covers what a server needs.
 
 ## Read from an agent
 
@@ -300,7 +274,7 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
   million messages in an inbox, a page read takes under 20 ms at the 95th percentile (worst case measured: 11 ms),
   and while a million-row retention sweep runs a delivery waits 18 ms or less at the 99th percentile
   (longest wait measured: 102 ms, deleting a whole inbox). [Performance](docs/performance.md) says how it was measured.
-- **Ready in milliseconds.** About 10 MiB of memory idle. No outbound network calls, no telemetry.
+- **Ready in milliseconds once migrated.** About 10 MiB of memory idle. (An upgrade that has migrations to apply to a large database takes longer: [Upgrading](docs/deploying.md#upgrading).) No outbound network calls, no telemetry.
 - **Inboxes as a file.** `hookinlet apply -f inboxes.yaml` creates the inboxes a file declares and changes the ones that
   differ. It never deletes anything. See [applying a file](docs/admin.md#applying-a-file).
 - **Backups while it runs.** `hookinlet backup --out file.db` takes a consistent snapshot.
