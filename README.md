@@ -319,6 +319,7 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
 | [**OpenAPI**](docs/openapi.json) | The same, machine-readable (OpenAPI 3.1), checked against the server by tests |
 | [**MCP**](docs/mcp.md) | The tools, their limits, and how to connect clients |
 | [**Verifiers**](docs/verifiers.md) | Stripe, GitHub, Slack, Standard Webhooks, generic HMAC, shared token |
+| [**Stability**](docs/stability.md) | What may change, how a change is announced, cursors and ids, CORS and TLS |
 | [**Extending**](docs/extending.md) | Embedding the server; replacing the store, notifier, auth, or secrets |
 | [**Performance**](docs/performance.md) | What was measured, on what, and how to repeat it |
 
