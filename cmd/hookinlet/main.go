@@ -42,6 +42,12 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		usage(stderr)
 		return exitUsage
 	}
+	// Secrets may come from files (HOOKINLET_ADMIN_TOKEN_FILE and the like).
+	getenv, err := config.WithSecretFiles(getenv)
+	if err != nil {
+		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
+		return exitUsage
+	}
 	switch args[0] {
 	case "serve":
 		return serve(args[1:], getenv, stderr)
@@ -95,6 +101,9 @@ Commands:
 
 Every setting is a flag and an environment variable: --listen-addr is also
 HOOKINLET_LISTEN_ADDR. Flags win over the environment.
+The secrets (HOOKINLET_ADMIN_TOKEN, HOOKINLET_MASTER_KEY, HOOKINLET_OLD_MASTER_KEY,
+HOOKINLET_VERIFIER_SECRET) can instead be read from a file named by the same variable
+with _FILE added, such as HOOKINLET_MASTER_KEY_FILE=/run/secrets/master_key.
 
 The inbox, token, apply, retention, and backup commands call a running server's admin API when
 given --url (with the admin token in HOOKINLET_ADMIN_TOKEN), and otherwise work
