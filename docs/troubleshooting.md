@@ -45,6 +45,10 @@ empties stay inside the database file and are reused by new writes, and they cou
 The file itself does not shrink. Admin calls that write answer `500` while the volume is
 completely full (the log says `storage full`); deliveries answer `503`.
 
+**`database disk image is malformed`, or answers that are wrong or missing.** The file is damaged. Run
+`hookinlet check` (it can run beside the server); if it reports problems, stop the server, copy the data
+directory aside, and restore the latest [backup](admin.md#backups).
+
 **`database schema version N is newer than this build supports`.** The data was
 written by a newer hookinlet. Run the newer version, or restore a backup taken by an
 older one.

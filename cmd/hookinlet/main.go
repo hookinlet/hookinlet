@@ -81,6 +81,8 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		return serve(args[1:], getenv, stderr)
 	case "migrate":
 		return migrateCmd(args[1:], getenv, stdout, stderr)
+	case "check":
+		return checkCmd(args[1:], getenv, stdout, stderr)
 	case "inbox":
 		return inboxCmd(args[1:], getenv, stdout, stderr)
 	case "token":
@@ -125,6 +127,7 @@ func usage(w io.Writer) {
 Commands:
   serve         Run the HTTP server (see "hookinlet serve -h" for settings)
   migrate       Apply pending database migrations and report the schema version
+  check         Verify the database file is sound (check --quick for a faster pass)
   inbox         Manage inboxes: create, list, show, update, set-secret, rotate-ingest-key, delete
   token         Manage agent tokens: create, list, revoke
   retention     Apply retention policies now (retention run)

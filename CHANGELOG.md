@@ -56,6 +56,10 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 
 ### Release review fixes
 
+- **`hookinlet check`** verifies the database file (SQLite's integrity check, or `--quick`), for use after a
+  crash, a disk problem or a restore. The server still does not scan the file at startup. New in `pkg/`:
+  `sqlite.Store.Check`.
+
 - **Upgrading from rc.1: stop the old server first.** rc.1 takes no lock on the data directory, so
   a migration could run under it and leave message counts wrong. The migration now refuses when
   another process has the database open.
