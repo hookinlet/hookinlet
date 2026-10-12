@@ -135,6 +135,10 @@ type Options struct {
 	// its routes are not mounted. (The admin token still reads inboxes through the read API and MCP, as it always does.) Inboxes and tokens are then managed with
 	// the command line, which works in the data directory.
 	DisableAdmin bool
+	// DisableUI turns off the admin console (the web app served at /admin on the same
+	// listener as the admin API). It is also absent when the admin API is, or has no
+	// Authenticator to guard it.
+	DisableUI bool
 	// AdminAddr, if set, serves the admin API on its own listener at this address
 	// and not on Addr. That lets the admin surface sit on a loopback or private
 	// interface while ingest and the read API are public. Empty serves everything
@@ -184,6 +188,7 @@ type Server struct {
 	secretsAt  time.Time
 	secretsErr error
 	backupMu   sync.Mutex     // one backup at a time
+	retained   retentionRun   // the last retention run that finished
 	retention  sync.WaitGroup // the scheduled sweep, so Serve can wait for it
 
 	streams      chan struct{} // a slot per open SSE stream
@@ -331,6 +336,7 @@ func (s *Server) build(surface surface) http.Handler {
 		s.mux = mux
 	}
 	s.registerRoutes(mux, surface)
+	s.mountConsole(mux, surface)
 	mux.HandleFunc("/", notFound)
 	// Outermost first. accessLog must see the same *http.Request the mux
 	// annotates with r.Pattern, so nothing between it and the mux may clone
@@ -395,7 +401,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 // ServeAdmin is Serve for a server with Options.AdminAddr set, given a listener
-// for each address. The admin API is served on adminLn and nothing else is.
+// for each address. The admin API, and the console if it is on, are served on adminLn and nothing else is.
 func (s *Server) ServeAdmin(ctx context.Context, ln, adminLn net.Listener) error {
 	if ln == nil || adminLn == nil {
 		if ln != nil {
@@ -552,10 +558,33 @@ func (s *Server) Maintain(ctx context.Context) {
 	s.sweepLoop(ctx)
 }
 
+// retentionRun remembers the last retention run that finished without an error.
+type retentionRun struct {
+	mu      sync.Mutex
+	at      time.Time
+	deleted int64
+}
+
+func (r *retentionRun) record(at time.Time, deleted int64, err error) {
+	if err != nil {
+		return
+	}
+	r.mu.Lock()
+	r.at, r.deleted = at, deleted
+	r.mu.Unlock()
+}
+
+func (r *retentionRun) last() (at time.Time, deleted int64, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.at, r.deleted, !r.at.IsZero()
+}
+
 func (s *Server) sweepLoop(ctx context.Context) {
 	sweep := func() {
 		start := time.Now()
 		n, err := s.adm.SweepRetention(ctx)
+		s.retained.record(s.opts.Now(), n, err)
 		s.metrics.sweeps.Add(1)
 		s.metrics.retention.Add(n)
 		switch {

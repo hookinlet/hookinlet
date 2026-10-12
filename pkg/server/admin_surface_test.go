@@ -179,3 +179,63 @@ func TestAShutDownServerCannotBeStarted(t *testing.T) {
 		t.Error("the listener was left open")
 	}
 }
+
+// The console is served at /admin wherever the admin API is, and nowhere else.
+func TestTheConsoleIsServedWithTheAdminAPI(t *testing.T) {
+	status := func(e *env, target string) (int, string) {
+		base := serveOn(t, e)
+		code, body := do2(t, "GET", base+target, nil, "")
+		return code, body
+	}
+	on := newEnv(t, withAuth)
+	if code, body := status(on, "/admin/"); code != 200 || !strings.Contains(body, `id="app"`) {
+		t.Errorf("/admin/: %d %.80q", code, body)
+	}
+	if code, _ := status(on, "/admin/inboxes/some-screen"); code != 200 {
+		t.Errorf("a screen of the app: %d", code)
+	}
+	base := serveOn(t, on)
+	if code, _ := do2(t, "POST", base+"/admin", nil, ""); code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /admin: %d, want 405", code)
+	}
+	if code, body := do2(t, "GET", base+"/admin/assets/", nil, ""); code != http.StatusNotFound || strings.Contains(body, "<a href") {
+		t.Errorf("a directory of the console's files: %d", code)
+	}
+	for name, mods := range map[string][]func(*Options){
+		"switched off":     {withAuth, func(o *Options) { o.DisableUI = true }},
+		"admin API off":    {withAuth, func(o *Options) { o.DisableAdmin = true }},
+		"no authenticator": nil,
+	} {
+		e := newEnv(t, mods...)
+		if code, _ := status(e, "/admin/"); code != 404 {
+			t.Errorf("%s: /admin/ answered %d", name, code)
+		}
+	}
+}
+
+// With its own listener the console is on the admin one, not the public one.
+func TestTheConsoleFollowsTheAdminListener(t *testing.T) {
+	e := newEnv(t, withAuth, func(o *Options) { o.AdminAddr = "127.0.0.1:1" })
+	var lc net.ListenConfig
+	pub, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adm, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- e.server.ServeAdmin(ctx, pub, adm) }()
+	t.Cleanup(func() { cancel(); <-done })
+	if code, _ := do2(t, "GET", "http://"+adm.Addr().String()+"/admin/", nil, ""); code != 200 {
+		t.Errorf("the admin listener: %d", code)
+	}
+	if code, _ := do2(t, "GET", "http://"+pub.Addr().String()+"/admin/", nil, ""); code != 404 {
+		t.Errorf("the public listener serves the console: %d", code)
+	}
+	if code, _ := do2(t, "GET", "http://"+adm.Addr().String()+"/admin", nil, ""); code != 200 && code != 301 {
+		t.Errorf("/admin without the slash: %d", code)
+	}
+}

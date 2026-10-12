@@ -202,6 +202,18 @@ The key is a secret of the same kind as a webhook URL on a chat service: keep it
 out of public places, and rotate it (`rotate-ingest-key`) if it leaks. Messages
 stay where they are.
 
+## The console
+
+The server also serves a web console at `/admin`, on the same listener as the admin API (or on
+`HOOKINLET_ADMIN_LISTEN_ADDR`, if the admin API has its own). It is a page that calls the admin
+API with the admin token: you type the token to sign in, and it stays in the page's memory until
+you sign out or close the tab. It is on by default; `HOOKINLET_ADMIN_UI=false` turns it off, and it
+is absent whenever the admin API is. The page and its scripts are static files built into the
+binary; they are served under a content security policy that allows no inline script and no other
+origin, and message content is always shown as text. It adds no new way to change anything: whatever
+it does goes through the endpoints in this document. `GET /v1/admin/status` is the one endpoint it
+needed that did not exist (version, schema, database size, free space, last retention run).
+
 ## The command line
 
 <!-- exercise -->

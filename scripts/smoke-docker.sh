@@ -122,6 +122,12 @@ expect "GET is not allowed"                 '405' "$(send GET /in/demo "" | cut 
 expect "an unknown inbox is 404"            '404' "$(send POST /in/nobody "$body1" "$(sign "$body1")" | cut -d' ' -f1)"
 expect "liveness"                           'ok'  "$(curl -fsS "$base/healthz" | sed 's/.*"status":"\([a-z]*\)".*/\1/')"
 
+# The admin console is in the image, under its content security policy.
+console=$(curl -sS -D - -o /dev/null "$base/admin/")
+case $console in *' 200'*) ;; *) fail "the console did not answer 200: $console" ;; esac
+case $console in *"script-src 'self'"*) echo "ok   the console is served under a content security policy" ;; *) fail "the console has no content security policy: $console" ;; esac
+expect "the admin status needs the admin token" '401' "$(curl -sS -o /dev/null -w '%{http_code}' "$base/v1/admin/status")"
+
 # The read API, with the token that `inbox create` printed.
 expect "no token is 401"                       '401' "$(read_api /v1/inboxes/demo | cut -d' ' -f1)"
 expect "a wrong token is 401"                  '401' "$(read_api /v1/inboxes/demo hki_wrong | cut -d' ' -f1)"
