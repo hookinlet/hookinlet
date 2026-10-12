@@ -180,6 +180,11 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 		}
 	}()
 
+	// A database put here by hand (a restored backup copied with the usual umask) keeps
+	// the mode it came with, and the -wal and -shm files are made to match it. The
+	// messages in it are not for other users of the machine.
+	tightenModes(abs, cfg.log)
+
 	// Create the database file ourselves so it is private to the owner. SQLite
 	// gives the -wal and -shm files the same permissions as the main file.
 	f, err := os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // the path is the configured data directory plus a fixed name
@@ -226,6 +231,22 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 		return nil, fmt.Errorf("sqlite: open read pool: %w", err)
 	}
 	return s, nil
+}
+
+// tightenModes makes the database file, and the write-ahead log and shared-memory file
+// beside it if they exist, readable by their owner only, and says so if it had to.
+func tightenModes(db string, log *slog.Logger) {
+	for _, p := range []string{db, db + "-wal", db + "-shm"} {
+		fi, err := os.Stat(p)
+		if err != nil || fi.Mode().Perm()&0o077 == 0 {
+			continue
+		}
+		if err := os.Chmod(p, 0o600); err != nil {
+			log.Warn("the database file is readable by other users and could not be made private", "path", p, "err", err.Error())
+			continue
+		}
+		log.Warn("the database file was readable by other users; it is now private to its owner", "path", p, "was", fi.Mode().Perm().String())
+	}
 }
 
 // walLimit, for a connection that writes, is the size the write-ahead log is cut back
