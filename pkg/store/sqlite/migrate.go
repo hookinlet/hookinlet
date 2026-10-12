@@ -9,7 +9,9 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,7 +60,7 @@ func loadMigrations() ([]migration, error) {
 // the versions it applied. It refuses to run against a database that has
 // migrations this binary does not know, since that means the data was written
 // by a newer version.
-func migrate(ctx context.Context, db *sql.DB) ([]int, error) {
+func migrate(ctx context.Context, db *sql.DB, dbPath string) ([]int, error) {
 	migs, err := loadMigrations()
 	if err != nil {
 		return nil, err
@@ -78,6 +80,16 @@ func migrate(ctx context.Context, db *sql.DB) ([]int, error) {
 	}
 	if current > len(migs) {
 		return nil, fmt.Errorf("sqlite: database schema version %d is newer than this build supports (%d); upgrade hookinlet", current, len(migs))
+	}
+
+	// Migrations only move forward, so before changing a database that has data in
+	// it, keep a copy of it as it was: if an upgrade turns out badly, that copy and
+	// the previous release are the way back. A database that has never been migrated
+	// (a new one) has nothing to keep.
+	if current > 0 && current < len(migs) {
+		if err := snapshotBeforeMigrating(ctx, db, dbPath, current); err != nil {
+			return nil, err
+		}
 	}
 
 	var applied []int
@@ -111,4 +123,29 @@ func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
 		return 0, s.ctxErr(ctx, fmt.Errorf("sqlite: read schema version: %w", err))
 	}
 	return v, nil
+}
+
+// MigrationSnapshotPrefix begins the name of the copy of the database that is made
+// before a migration: hookinlet.db.before-migration-N.bak, where N is the schema
+// version it was at. Only the latest is kept; delete it once the upgrade is trusted.
+const MigrationSnapshotPrefix = DBFileName + ".before-migration-"
+
+func snapshotBeforeMigrating(ctx context.Context, db *sql.DB, dbPath string, from int) error {
+	dir := filepath.Dir(dbPath)
+	name := filepath.Join(dir, MigrationSnapshotPrefix+strconv.Itoa(from)+".bak")
+	old, _ := filepath.Glob(filepath.Join(dir, MigrationSnapshotPrefix+"*.bak"))
+	for _, f := range old {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("sqlite: remove the previous pre-migration copy %s: %w", f, err)
+		}
+	}
+	// VACUUM INTO writes a complete, consistent copy in one read transaction.
+	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, name); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("sqlite: could not keep a copy of the database before migrating it (is there room for a second copy in %s?); nothing was changed: %w", dir, err)
+	}
+	if err := os.Chmod(name, 0o600); err != nil {
+		return fmt.Errorf("sqlite: pre-migration copy: %w", err)
+	}
+	return nil
 }

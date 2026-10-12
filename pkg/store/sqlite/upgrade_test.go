@@ -109,3 +109,85 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 		t.Errorf("a repeat of an old delivery: %+v created %v err %v", dup, created, err)
 	}
 }
+
+// Before an existing database is migrated, a copy of it as it was is kept.
+func TestADatabaseIsCopiedBeforeItIsMigrated(t *testing.T) {
+	dir := t.TempDir()
+	raw, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"0001_init.sql", "0002_delivery_index.sql"} {
+		b, err := os.ReadFile(filepath.Join("migrations", name)) //nolint:gosec // this package's own migration files
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.ExecContext(t.Context(), string(b)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{
+		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`,
+		`INSERT INTO schema_migrations VALUES (1, 'then'), (2, 'then')`,
+		`INSERT INTO inboxes (slug, name, verifier, agent_token_hash, created_at, updated_at) VALUES ('kept', 'kept', 'none', x'01', '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z')`,
+	} {
+		if _, err := raw.ExecContext(t.Context(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = raw.Close()
+
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+
+	snap := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"2.bak")
+	info, err := os.Stat(snap)
+	if err != nil {
+		t.Fatalf("no copy was kept: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("the copy's mode is %v, want 0600", info.Mode().Perm())
+	}
+	old, err := sql.Open("sqlite", snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = old.Close() }()
+	var version, inboxes int
+	if err := old.QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil || version != 2 {
+		t.Errorf("the copy is at version %d (%v), want the version before the upgrade, 2", version, err)
+	}
+	if err := old.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM inboxes`).Scan(&inboxes); err != nil || inboxes != 1 {
+		t.Errorf("the copy holds %d inboxes (%v)", inboxes, err)
+	}
+
+	// Nothing pending, nothing copied: the same copy stays, and no other appears.
+	before, _ := os.Stat(snap)
+	s, err = sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	after, _ := os.Stat(snap)
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("a start with nothing to migrate replaced the copy")
+	}
+	if all, _ := filepath.Glob(filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"*")); len(all) != 1 {
+		t.Errorf("copies: %v", all)
+	}
+}
+
+func TestANewDatabaseIsNotCopied(t *testing.T) {
+	dir := t.TempDir()
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	if all, _ := filepath.Glob(filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"*")); len(all) != 0 {
+		t.Errorf("a new database left %v", all)
+	}
+}
