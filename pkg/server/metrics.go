@@ -39,8 +39,9 @@ func (m *metrics) count(table *sync.Map, key string, n int64) {
 func (m *metrics) delivery(result string) { m.count(&m.deliveries, result, 1) }
 
 // request notes a finished request by the route pattern that served it and its
-// status. An unmatched path has no pattern and is counted under "unmatched", so
-// scanning cannot add series.
+// status. A path that matches no route is served by the catch-all, whose pattern is
+// "/", so scanning cannot add series; a request with no pattern at all (which the
+// router does not produce) is counted as "unmatched".
 func (m *metrics) request(route string, status int) {
 	if route == "" {
 		route = "unmatched"
