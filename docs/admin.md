@@ -213,6 +213,13 @@ binary; they are served under a content security policy that allows no inline sc
 origin, and message content is always shown as text. It has an overview (inboxes, activity over the last day, the last retention run), a list of inboxes, an inbox page
 with its messages (filter by event type, verification and time; read a message's body, headers and exact bytes;
 follow new ones as they arrive), and a page to issue and revoke agent tokens; it follows the system's light or dark theme, which can be switched from its sidebar.
+Its settings are in the console too: creating an inbox picks the sender and asks only for what that sender needs, an
+inbox's page has a Settings tab (name, retention, verification, replacing its secret, rotating its ingest URL, and
+deleting it after typing its name), and a Maintenance page runs retention and downloads a backup. `⌘K` (or `Ctrl K`)
+opens a command palette to go anywhere or do anything by name.
+
+![An inbox's Settings tab](images/console-settings.png)
+
 It adds no new way to change anything: whatever
 it does goes through the endpoints in this document. `GET /v1/admin/status` is the one endpoint it
 needed that did not exist (version, schema, database size, free space, last retention run).

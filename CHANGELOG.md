@@ -56,6 +56,13 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 
 ### Release review fixes
 
+- **Admin console, fourth part.** The console can now manage: a new-inbox form with a section for each
+  kind of sender (Stripe, GitHub, Slack, Standard Webhooks, HMAC, shared token, none) that shows the
+  agent token and ingest URL once; a Settings tab per inbox (general settings, verification, replacing
+  the secret, rotating the ingest URL, deleting with a typed confirmation); a Maintenance page (status,
+  run retention, download a backup); and a command palette (`⌘K`). The console has Playwright
+  end-to-end tests and an axe accessibility scan of every screen in both themes, run in CI.
+
 - **Admin console, third part.** Each inbox has a page: its facts and ingest path, and its messages, newest
   first, with filters (event type, verification, time), older messages on request, and a live mode that
   follows the stream. A message opens at its own address (`/admin/inboxes/SLUG/messages/SEQ`) and shows

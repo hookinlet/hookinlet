@@ -42,5 +42,5 @@ export default defineConfig({
     // `npm run dev` proxies the API to a server on :8080.
     proxy: { '/v1': 'http://localhost:8080', '/healthz': 'http://localhost:8080', '/readyz': 'http://localhost:8080' },
   },
-  test: { environment: 'node' },
+  test: { environment: 'node', include: ['src/**/*.test.ts'] }, // the Playwright specs in e2e/ run separately
 })

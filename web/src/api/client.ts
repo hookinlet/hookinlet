@@ -5,6 +5,9 @@ export type Inbox = components['schemas']['Admin']
 export type Token = components['schemas']['Token']
 export type TokenCreated = components['schemas']['TokenCreated']
 export type MessagePage = components['schemas']['MessagePage']
+export type CreateInbox = components['schemas']['CreateInbox']
+export type PatchInbox = components['schemas']['PatchInbox']
+export type InboxCreated = components['schemas']['Created']
 
 export class ApiError extends Error {
   constructor(
@@ -72,4 +75,38 @@ export async function recentTimes(token: string, slug: string, lastSeq: number, 
     `/v1/inboxes/${encodeURIComponent(slug)}/messages?before=${lastSeq + 1}&limit=${limit}&fields=summary`,
   )
   return page.messages.map((m) => m.received_at)
+}
+
+const enc = encodeURIComponent
+const json = (body: unknown) => JSON.stringify(body)
+
+export const createInbox = (token: string, body: CreateInbox) =>
+  request<InboxCreated>(token, '/v1/admin/inboxes', { method: 'POST', body: json(body) })
+
+export const patchInbox = (token: string, slug: string, body: PatchInbox) =>
+  request<Inbox>(token, `/v1/admin/inboxes/${enc(slug)}`, { method: 'PATCH', body: json(body) })
+
+export const setSecret = (token: string, slug: string, secret: string) =>
+  request<Inbox>(token, `/v1/admin/inboxes/${enc(slug)}/secret`, { method: 'PUT', body: json({ secret }) })
+
+export const rotateIngestKey = (token: string, slug: string) =>
+  request<Inbox>(token, `/v1/admin/inboxes/${enc(slug)}/rotate-ingest-key`, { method: 'POST' })
+
+export const deleteInbox = (token: string, slug: string) => request<void>(token, `/v1/admin/inboxes/${enc(slug)}`, { method: 'DELETE' })
+
+export const runRetention = (token: string) => request<{ deleted: number }>(token, '/v1/admin/retention/run', { method: 'POST' })
+
+// backup downloads a consistent copy of the database into memory as a Blob, for saving.
+export async function backup(token: string): Promise<Blob> {
+  const res = await fetch('/v1/admin/backup', { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) {
+    let message = res.statusText
+    try {
+      message = ((await res.json()) as { error?: { message?: string } }).error?.message ?? message
+    } catch {
+      // not JSON
+    }
+    throw new ApiError(res.status, message)
+  }
+  return await res.blob()
 }

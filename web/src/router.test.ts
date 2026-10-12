@@ -18,8 +18,11 @@ describe('parse', () => {
     expect(parse('/admin/tokens/')).toEqual({ name: 'tokens' })
   })
   it('finds an inbox and a message in it', () => {
-    expect(parse('/admin/inboxes/stripe-prod')).toEqual({ name: 'inbox', slug: 'stripe-prod', seq: null })
-    expect(parse('/admin/inboxes/stripe-prod/messages/42')).toEqual({ name: 'inbox', slug: 'stripe-prod', seq: 42 })
+    expect(parse('/admin/inboxes/stripe-prod')).toEqual({ name: 'inbox', slug: 'stripe-prod', seq: null, tab: 'messages' })
+    expect(parse('/admin/inboxes/stripe-prod/messages/42')).toEqual({ name: 'inbox', slug: 'stripe-prod', seq: 42, tab: 'messages' })
+    expect(parse('/admin/inboxes/stripe-prod/settings')).toEqual({ name: 'inbox', slug: 'stripe-prod', seq: null, tab: 'settings' })
+    expect(parse('/admin/new')).toEqual({ name: 'newinbox' })
+    expect(parse('/admin/maintenance')).toEqual({ name: 'maintenance' })
     expect(parse('/admin/inboxes/Bad_Slug')).toEqual({ name: 'notfound' })
     expect(parse('/admin/inboxes/a/messages/x')).toEqual({ name: 'notfound' })
   })

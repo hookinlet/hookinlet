@@ -8,8 +8,10 @@ export const BASE = '/admin'
 export type Route =
   | { name: 'overview' }
   | { name: 'inboxes' }
-  | { name: 'inbox'; slug: string; seq: number | null }
+  | { name: 'inbox'; slug: string; seq: number | null; tab: 'messages' | 'settings' }
+  | { name: 'newinbox' }
   | { name: 'tokens' }
+  | { name: 'maintenance' }
   | { name: 'notfound' }
 
 export function parse(pathname: string): Route {
@@ -22,9 +24,15 @@ export function parse(pathname: string): Route {
       return { name: 'inboxes' }
     case '/tokens':
       return { name: 'tokens' }
+    case '/maintenance':
+      return { name: 'maintenance' }
+    case '/new':
+      return { name: 'newinbox' }
     default: {
+      const s = /^\/inboxes\/([a-z0-9-]{1,64})\/settings$/.exec(clean)
+      if (s) return { name: 'inbox', slug: s[1]!, seq: null, tab: 'settings' }
       const m = /^\/inboxes\/([a-z0-9-]{1,64})(?:\/messages\/(\d{1,15}))?$/.exec(clean)
-      if (m) return { name: 'inbox', slug: m[1]!, seq: m[2] ? Number(m[2]) : null }
+      if (m) return { name: 'inbox', slug: m[1]!, seq: m[2] ? Number(m[2]) : null, tab: 'messages' }
       return { name: 'notfound' }
     }
   }
@@ -44,7 +52,7 @@ export function navigate(path: string): void {
   current.value = parse(target)
   // Moving between the messages of one inbox keeps the page where it is; any other move starts at the top.
   const after = current.value
-  const sameInbox = before.name === 'inbox' && after.name === 'inbox' && before.slug === after.slug
+  const sameInbox = before.name === 'inbox' && after.name === 'inbox' && before.slug === after.slug && before.tab === after.tab
   if (!sameInbox) window.scrollTo(0, 0)
 }
 

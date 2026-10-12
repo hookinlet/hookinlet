@@ -14,6 +14,9 @@ npm run dev                  # http://localhost:5173/admin/, proxying the API to
 npm run types                # regenerate src/api/schema.d.ts from ../docs/openapi.json
 npm test                     # unit tests
 npm run build                # writes ../internal/ui/dist; commit the result
+npm run e2e:install          # once: the browser the end-to-end tests use
+npm run e2e                  # builds the Go binary, then runs the browser tests against it
+SCREENSHOTS=1 npm run e2e -- e2e/screenshots.spec.ts   # regenerates ../docs/images
 node licenses.mjs            # after a dependency change; then run ../scripts/third-party-licenses.sh
 ```
 

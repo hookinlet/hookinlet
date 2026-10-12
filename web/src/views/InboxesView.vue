@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import InboxTable from '../components/InboxTable.vue'
 import { inboxes } from '../store'
+import Icon from '../components/Icon.vue'
+import { href, link } from '../router'
 import { loadActivity, loadingActivity } from './useActivity'
 
 const q = ref('')
@@ -24,6 +26,7 @@ onMounted(async () => {
     <span class="grow"></span>
     <label class="sr-only" for="q">Filter inboxes</label>
     <input id="q" v-model="q" class="input filter" type="search" placeholder="Filter by name, slug or verifier" autocomplete="off" />
+    <a class="btn primary" :href="href('/new')" @click="link($event, '/new')"><Icon name="plus" />New inbox</a>
   </header>
   <p v-if="inboxes.error.value" class="err" role="alert">{{ inboxes.error.value }}</p>
   <InboxTable v-if="inboxes.data.value && shown.length" :inboxes="shown" :loading-lines="loadingActivity" />
@@ -39,6 +42,7 @@ onMounted(async () => {
 h1 { font-size: 22px; }
 .grow { flex: 1; }
 .filter { width: min(100%, 280px); }
+a.btn:hover { text-decoration: none; }
 .empty { padding: 28px; display: grid; gap: 8px; }
 .empty h2 { font-size: 17px; }
 .skel { padding: 16px; display: grid; gap: 14px; }
