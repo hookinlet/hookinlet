@@ -133,7 +133,7 @@ func TestServeRefusesAServerWithAnAdminAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if err := e.server.Serve(t.Context(), l); err == nil || !strings.Contains(err.Error(), "ServeAdmin") {
 		t.Errorf("Serve with AdminAddr set: %v; want an error pointing at ServeAdmin", err)
 	}
