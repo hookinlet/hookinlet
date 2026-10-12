@@ -54,7 +54,7 @@ func run(args []string, getenv func(string) string, stderr *os.File) int {
 	fs := flag.NewFlagSet("relay", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		source     = fs.String("url", getenv("HOOKINLET_URL"), "address of the hookinlet server [env HOOKINLET_URL]")
+		source     = fs.String("url", orDefault(getenv("HOOKINLET_URL"), "http://localhost:8080"), "address of the hookinlet server [env HOOKINLET_URL]")
 		inbox      = fs.String("inbox", "", "slug of the inbox to relay (required)")
 		to         = fs.String("to", "", "URL to forward each message to (required)")
 		state      = fs.String("state", "", "file that remembers the position, so a restart carries on (required)")
@@ -98,4 +98,11 @@ func run(args []string, getenv func(string) string, stderr *os.File) int {
 		return 1
 	}
 	return 0
+}
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }

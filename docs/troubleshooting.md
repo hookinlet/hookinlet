@@ -21,7 +21,7 @@ HOOKINLET_OLD_MASTER_KEY=<old> HOOKINLET_MASTER_KEY=<new> hookinlet rekey --data
 ```
 
 If the old key is lost, nothing can recover those secrets: set each again with
-`hookinlet inbox set-secret SLUG` (it works in the data directory with the new key).
+`hookinlet inbox set-secret SLUG --secret-stdin` (it works in the data directory with the new key).
 
 **`another hookinlet process (process N) holds the lock on this data directory`.** A second server,
 or `migrate`, `rekey` or `renew-epochs`, is running against the same directory. Stop the other

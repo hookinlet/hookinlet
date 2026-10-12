@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
@@ -24,8 +25,22 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
 )
 
-// version is overridden at build time with -ldflags "-X main.version=...".
+// version is overridden at build time with -ldflags "-X main.version=...". A build made
+// with plain `go build` from a checkout reports the commit it was built from instead.
 var version = "dev"
+
+func init() {
+	if version != "dev" {
+		return
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" && len(s.Value) >= 12 {
+				version = "dev-" + s.Value[:12]
+			}
+		}
+	}
+}
 
 // Exit codes: 1 is a runtime failure, 2 is a usage or configuration error.
 const (
@@ -157,9 +172,9 @@ func serve(args []string, getenv func(string) string, stderr io.Writer) int {
 			"The master key (HOOKINLET_MASTER_KEY) must be the one the secrets were sealed under.\n"+
 			"  - If this is the wrong key, start again with the right one.\n"+
 			"  - If the key was rotated on purpose, re-seal the secrets under the new one:\n"+
-			"      hookinlet rekey --old-master-key OLD   (new key in HOOKINLET_MASTER_KEY)\n"+
+			"      HOOKINLET_OLD_MASTER_KEY=<the old key> hookinlet rekey   (new key in HOOKINLET_MASTER_KEY)\n"+
 			"  - If the old key is lost, set each affected secret again:\n"+
-			"      hookinlet inbox set-secret SLUG   (works in the data directory with the new key)\n", err)
+			"      hookinlet inbox set-secret SLUG --secret-stdin   (works in the data directory with the new key)\n", err)
 		return exitRuntime
 	}
 
