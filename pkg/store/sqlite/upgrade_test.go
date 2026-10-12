@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -483,4 +484,43 @@ func TestAMigrationRefusesWhileAnotherProcessHasTheDatabaseOpen(t *testing.T) {
 		t.Fatalf("once the other connection is gone: %v", err)
 	}
 	_ = s.Close()
+}
+
+// A database copied in with a wide mode (a restore with the usual umask) is made
+// private when it is opened, along with the files SQLite keeps beside it.
+func TestOpeningTightensTheModeOfADatabaseThatCameFromElsewhere(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes are not meaningful here")
+	}
+	dir := t.TempDir()
+	s, err := sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	db := filepath.Join(dir, sqlite.DBFileName)
+	for _, p := range []string{db, db + "-wal", db + "-shm"} {
+		if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
+			if err := os.WriteFile(p, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Chmod(p, 0o644); err != nil { //nolint:gosec // the point of the test: a wide mode
+			t.Fatal(err)
+		}
+	}
+	s, err = sqlite.Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	for _, p := range []string{db, db + "-wal", db + "-shm"} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			continue // SQLite removes them when the last connection closes
+		}
+		if fi.Mode().Perm()&0o077 != 0 {
+			t.Errorf("%s is %v", filepath.Base(p), fi.Mode().Perm())
+		}
+	}
 }
