@@ -210,7 +210,9 @@ API with the admin token: you type the token to sign in, and it stays in the pag
 you sign out or close the tab. It is on by default; `HOOKINLET_ADMIN_UI=false` turns it off, and it
 is absent whenever the admin API is. The page and its scripts are static files built into the
 binary; they are served under a content security policy that allows no inline script and no other
-origin, and message content is always shown as text. It adds no new way to change anything: whatever
+origin, and message content is always shown as text. It has an overview (inboxes, activity over the last day, the last retention run), a list of inboxes, and a page to
+issue and revoke agent tokens; it follows the system's light or dark theme, which can be switched from its sidebar.
+It adds no new way to change anything: whatever
 it does goes through the endpoints in this document. `GET /v1/admin/status` is the one endpoint it
 needed that did not exist (version, schema, database size, free space, last retention run).
 

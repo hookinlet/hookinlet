@@ -11,3 +11,35 @@ export function bytes(n: number): string {
   }
   return `${i === 0 ? v : v.toFixed(v < 10 ? 1 : 0)} ${UNITS[i]}`
 }
+
+// compact writes a count briefly: 4.2M, 88K, 341.
+export function compact(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '-'
+  if (n < 1000) return String(n)
+  const units: [number, string][] = [
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'K'],
+  ]
+  for (const [size, suffix] of units) {
+    if (n >= size) {
+      const v = n / size
+      return `${v < 10 ? v.toFixed(1).replace(/\.0$/, '') : Math.round(v)}${suffix}`
+    }
+  }
+  return String(n)
+}
+
+// ago writes how long before `now` a moment was: "just now", "14 min ago", "3 days ago".
+export function ago(then: Date | string, now: Date = new Date()): string {
+  const t = typeof then === 'string' ? new Date(then) : then
+  const s = Math.round((now.getTime() - t.getTime()) / 1000)
+  if (Number.isNaN(s)) return '-'
+  if (s < 5) return 'just now'
+  if (s < 60) return `${s} s ago`
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m} min ago`
+  const h = Math.round(m / 60)
+  if (h < 48) return `${h} h ago`
+  return `${Math.round(h / 24)} days ago`
+}
