@@ -239,6 +239,7 @@ func New(opts Options) (*Server, error) {
 	if opts.Verifiers == nil {
 		opts.Verifiers = verify.Default()
 	}
+	realClock := opts.Now == nil
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -305,7 +306,7 @@ func New(opts Options) (*Server, error) {
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),
 	}
-	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now, Log: opts.Logger}
+	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now, Log: opts.Logger, GuardClock: realClock}
 	if err := s.checkMCPTools(); err != nil {
 		return nil, err
 	}

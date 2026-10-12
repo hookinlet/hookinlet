@@ -60,6 +60,10 @@ type Service struct {
 	// Log receives a warning when the clock is found to have stepped forward. Defaults
 	// to discarding it.
 	Log *slog.Logger
+	// GuardClock turns on the check for a wall clock that has stepped forward (see
+	// retentionTime). It is meant for the real clock: a Now that is made up, as in a
+	// test, moves as it likes. It is also on whenever Monotonic is set.
+	GuardClock bool
 	// Monotonic reads a clock that does not step, as a duration from any fixed start.
 	// Defaults to the time since the process began. It exists for tests.
 	Monotonic func() time.Duration
@@ -479,7 +483,7 @@ func (s *Service) retentionTime() time.Time {
 	wall, mono := s.now(), s.monotonic()
 	prevWall, prevMono, had := s.lastWall, s.lastMono, s.haveLast
 	s.lastWall, s.lastMono, s.haveLast = wall, mono, true
-	if !had {
+	if !had || !(s.GuardClock || s.Monotonic != nil) {
 		return wall
 	}
 	// Round(0) drops time.Time's own monotonic reading, so Sub compares wall clocks.
