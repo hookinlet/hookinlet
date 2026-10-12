@@ -55,20 +55,17 @@ Everything below is the detail behind the summary above, phase by phase: what ch
 Go packages, the API, and the configuration, in the order it happened. The newest is first.
 
 ### Release review fixes
-
 - **A clock that jumps forward no longer makes retention delete messages early.** A retention run that
   finds the wall clock more than ten minutes ahead of the monotonic clock since the last run uses the time
   that really passed, and logs it; the next run accepts the clock as it reads.
 - **`/readyz` no longer fails for the whole server because one inbox's secret does not open.**
   It fails when the master key opens none of the stored secrets (a wrong key), and logs a warning
   naming the inboxes when only some do not open. Starting still refuses until they are fixed.
-
 - **Upgrading from rc.1: stop the old server first.** rc.1 takes no lock on the data directory, so
   a migration could run under it and leave message counts wrong. The migration now refuses when
   another process has the database open.
 - **An MCP `wait_for_messages` holds no read slot while it waits.** Idle waits could use up every
   slot and make reads answer 503; the slot is taken as the answer is returned.
-
 - **Changes to the public packages:** `sqlite.Open` applies migrations only when given
   `WithExclusiveLock()`; without it, a database that needs migrating fails with the new
   `*sqlite.NeedsMigrationError` (servers built on the package should pass the option, as
@@ -78,7 +75,6 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   `inboxtest.AuthenticatorSuite` requires `CanReadInbox(nil)` to be false and has a `Revoke`
   fixture field. `hookinlet backup --data-dir` on a database that needs migrating refuses: back
   up with the old binary first, or upgrade (a copy is kept).
-
 - **A command that does not hold the data-directory lock no longer migrates the database.** It
   refuses and says to stop the server and run `hookinlet migrate` (which takes the lock). Before,
   `inbox show` run with the new binary beside the old server upgraded the schema under it.
@@ -87,7 +83,6 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   place the copy was kept, and a copy that fails leaves no `-journal` behind.
 - **`/readyz` counts pages the database can reuse as room**, so it recovers after retention
   has freed space on a volume that is still nearly full.
-
 - **A client that asks for a big answer and never reads it can no longer pin memory.**
   Responses have a write deadline (`server.Options.ResponseTimeout`, 2 minutes), and a read slot
   is kept until the response has been written, so at most 16 pages are in flight (it was 16
