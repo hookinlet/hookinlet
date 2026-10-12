@@ -121,7 +121,7 @@ func TestMCPMessagesSeparateWhatTheSenderWrote(t *testing.T) {
 	}
 	// Exactly these are the server's; anything else at the top level would be a field
 	// the sender could have influenced, sitting where an agent trusts it.
-	server := map[string]bool{"seq": true, "epoch": true, "inbox": true, "received_at": true, "method": true, "size": true,
+	server := map[string]bool{"body_truncated": true, "seq": true, "epoch": true, "inbox": true, "received_at": true, "method": true, "size": true,
 		"verified": true, "verifier": true, "verify_error": true, "source_ip": true, "untrusted": true}
 	for k := range m {
 		if !server[k] {

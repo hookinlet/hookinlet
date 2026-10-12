@@ -20,6 +20,10 @@ applies.
   off where that makes sense (`RetentionInterval`, `IngestMemoryBudget`) and is an error
   everywhere else (it used to be taken as the default). `Addr` is only needed to `Run`.
 
+- The admin lists' `next` links carry the limit the page was cut with (clamped, or the
+  default), as the message lists' always did. `body_truncated` is a top-level field of an MCP
+  message: it is the server's flag, not something the sender wrote.
+
 #### Added
 - `docs/stability.md`: what is stable, what is not, how a change is announced, what an inbox
   identifier is, and where CORS, TLS and the Host check stand.

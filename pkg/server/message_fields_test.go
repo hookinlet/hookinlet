@@ -5,6 +5,7 @@ package server
 
 import (
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -48,8 +49,17 @@ func TestTheMessageTypesCarryTheSameFields(t *testing.T) {
 	// "untrusted" is the key that holds the sender's fields, not a field of the message.
 	mcp = slicesDelete(mcp, "untrusted")
 	// body_truncated is set only where a size cap applies, which the MCP tools set and
-	// the REST API never does; the REST document does not have it.
+	// the REST API never does; the REST document does not have it. In the MCP message
+	// it is a server flag and sits at the top level, which is checked here.
 	built, mcp = slicesDelete(built, "body_truncated"), slicesDelete(mcp, "body_truncated")
+	if !slices.Contains(jsonFields(reflect.TypeFor[mcpMessage]()), "body_truncated") {
+		t.Error("body_truncated must be a top-level, server-set field of the MCP message")
+	}
+	for _, n := range jsonFields(reflect.TypeFor[mcpUntrusted]()) {
+		if n == "body_truncated" {
+			t.Error("body_truncated is a server flag and must not sit under untrusted")
+		}
+	}
 	if !reflect.DeepEqual(rest, built) {
 		t.Errorf("the REST message and wire.Message differ:\n rest %v\n wire %v", rest, built)
 	}

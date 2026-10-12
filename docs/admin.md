@@ -28,7 +28,7 @@ The admin API is on the same address as ingest by default. Two settings take it
 off the internet:
 
 - `--admin-listen-addr 127.0.0.1:9090` serves it on its own address and nowhere
-  else; the public address answers `404` for `/admin/...`, and the admin address
+  else; the public address answers `404` for `/v1/admin/...`, and the admin address
   answers `404` for everything that is not admin. This moves the *admin API*; the
   admin token still reads every inbox through the read API and MCP on the public
   address, so keep it as secret as before and give agents their own tokens. Reach it over an SSH tunnel, a

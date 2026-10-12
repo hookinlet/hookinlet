@@ -4,12 +4,12 @@
 package inbox_test
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
+	"github.com/hookinlet/hookinlet/pkg/verify"
 )
 
 // These interfaces are implemented outside this module, so a method added to one
@@ -19,34 +19,69 @@ import (
 // so that the change is a decision and not an accident; before 1.0 a decision to
 // change one is allowed, and goes in CHANGELOG.md, and this list is updated with it.
 func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
+	// Each method with its signature: a changed parameter or result breaks every
+	// implementation as much as a new method does.
 	want := map[string][]string{
 		"Store": {
-			"Append", "Close", "CreateInbox", "CreateToken", "DeleteInbox", "DeleteToken", "Get", "GetInbox", "GetInboxBySlug",
-			"GetTokenByHash", "LatestSeq", "ListInboxes", "ListTokens", "Ping", "Prune", "Query", "ResolveIngestKey",
-			"Stats", "UpdateInbox",
+			"Append(context.Context, inbox.ID, *inbox.NewMessage) (*inbox.Message, bool, error)",
+			"Close() error",
+			"CreateInbox(context.Context, *inbox.Inbox) error",
+			"CreateToken(context.Context, *inbox.Token) error",
+			"DeleteInbox(context.Context, inbox.ID) error",
+			"DeleteToken(context.Context, inbox.TokenID) error",
+			"Get(context.Context, inbox.ID, int64) (*inbox.Message, error)",
+			"GetInbox(context.Context, inbox.ID) (*inbox.Inbox, error)",
+			"GetInboxBySlug(context.Context, string) (*inbox.Inbox, error)",
+			"GetTokenByHash(context.Context, []uint8) (*inbox.Token, error)",
+			"LatestSeq(context.Context, inbox.ID) (int64, error)",
+			"ListInboxes(context.Context, inbox.ListParams) ([]*inbox.Inbox, error)",
+			"ListTokens(context.Context, inbox.TokenListParams) ([]*inbox.Token, error)",
+			"Ping(context.Context) error",
+			"Prune(context.Context, time.Time) (int64, error)",
+			"Query(context.Context, inbox.ID, inbox.Query) (*inbox.Page, error)",
+			"ResolveIngestKey(context.Context, string) (*inbox.Inbox, error)",
+			"Stats(context.Context, inbox.ID) (*inbox.InboxStats, error)",
+			"UpdateInbox(context.Context, *inbox.Inbox) error",
 		},
-		"Hooks":         {"AfterIngest", "BeforeIngest"},
-		"SecretBox":     {"Open", "Seal"},
-		"Authenticator": {"Authenticate"},
-		"Principal":     {"CanAdmin", "CanReadInbox"},
-		"Notifier":      {"Publish", "Subscribe"},
+		"Hooks": {
+			"AfterIngest(context.Context, *inbox.Inbox, *inbox.Message, bool)",
+			"BeforeIngest(context.Context, *inbox.IngestRequest) error",
+		},
+		"SecretBox": {
+			"Open([]uint8, []uint8) ([]uint8, error)",
+			"Seal([]uint8, []uint8) ([]uint8, error)",
+		},
+		"Authenticator": {"Authenticate(*http.Request) (inbox.Principal, error)"},
+		"Principal":     {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool"},
+		"Notifier": {
+			"Publish(context.Context, inbox.ID, int64)",
+			"Subscribe(context.Context, inbox.ID) (<-chan struct {}, func())",
+		},
+		// The optional interfaces are part of the surface too.
+		"Backupper":       {"Backup(context.Context) (io.ReadCloser, int64, error)"},
+		"ScopedPrincipal": {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "InboxIDs() []inbox.ID"},
+		"Verifier":        {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
 	}
 	got := map[string]reflect.Type{
-		"Store":         reflect.TypeFor[inbox.Store](),
-		"Hooks":         reflect.TypeFor[inbox.Hooks](),
-		"SecretBox":     reflect.TypeFor[inbox.SecretBox](),
-		"Authenticator": reflect.TypeFor[inbox.Authenticator](),
-		"Principal":     reflect.TypeFor[inbox.Principal](),
-		"Notifier":      reflect.TypeFor[inbox.Notifier](),
+		"Store":           reflect.TypeFor[inbox.Store](),
+		"Hooks":           reflect.TypeFor[inbox.Hooks](),
+		"SecretBox":       reflect.TypeFor[inbox.SecretBox](),
+		"Authenticator":   reflect.TypeFor[inbox.Authenticator](),
+		"Principal":       reflect.TypeFor[inbox.Principal](),
+		"Notifier":        reflect.TypeFor[inbox.Notifier](),
+		"Backupper":       reflect.TypeFor[inbox.Backupper](),
+		"ScopedPrincipal": reflect.TypeFor[inbox.ScopedPrincipal](),
+		"Verifier":        reflect.TypeFor[verify.Verifier](),
 	}
 	for name, typ := range got {
 		var methods []string
 		for m := range typ.Methods() {
-			methods = append(methods, m.Name)
+			sig := strings.TrimPrefix(m.Type.String(), "func")
+			methods = append(methods, m.Name+sig)
 		}
-		if strings.Join(methods, ",") != strings.Join(want[name], ",") {
-			t.Errorf("inbox.%s changed:\n got  %s\n want %s\nAdd a capability as a new optional interface instead (docs/stability.md); if this change is deliberate, say so in CHANGELOG.md and update this list.",
-				name, fmt.Sprint(methods), fmt.Sprint(want[name]))
+		if strings.Join(methods, "\n") != strings.Join(want[name], "\n") {
+			t.Errorf("%s changed:\n got:\n  %s\n want:\n  %s\nAdd a capability as a new optional interface instead (docs/stability.md); if this change is deliberate, say so in CHANGELOG.md and update this list.",
+				name, strings.Join(methods, "\n  "), strings.Join(want[name], "\n  "))
 		}
 	}
 }

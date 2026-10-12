@@ -46,7 +46,7 @@ func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(
 type applyEnv struct {
 	url    string
 	logs   *syncBuf
-	writes *atomic.Int64 // POST, PUT, PATCH, DELETE to /admin
+	writes *atomic.Int64 // POST, PUT, PATCH, DELETE to /v1/admin
 	t      *testing.T
 	dir    string
 }

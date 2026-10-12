@@ -244,7 +244,11 @@ func TestQueryFiltersAndDirections(t *testing.T) {
 
 	// Messages come without bodies unless asked.
 	p = callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "limit": 1}).page(t)
-	if _, has := p.Messages[0]["untrusted"].(map[string]any)["body"]; has {
+	u, ok := p.Messages[0]["untrusted"].(map[string]any)
+	if !ok {
+		t.Fatalf("no untrusted object: %v", p.Messages[0])
+	}
+	if _, has := u["body"]; has {
 		t.Errorf("a default query carried a body: %v", p.Messages[0])
 	}
 }
@@ -343,16 +347,16 @@ func TestBodiesOverTheInlineLimitAreTruncatedAndFetchableWhole(t *testing.T) {
 
 	whole := callTool(t, cs, "get_message", map[string]any{"inbox": "agent-a", "seq": 2})
 	var m struct {
-		Untrusted struct {
-			Body          map[string]string `json:"body"`
-			BodyTruncated bool              `json:"body_truncated"`
+		BodyTruncated bool `json:"body_truncated"`
+		Untrusted     struct {
+			Body map[string]string `json:"body"`
 		} `json:"untrusted"`
 	}
 	if err := json.Unmarshal(whole.raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m.Untrusted.BodyTruncated || m.Untrusted.Body["data"] != strings.Repeat("z", 5000) {
-		t.Errorf("get_message must return the full body (truncated=%v, %d bytes)", m.Untrusted.BodyTruncated, len(m.Untrusted.Body["data"]))
+	if m.BodyTruncated || m.Untrusted.Body["data"] != strings.Repeat("z", 5000) {
+		t.Errorf("get_message must return the full body (truncated=%v, %d bytes)", m.BodyTruncated, len(m.Untrusted.Body["data"]))
 	}
 }
 
@@ -1101,7 +1105,7 @@ func TestResultsAreBoundedByWhatIsSentNotWhatIsStored(t *testing.T) {
 	}
 	call := func(after int64) (int, mcpPage) {
 		status, _, resp := mcpPost(t, base, ae.tokenA, fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_messages","arguments":{"inbox":"agent-a","after":%d,"limit":100}}}`, after))
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_messages","arguments":{"inbox":"agent-a","after":%d,"limit":100,"bodies":true}}}`, after))
 		if status != http.StatusOK {
 			t.Fatalf("status %d: %.200s", status, resp)
 		}
@@ -1151,10 +1155,14 @@ func TestAMessageTooBigToReturnIsFetchedOverREST(t *testing.T) {
 	if o := callTool(t, cs, "get_message", map[string]any{"inbox": "agent-a", "seq": 2}); o.err != "" {
 		t.Errorf("a small message was refused: %s", o.err)
 	}
-	// It is still in a page, whole, as the only message that fits.
-	p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0}).page(t)
+	// It is still in a page, as the only message that fits, and with bodies it is
+	// marked as too big to include (it is over the inline limit).
+	p := callTool(t, cs, "query_messages", map[string]any{"inbox": "agent-a", "after": 0, "bodies": true}).page(t)
 	if len(p.Messages) == 0 || seqsOf(p.Messages)[0] != 1 {
-		t.Errorf("the first message must still be deliverable in a page: %v", seqsOf(p.Messages))
+		t.Fatalf("the first message must still be deliverable in a page: %v", seqsOf(p.Messages))
+	}
+	if p.Messages[0]["body_truncated"] != true {
+		t.Errorf("a body over the inline limit must be flagged: %v", p.Messages[0])
 	}
 }
 
@@ -1342,4 +1350,38 @@ func flattenUntrusted(ms []map[string]any) []map[string]any {
 		out[i] = flat
 	}
 	return out
+}
+
+// Reading backward is trimmed to the same budget, and the cursor to continue from
+// is the oldest message kept.
+func TestABackwardReadIsTrimmedToTheBudgetToo(t *testing.T) {
+	ae, base, _ := mcpEnv(t, func(o *Options) { o.MCPInlineBodyBytes = 16 << 10 })
+	body := strings.Repeat("<", 15<<10)
+	const total = 30
+	for range total {
+		ae.post("/in/agent-a", body, "Content-Type", "text/plain")
+	}
+	status, _, resp := mcpPost(t, base, ae.tokenA, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_messages","arguments":{"inbox":"agent-a","limit":100,"bodies":true}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+	if len(resp) > mcpResultBudget+(64<<10) {
+		t.Errorf("a result of %d bytes, over the %d byte budget", len(resp), mcpResultBudget)
+	}
+	var env struct {
+		Result struct {
+			StructuredContent mcpPage `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(resp), &env); err != nil {
+		t.Fatal(err)
+	}
+	p := env.Result.StructuredContent
+	if len(p.Messages) == 0 || len(p.Messages) >= total {
+		t.Fatalf("%d messages: it was not trimmed, or nothing is left", len(p.Messages))
+	}
+	oldest := seqsOf(p.Messages)[len(p.Messages)-1]
+	if p.NextBefore == nil || *p.NextBefore != oldest {
+		t.Errorf("next_before = %v, want the oldest message kept (%d)", p.NextBefore, oldest)
+	}
 }

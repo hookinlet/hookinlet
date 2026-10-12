@@ -35,7 +35,8 @@ import (
 // rule for the rest is one: a zero value means the documented default; a negative
 // number turns a bound or a schedule off where that makes sense (RetentionInterval,
 // IngestMemoryBudget) and is an error everywhere else; New reports a contradictory or
-// out-of-range option, and does no I/O.
+// out-of-range option (MCPInlineBodyBytes is clamped to its maximum instead), and does no
+// I/O.
 type Options struct {
 	// Addr is the TCP address Run listens on, for example ":8080". It is not needed
 	// to Serve on a listener you made, or to mount Handler() in your own http.Server.
@@ -497,8 +498,8 @@ func (s *Server) retentionLoop() {
 // http.Server of your own, or the sweep never runs. It does nothing if the schedule
 // is off (a negative RetentionInterval). It returns when it stops.
 func (s *Server) Maintain(ctx context.Context) {
-	if s.opts.RetentionInterval < 0 {
-		return
+	if s.opts.RetentionInterval < 0 || s.closeCtx.Err() != nil || ctx.Err() != nil {
+		return // nothing to do, or the server is already shut down and its Store may be closing
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

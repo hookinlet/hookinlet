@@ -5,7 +5,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -429,5 +431,36 @@ func TestMaintainRunsTheRetentionScheduleWithoutServe(t *testing.T) {
 	case <-returned:
 	case <-time.After(time.Second):
 		t.Error("Maintain with the schedule off did not return at once")
+	}
+}
+
+// The next link of an admin list says the limit the page was cut with, which is the
+// one asked for only if it was within the maximum.
+func TestAnAdminNextLinkCarriesTheEffectiveLimit(t *testing.T) {
+	a := newAdminEnv(t)
+	for i := range 1005 {
+		slug := fmt.Sprintf("bulk-%04d", i)
+		if err := a.store.CreateInbox(t.Context(), &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: "none"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := func(query string) string {
+		var page struct {
+			Next *string `json:"next"`
+		}
+		_ = json.Unmarshal(a.mustAdmin("GET", "/v1/admin/inboxes"+query, nil, 200), &page)
+		if page.Next == nil {
+			return ""
+		}
+		return *page.Next
+	}
+	for query, want := range map[string]string{
+		"?limit=5000": "&limit=1000", // clamped to the maximum
+		"?limit=7":    "&limit=7",
+		"":            "&limit=100", // the default
+	} {
+		if got := next(query); !strings.HasSuffix(got, want) {
+			t.Errorf("GET /v1/admin/inboxes%s: next = %q, want it to end in %q", query, got, want)
+		}
 	}
 }

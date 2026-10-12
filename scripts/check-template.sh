@@ -12,15 +12,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-version=$(sed -n 's|.*oapi-codegen/v2/cmd/oapi-codegen@\(v[0-9.]*\).*|\1|p' internal/api/generate.go | head -1)
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+
+version=$(sed -n 's|.*oapi-codegen/v2/cmd/oapi-codegen@\(v[^ ]*\) .*|\1|p' internal/api/generate.go | head -1)
 [ -n "$version" ] || { echo "check-template: cannot find the generator version in internal/api/generate.go" >&2; exit 2; }
 
-dir=$(cd "$(mktemp -d)" && GOFLAGS=-mod=mod go mod download -json "github.com/oapi-codegen/oapi-codegen/v2@$version" | sed -n 's/.*"Dir": "\(.*\)",/\1/p')
+dir=$(cd "$scratch" && GOFLAGS=-mod=mod go mod download -json "github.com/oapi-codegen/oapi-codegen/v2@$version" | sed -n 's/.*"Dir": "\(.*\)",/\1/p')
 upstream="$dir/pkg/codegen/templates/strict/strict-interface.tmpl"
 [ -f "$upstream" ] || { echo "check-template: no template at $upstream" >&2; exit 2; }
 
-actual=$(mktemp)
-diff "$upstream" internal/api/templates/strict-interface.tmpl > "$actual" || true   # 1 = they differ, as expected
+actual="$scratch/actual.diff"
+rc=0
+diff "$upstream" internal/api/templates/strict-interface.tmpl > "$actual" || rc=$?
+[ "$rc" -le 1 ] || { echo "check-template: diff failed (exit $rc)" >&2; exit 2; }   # 1 = they differ, as expected
 
 if [ "${1:-}" = "--update" ]; then
   cp "$actual" internal/api/templates/strict-interface.tmpl.diff

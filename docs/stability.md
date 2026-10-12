@@ -9,9 +9,13 @@ every change that touches it is written down.
 The read API, the stream, the admin API and ingest are described by one document,
 [`openapi.json`](openapi.json), which the server is tested against: every response it
 can give is in the document, and every response in the document is given by a test.
-Paths carry the major version (`/v1/...`; ingest, `/in/...`, and the health checks
-and `/metrics` are not versioned because they are not an API that clients are
-written against). A breaking change to `/v1` would be `/v2`, served beside it.
+Paths carry the major version (`/v1/...`). Ingest (`/in/...`), the health checks,
+`/metrics` and `/mcp` are not versioned in the path: ingest is what senders are
+configured with and does not change shape, the health checks and metrics are for
+platforms, and MCP is versioned by its own protocol and its tool names. Until 1.0 a
+breaking change is made in place, as a minor version with a CHANGELOG entry (this is
+how the admin API came to be under `/v1/admin`); from 1.0, a breaking change to `/v1`
+would be `/v2`, served beside it.
 
 **Not breaking** (clients must be ready for them):
 
@@ -33,7 +37,8 @@ meant success meaning failure.
 ### What the server is strict about
 
 - **Unknown query parameters are an error** (`400`), as are repeated ones and a
-  malformed query string, on every operation. A typo does not quietly get the default
+  malformed query string, on every operation but ingest, which stores the query
+  string with the message. A typo does not quietly get the default
   page. This will not be relaxed, and it is why a new optional parameter is not a
   breaking change: nobody could have been sending it.
 - **Unknown fields in a request body are an error**, and so is anything after the JSON.
@@ -51,8 +56,8 @@ past a restore; a `409 epoch_changed` is the server telling you to start again.
 
 Inboxes are named by their **slug** everywhere a client reads or acts: the read API,
 the stream, MCP and the CLI. The admin API also shows a numeric `id`, which is the
-order in which inboxes were created, is never reused, and is what the admin list's
-`after` cursor counts. Do not build on it beyond that: it is an internal key, and an
+order in which inboxes were created, is never reused within a database (a database restored from an older backup hands out
+the ids it had then again), and is what the admin list's `after` cursor counts. Do not build on it beyond that: it is an internal key, and an
 embedder's Store may hand out another kind. Tokens have a numeric `id` for the same
 reason (to revoke one, and to page through them). An **ingest key** is not an
 identifier but a capability: treat it like a password for senders.
@@ -86,8 +91,8 @@ applies. Anything under `internal/` is not.
 `inbox.Authenticator`, `inbox.Principal` and `inbox.Notifier` do not gain methods once
 they are 1.0: a new capability is a new, small interface that an implementation may
 also satisfy, found by a type assertion (as `Backupper` and `ScopedPrincipal` are), with
-the server falling back to what it did before. A test fails when one of those method
-sets changes, so the change cannot be an accident. A conformance suite for a new
+the server falling back to what it did before. A test fails when the methods of one of those
+interfaces, their names or their signatures, change, so the change cannot be an accident. A conformance suite for a new
 interface ships with it, and a behaviour that is in no suite is not part of the
 contract.
 

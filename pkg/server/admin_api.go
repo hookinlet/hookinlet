@@ -227,10 +227,9 @@ func (a *adminAPI) ListInboxes(ctx context.Context, req api.ListInboxesRequestOb
 		out.Inboxes[i] = view(v, base)
 	}
 	if next != 0 {
-		n := "/v1/admin/inboxes?after=" + strconv.FormatInt(int64(next), 10)
-		if limit > 0 {
-			n += "&limit=" + strconv.Itoa(limit)
-		}
+		// The limit the page was cut with: what was asked, clamped, or the default.
+		n := "/v1/admin/inboxes?after=" + strconv.FormatInt(int64(next), 10) +
+			"&limit=" + strconv.Itoa(inbox.ListParams{Limit: limit}.EffectiveLimit())
 		out.Next = &n
 	}
 	return api.ListInboxes200JSONResponse{Body: out, Headers: api.ListInboxes200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
@@ -358,9 +357,7 @@ func (a *adminAPI) ListTokens(ctx context.Context, req api.ListTokensRequestObje
 	}
 	if next != 0 {
 		q := url.Values{"after": {strconv.FormatInt(int64(next), 10)}}
-		if limit > 0 {
-			q.Set("limit", strconv.Itoa(limit))
-		}
+		q.Set("limit", strconv.Itoa(inbox.TokenListParams{Limit: limit}.EffectiveLimit()))
 		if slug != "" {
 			q.Set("inbox", slug)
 		}

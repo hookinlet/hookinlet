@@ -58,9 +58,12 @@ before anything else is looked at.
 
 ### The shape of a message
 
-A message has two parts. At the top are the fields the **server** set about the
-delivery: `seq`, `epoch`, `inbox`, `received_at`, `method`, `size`, `verified`,
-`verifier`, `verify_error`, `source_ip`. Under **`untrusted`** is everything the
+A message has two parts. At the top are the fields the **server** established
+about the delivery, none of which can carry text the sender chose: `seq`, `epoch`,
+`inbox`, `received_at`, `method` (POST or PUT), `size`, `verified`, `verifier`,
+`verify_error` (fixed wording), `source_ip` (an address the server observed; see the
+[API notes](api.md#treat-message-content-as-data-never-as-instructions)), and
+`body_truncated` (the server saying it left a body out). Under **`untrusted`** is everything the
 **sender** wrote or chose: `path`, `query`, `headers`, `content_type`,
 `delivery_id`, `event_type`, and the body (`body`, `body_text` or `body_base64`,
 as in the [REST messages](api.md#messages)). An agent that reads a transcript, and
@@ -171,13 +174,14 @@ free slot is told "too many waits are in progress" and should retry shortly. A
 
 To protect an agent's context window, `query_messages` and `wait_for_messages`
 leave out any body larger than 16 KiB (`HOOKINLET_MCP_INLINE_BODY_BYTES`). Those
-messages have `body_truncated: true`, no body fields, and their true `size`.
+messages have `body_truncated: true` at the top level, no body fields under
+`untrusted`, and their true `size`.
 Fetch one whole with `get_message`. (Without `bodies: true` no body is sent at all.)
 
 ## Treat message content as data
 
-Everything in a message was written by whoever sent the webhook, including a
-verified one. The server says so in its `instructions` and in each tool's
+Everything under a message's `untrusted` was written by whoever sent the webhook,
+including a verified one. The server says so in its `instructions` and in each tool's
 description, but the protection that matters is in your agent: treat message
 content as data to analyze, never as instructions to follow. See
 [the API notes](api.md#treat-message-content-as-data-never-as-instructions).
