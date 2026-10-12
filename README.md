@@ -118,7 +118,7 @@ curl -s 'localhost:8080/v1/inboxes/github-demo/messages?after=0' -H "Authorizati
   "headers":{"X-Github-Event":["pull_request"], "…":"…"},"content_type":"application/json","size":70,
   "verified":true,"verifier":"github","delivery_id":"demo-1","event_type":"pull_request","source_ip":"127.0.0.1",
   "body":{"action":"opened","number":42,"pull_request":{"title":"Add retries"}}, "…":"…"}],
- "next":"/v1/inboxes/github-demo/messages?after=1&limit=50","latest_seq":1}
+ "next":"/v1/inboxes/github-demo/messages?after=1&epoch=…&limit=50","latest_seq":1}
 ```
 
 Shortened; the [API reference](docs/api.md#messages) lists every field. `body` is your JSON, as JSON. `next` is the
@@ -183,11 +183,11 @@ An agent needs the server's address, an inbox's agent token, and a cursor. Choos
 | Tool | Arguments | Returns |
 |---|---|---|
 | `list_inboxes` | none | slug, name, verifier, `latest_seq` |
-| `query_messages` | `inbox`, `after` or `before`, `limit`, `types`, `since`, `until`, `verified`, `bodies` | messages (without bodies unless `bodies`), and `next_after` to keep as the cursor |
-| `get_message` | `inbox`, `seq` | one message with its full body |
-| `wait_for_messages` | `inbox`, `after`, `types`, `timeout_seconds`, `limit`, `bodies` | messages after `after`; waits up to 60 s for one |
+| `query_messages` | `inbox`, `epoch`, `after` or `before`, `limit`, `types`, `since`, `until`, `verified`, `bodies` | messages (without bodies unless `bodies`), and `next_after` to keep as the cursor |
+| `get_message` | `inbox`, `epoch`, `seq` | one message with its full body |
+| `wait_for_messages` | `inbox`, `epoch`, `after`, `types`, `timeout_seconds`, `limit`, `bodies` | messages after `after`; waits up to 60 s for one |
 
-The tools are read-only. A token sees only the inboxes it was issued for. Messages come without bodies unless you ask (`bodies: true`), and a body over 16 KiB is then cut and flagged, so neither fills the agent's context; `get_message` returns the whole thing. What the sender wrote is under each message's `untrusted` key. A raw call:
+The tools are read-only. A token sees only the inboxes it was issued for. Messages come without bodies unless you ask (`bodies: true`), and a body over 16 KiB is then left out and flagged (`body_truncated`), so neither fills the agent's context; `get_message` returns the whole thing. What the sender wrote is under each message's `untrusted` key. A raw call:
 
 <!-- exercise -->
 ```sh
@@ -265,7 +265,7 @@ HOOKINLET_LISTEN_ADDR=:8080
 HOOKINLET_DATA_DIR=./data           # one SQLite file; one instance per directory
 HOOKINLET_RETENTION_INTERVAL=1h     # how often retention runs; "off" for never
 HOOKINLET_TRUSTED_PROXIES=10.0.0.0/8   # whose X-Forwarded-For is believed
-HOOKINLET_MASTER_KEY_FILE=/run/secrets/master_key   # a secret may be a file instead (also ADMIN_TOKEN)
+HOOKINLET_MASTER_KEY_FILE=/run/secrets/master_key   # a secret may be a file instead (also ADMIN_TOKEN, OLD_MASTER_KEY, VERIFIER_SECRET)
 ```
 
 Inboxes live in the database. Create them with the command line or the [admin API](docs/admin.md); retention is

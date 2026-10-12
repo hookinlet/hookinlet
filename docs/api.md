@@ -100,7 +100,7 @@ secret is ever included.
       "body": {"id": "evt_1NXWPnCo6bFb1KQto6C8OWvE", "type": "invoice.paid"}
     }
   ],
-  "next": "/v1/inboxes/stripe-prod/messages?after=1234&limit=50",
+  "next": "/v1/inboxes/stripe-prod/messages?after=1234&epoch=…&limit=50",
   "latest_seq": 1240
 }
 ```
@@ -280,8 +280,8 @@ data: {...}
 
 - **`id`** is the message's `seq`. **`data`** is the same JSON object the REST API
   returns for that message, on one line.
-- **`event: gap`** is sent at most once, first, when the stream was asked to start
-  after a position that retention has since passed (see [Epochs and gaps](#epochs-and-gaps)).
+- **`event: gap`** is sent whenever retention has removed messages after the stream's
+  position, at the start or later (see [Epochs and gaps](#epochs-and-gaps)).
   Its data is `{"after": 10, "oldest_seq": 40, "epoch": "…"}`: messages between them
   were removed before you read them. It has no `id`, so it does not move
   `Last-Event-ID`; the messages that are left follow.
@@ -435,8 +435,8 @@ delivery returns the `seq` of the message that is already stored.
 
 ```
 GET /healthz   200 {"status": "ok"}     the process is up
-GET /readyz    200 {"status": "ready"}  the store is reachable
-               503 {"error": {"code": "not_ready", ...}} it is not
+GET /readyz    200 {"status": "ready"}  the store is reachable, there is room, secrets open
+               503 {"error": {"code": "not_ready", ...}} it is not, or it is draining or shutting down
 ```
 
 Neither requires authentication. Use `/healthz` for liveness checks and

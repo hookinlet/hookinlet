@@ -8,3 +8,9 @@ published by the Free Software Foundation. See the LICENSE file.
 This program is distributed in the hope that it will be useful, but WITHOUT
 ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 FOR A PARTICULAR PURPOSE.
+
+internal/api/templates/strict-interface.tmpl is a modified copy of a template from
+oapi-codegen v2.8.0 (github.com/oapi-codegen/oapi-codegen), Copyright the oapi-codegen
+authors, licensed under the Apache License, Version 2.0, which is in
+internal/api/LICENSE.oapi-codegen. The changes are recorded in
+internal/api/templates/strict-interface.tmpl.diff.

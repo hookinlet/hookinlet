@@ -99,8 +99,29 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 			t.Fatal(err)
 		}
 
+		scoped := &inbox.Token{Name: "scoped", Hash: []byte("backup-hash-scoped-token-00000001"), InboxIDs: []inbox.ID{a.ID}}
+		everything := &inbox.Token{Name: "everything", Hash: []byte("backup-hash-all-tokens-0000000002"), AllInboxes: true}
+		for _, tok := range []*inbox.Token{scoped, everything} {
+			if err := s.CreateToken(ctx, tok); err != nil {
+				t.Fatal(err)
+			}
+		}
+
 		r := restore(t, take(t, s))
 		defer func() { _ = r.Close() }()
+		for _, want := range []*inbox.Token{scoped, everything} {
+			got, err := r.GetTokenByHash(ctx, want.Hash)
+			if err != nil {
+				t.Fatalf("token %q after restore: %v", want.Name, err)
+			}
+			if got.ID != want.ID || got.Name != want.Name || got.AllInboxes != want.AllInboxes || !reflect.DeepEqual(got.InboxIDs, want.InboxIDs) {
+				t.Errorf("token %q differs after restore:\n got  %+v\n want %+v", want.Name, got, want)
+			}
+		}
+		// A delivery that was stored before the snapshot is still a duplicate.
+		if m, created, err := r.Append(ctx, a.ID, &inbox.NewMessage{Method: "POST", Body: []byte("again"), Verified: true, DeliveryID: "d0"}); err != nil || created || m.Seq != 1 {
+			t.Errorf("a repeated delivery after restore: seq %v, created %v, %v; want the original, not created", m, created, err)
+		}
 		for _, created := range []*inbox.Inbox{a, b} {
 			want, err := s.GetInboxBySlug(ctx, created.Slug) // as it is now, with its LastSeq
 			if err != nil {

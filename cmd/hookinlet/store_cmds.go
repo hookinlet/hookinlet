@@ -29,6 +29,7 @@ const verifierSecretEnv = config.EnvPrefix + "VERIFIER_SECRET"
 // and reports the schema version.
 func migrateCmd(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet migrate", flag.ContinueOnError)
+	usageWith(fs, "hookinlet migrate [flags]")
 	fs.SetOutput(stderr)
 	resolve := config.AddDataFlags(fs, getenv)
 	if code, done := parseFlags(fs, args, stderr); done {
@@ -65,9 +66,10 @@ func migrateCmd(args []string, getenv func(string) string, stdout, stderr io.Wri
 // release up to the current layout. Stop the server first.
 func rekeyCmd(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet rekey", flag.ContinueOnError)
+	usageWith(fs, "hookinlet rekey [flags]")
 	fs.SetOutput(stderr)
 	resolve := config.AddDataFlags(fs, getenv)
-	oldKey := fs.String("old-master-key", "", "the master key the secrets are sealed under now (prefer the environment variable "+config.EnvPrefix+"OLD_MASTER_KEY: flags are visible in process listings); default: the master key")
+	oldKey := fs.String("old-master-key", "", "the master key the secrets are sealed under now (prefer the environment variable "+config.EnvPrefix+"OLD_MASTER_KEY: flags are visible in process listings); default: the master key [env "+config.EnvPrefix+"OLD_MASTER_KEY]")
 	if code, done := parseFlags(fs, args, stderr); done {
 		return code
 	}
@@ -132,6 +134,7 @@ func rekeyCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 // backup` and GET /v1/admin/backup already have new epochs. Stop the server first.
 func renewEpochsCmd(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet renew-epochs", flag.ContinueOnError)
+	usageWith(fs, "hookinlet renew-epochs [flags]")
 	fs.SetOutput(stderr)
 	resolve := config.AddDataFlags(fs, getenv)
 	if code, done := parseFlags(fs, args, stderr); done {

@@ -56,6 +56,7 @@ func tokenCmd(args []string, getenv func(string) string, stdout, stderr io.Write
 
 func tokenCreate(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet token create", flag.ContinueOnError)
+	usageWith(fs, "hookinlet token create --name NAME [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	name := fs.String("name", "", "a name for people to tell tokens apart by (required)")
@@ -108,6 +109,7 @@ func describeScope(t admin.TokenView) string {
 
 func tokenList(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet token list", flag.ContinueOnError)
+	usageWith(fs, "hookinlet token list [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	slug := fs.String("inbox", "", "only the tokens that can read this inbox")
@@ -150,6 +152,7 @@ func tokenList(args []string, getenv func(string) string, stdout, stderr io.Writ
 
 func tokenRevoke(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet token revoke", flag.ContinueOnError)
+	usageWith(fs, "hookinlet token revoke ID [flags]")
 	fs.SetOutput(stderr)
 	c := addConn(fs, getenv)
 	// The id comes first, then any flags.

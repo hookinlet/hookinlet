@@ -26,6 +26,12 @@ func TestConformance(t *testing.T) {
 			t.Fatal(err)
 		}
 		return box
+	}, func(t *testing.T) inbox.SecretBox {
+		box, err := secretbox.New(key(2))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return box
 	})
 }
 

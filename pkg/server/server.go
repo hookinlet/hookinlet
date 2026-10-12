@@ -413,6 +413,13 @@ func (s *Server) ServeAdmin(ctx context.Context, ln, adminLn net.Listener) error
 }
 
 func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
+	if s.closeCtx.Err() != nil {
+		_ = ln.Close()
+		if adminLn != nil {
+			_ = adminLn.Close()
+		}
+		return errors.New("server: a Server cannot be started again after Shutdown; make a new one")
+	}
 	errCh := make(chan error, 2)
 	go func() { errCh <- s.http.Serve(ln) }()
 	s.log.Info("listening", "addr", ln.Addr().String())

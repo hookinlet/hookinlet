@@ -31,7 +31,10 @@ that the process answers.
 func healthcheckCmd(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("hookinlet healthcheck", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprint(stderr, healthcheckUsage) }
+	fs.Usage = func() {
+		fmt.Fprint(stderr, healthcheckUsage)
+		fs.PrintDefaults()
+	}
 	base := fs.String("url", "", "address of the server, such as http://127.0.0.1:8080 (default: this machine, at "+config.EnvPrefix+"LISTEN_ADDR)")
 	timeout := fs.Duration("timeout", 3*time.Second, "how long to wait for an answer")
 	live := fs.Bool("live", false, "check /healthz (the process answers) and not /readyz (it is ready for work)")

@@ -7,8 +7,8 @@ bodies, tokens or secrets. `docker logs hookinlet` is the first place to look.
 ## The server refuses to start
 
 **`invalid configuration`** lists every setting that is wrong, all at once. The
-admin token must be at least 32 characters, with no whitespace and not mostly one
-repeated character (`openssl rand -base64 32` makes a good one). The master key must be
+admin token must be at least 32 characters, with no whitespace and at least 10
+different characters (`openssl rand -base64 32` makes a good one). The master key must be
 base64 for exactly 32 bytes (the same command).
 
 **`stored verifier secrets cannot be opened` / `refusing to start`.** The master key is
@@ -24,7 +24,7 @@ If the old key is lost, nothing can recover those secrets: set each again with
 `hookinlet inbox set-secret SLUG` (it works in the data directory with the new key).
 
 **`another hookinlet process (process N) holds the lock on this data directory`.** A second server,
-or `rekey` or `renew-epochs`, is running against the same directory. Stop the other
+or `migrate`, `rekey` or `renew-epochs`, is running against the same directory. Stop the other
 one. Two servers must never share a directory.
 
 **`permission denied` on the data directory** (Docker). The image runs as uid 65532. Use

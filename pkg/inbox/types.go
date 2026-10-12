@@ -177,6 +177,9 @@ func (in *Inbox) ApplyDefaults() {
 // Validate checks the inbox's fields. Errors wrap ErrInvalid. Call
 // ApplyDefaults first.
 func (in *Inbox) Validate() error {
+	if in == nil {
+		return Invalidf("inbox is required")
+	}
 	switch {
 	case !ValidSlug(in.Slug):
 		return Invalidf("slug must be 3-64 characters from a-z, 0-9, and hyphen")
@@ -251,6 +254,9 @@ type NewMessage struct {
 
 // Validate checks the fields a Store cannot sensibly default.
 func (m *NewMessage) Validate() error {
+	if m == nil {
+		return Invalidf("message is required")
+	}
 	if m.Method == "" {
 		return Invalidf("method is required")
 	}
@@ -432,6 +438,9 @@ type Token struct {
 // Validate checks the fields a Store cannot sensibly default. Errors wrap
 // ErrInvalid.
 func (t *Token) Validate() error {
+	if t == nil {
+		return Invalidf("token is required")
+	}
 	switch {
 	case t.Name == "" || !utf8.ValidString(t.Name) || utf8.RuneCountInString(t.Name) > MaxTokenNameLen:
 		return Invalidf("token name must be 1-%d characters of valid UTF-8", MaxTokenNameLen)

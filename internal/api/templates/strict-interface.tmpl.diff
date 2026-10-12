@@ -1,6 +1,8 @@
-90c90
+0a1
+> {{/* Derived from oapi-codegen v2.8.0, pkg/codegen/templates/strict/strict-interface.tmpl, Copyright the oapi-codegen authors, Apache License 2.0 (internal/api/LICENSE.oapi-codegen). Modified: the JSON response encoding and Content-Length (see strict-interface.tmpl.diff). */}}
+90c91
 <                     if err := json.NewEncoder(&buf).Encode(response{{if $hasBodyVar}}.Body{{end}}{{if and $hasUnionElements (not .Schema.IsExternalRef)}}.union{{end}}); err != nil {
 ---
 >                     if err := encodeJSON(&buf, response{{if $hasBodyVar}}.Body{{end}}{{if and $hasUnionElements (not .Schema.IsExternalRef)}}.union{{end}}); err != nil {
-106a107
+106a108
 >                     setContentLength(w, &buf)

@@ -98,7 +98,7 @@ notarized: one downloaded through a browser is quarantined, and
   off. Streams send `X-Accel-Buffering: no`; a proxy that buffers responses
   anyway will hold events back.
 - **The two secrets, kept.** `HOOKINLET_ADMIN_TOKEN` (at least 32 characters, no
-  whitespace, not mostly one repeated character) is the credential for the admin
+  whitespace, at least 10 different characters) is the credential for the admin
   API and can read every inbox. Keep the admin API off the public address with
   `HOOKINLET_ADMIN_LISTEN_ADDR`, or turn it off with `HOOKINLET_ADMIN_ENABLED=false`
   ([why and how](admin.md#keeping-the-admin-api-off-the-public-address)).
@@ -268,7 +268,7 @@ A server takes a lock on the data directory (`hookinlet.lock`, an advisory lock 
 operating system drops when the process ends, so there is nothing to clean up after a
 crash). A second server started on the same directory stops at once and says which
 process holds it, instead of two writers corrupting each other's work. `hookinlet
-rekey` and `renew-epochs`, which must not run beside a server, take the same lock.
+migrate`, `rekey` and `renew-epochs`, which must not run beside a server, take the same lock.
 The other commands do not, so `hookinlet inbox ...` still works in the directory of a
 running server. On a file system that does not support locks (some network and FUSE
 mounts) the server starts anyway and logs a warning: nothing then stops a second one.

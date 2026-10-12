@@ -161,3 +161,21 @@ func TestServeAdminClosesTheListenerItRefuses(t *testing.T) {
 		t.Error("the listener was left open")
 	}
 }
+
+// A Server that has been shut down cannot be started: it says so and frees the port.
+func TestAShutDownServerCannotBeStarted(t *testing.T) {
+	e := newEnv(t, withAuth)
+	_ = e.server.Shutdown(t.Context())
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.server.Serve(t.Context(), l); err == nil {
+		t.Error("Serve after Shutdown returned nil")
+	}
+	if c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", l.Addr().String()); err == nil {
+		_ = c.Close()
+		t.Error("the listener was left open")
+	}
+}
