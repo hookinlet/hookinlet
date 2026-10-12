@@ -11,7 +11,7 @@ import (
 )
 
 // Every comparison involving a secret, token, or signature must be
-// constant-time (guardrail 22). The packages that do such comparisons route
+// constant-time. The packages that do such comparisons route
 // them through hmac.Equal or crypto/subtle; this test fails if a source file
 // reaches for an early-exit comparison instead. It is a tripwire for review,
 // not a proof: the real guarantee is that the code paths use hmac.Equal.

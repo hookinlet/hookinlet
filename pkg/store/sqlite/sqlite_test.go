@@ -135,7 +135,7 @@ func TestRefusesDatabaseFromANewerVersion(t *testing.T) {
 	}
 }
 
-// Migrations are append-only (guardrail 20). This pins the hash of every
+// Migrations are append-only: a shipped one is never edited. This pins the hash of every
 // shipped migration: editing one fails here. To change the schema, add a new
 // numbered file and append its hash.
 func TestShippedMigrationsAreUnchanged(t *testing.T) {
@@ -245,7 +245,7 @@ func TestReadersAndWriterOverlap(t *testing.T) {
 	}
 }
 
-// Guardrail 17 and the Phase 1 gate: redacted headers are never persisted. This
+// Redacted headers are never persisted. This
 // checks the bytes on disk, not just what the API returns.
 func TestRedactedHeadersNeverReachDisk(t *testing.T) {
 	dir := t.TempDir()

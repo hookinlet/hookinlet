@@ -199,7 +199,7 @@ func (t *mcpTools) fail(ctx context.Context, what string, err error) error {
 }
 
 // inbox finds an inbox the caller may read. An inbox that does not exist and
-// one the caller may not read look the same (guardrail 25).
+// one the caller may not read look the same (a credential for one inbox must not reveal whether another exists).
 func (t *mcpTools) inbox(ctx context.Context, slug string) (*inbox.Inbox, error) {
 	if slug == "" || len(slug) > mcpMaxSlugLen {
 		return nil, errToolNotFound

@@ -56,7 +56,7 @@ func (s *Server) internalFailure(ctx context.Context, what string, err error, at
 // The order of steps matters. The method is checked before the inbox is looked
 // up, so a wrong method never reveals whether an inbox exists. The body is read
 // only under a size limit. Nothing is answered 2xx until the message is
-// committed to the Store (guardrail 16).
+// committed to the Store.
 func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Request) ingestResult {
 	if r.Method != http.MethodPost && r.Method != http.MethodPut {
 		return refuse(http.StatusMethodNotAllowed, "method_not_allowed", "this endpoint accepts POST and PUT")

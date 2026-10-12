@@ -51,9 +51,7 @@ None of this is done by a workflow; each is a setting or a tag only a maintainer
    `docker pull ghcr.io/hookinlet/hookinlet:0.1.0`.
 3. **Enable private vulnerability reporting** (Settings, Code security). `SECURITY.md` and the
    issue chooser send reporters there, and it is off until it is enabled.
-4. **Decide what in the repository should stay internal.** `PLAN.md` and `CLAUDE.md` describe the
-   private commercial product and are the working notes for the agent that built this project;
-   they are tracked, so they would be public.
+4. **The planning notes are not in the repository.** `PLAN.md`, `CLAUDE.md` and `GUARDRAILS.md` are untracked and ignored (the rules that matter are in `CONTRIBUTING.md`). They are still in the git history, which a public repository shows; if that matters, publish a history that does not contain them.
 5. **Read the README once from a clean clone**, in a new shell, as a stranger would.
 
 ## After

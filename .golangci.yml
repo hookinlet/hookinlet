@@ -20,7 +20,7 @@ linters:
         # Close errors on result sets are reported through rows.Err.
         - (*database/sql.Rows).Close
     goheader:
-      # Guardrail 11: every source file carries the AGPL-3.0 SPDX header.
+      # Every source file carries the AGPL-3.0 SPDX header.
       template: |-
         SPDX-License-Identifier: AGPL-3.0-only
         Copyright (C) {{ YEAR }} Pat Ramsey

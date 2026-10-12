@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the public `pkg/` API are listed here (guardrail 10).
+All notable changes to the public `pkg/` API are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
@@ -367,7 +367,7 @@ applies.
 - `inbox.SingleInboxPrincipal`: an optional capability of a `Principal` limited
   to one inbox, checked by `AuthenticatorSuite`. `token.Agent` implements it.
 - Dependency: `github.com/modelcontextprotocol/go-sdk` v1.8.0 (and its
-  permissively licensed dependencies; see `PLAN.md`).
+  permissively licensed dependencies).
 
 #### Changed
 - The REST message JSON can carry `body_truncated: true`, but only where a size

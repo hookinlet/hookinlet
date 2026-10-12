@@ -42,5 +42,5 @@ hookinlet is pre-1.0 and only the latest release is supported.
 
 ## Where to look
 
-[`GUARDRAILS.md`](GUARDRAILS.md) lists the security rules the code is held to (rules 16 to 26), and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) lists the security rules the code is held to (see "Security" and "Data integrity"), and
 [`docs/deploying.md`](docs/deploying.md) says how to run it safely.
