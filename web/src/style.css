@@ -5,7 +5,7 @@
    app comes from here. */
 :root {
   --bg: #f4f6f6; --panel: #ffffff; --panel2: #eef2f2; --line: #d9e0e1; --fg: #12181a; --mute: #5b6a6e;
-  --accent: #08776b; --accent-fg: #ffffff; --accent-soft: #d7efea;
+  --field: #7f8e91; --accent: #08776b; --accent-fg: #ffffff; --accent-soft: #d7efea;
   --ok: #1f7a4d; --ok-soft: #ddf1e6; --bad: #b3363a; --bad-soft: #f8e1e1; --warn: #8a5a00; --warn-soft: #f6e8c8;
   --code-key: #08776b; --code-str: #8a4b13; --code-num: #2b5fa8;
   --shadow: 0 12px 40px rgb(18 24 26 / 0.14);
@@ -17,7 +17,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     --bg: #0e1112; --panel: #14181a; --panel2: #1a2023; --line: #252d30; --fg: #e7ecec; --mute: #8b9699;
-    --accent: #2dd4bf; --accent-fg: #06201c; --accent-soft: #123530;
+    --field: #5d6b6f; --accent: #2dd4bf; --accent-fg: #06201c; --accent-soft: #123530;
     --ok: #4ade9a; --ok-soft: #12302a; --bad: #f2777a; --bad-soft: #3a1b1d; --warn: #e8b04a; --warn-soft: #382c12;
     --code-key: #2dd4bf; --code-str: #e3b07a; --code-num: #8cb4f2;
     --shadow: 0 12px 40px rgb(0 0 0 / 0.45);
@@ -26,7 +26,7 @@
 }
 :root[data-theme='dark'] {
   --bg: #0e1112; --panel: #14181a; --panel2: #1a2023; --line: #252d30; --fg: #e7ecec; --mute: #8b9699;
-  --accent: #2dd4bf; --accent-fg: #06201c; --accent-soft: #123530;
+  --field: #5d6b6f; --accent: #2dd4bf; --accent-fg: #06201c; --accent-soft: #123530;
   --ok: #4ade9a; --ok-soft: #12302a; --bad: #f2777a; --bad-soft: #3a1b1d; --warn: #e8b04a; --warn-soft: #382c12;
   --code-key: #2dd4bf; --code-str: #e3b07a; --code-num: #8cb4f2;
   --shadow: 0 12px 40px rgb(0 0 0 / 0.45);
@@ -64,7 +64,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
 .field { display: grid; gap: 6px; }
 .field > label, .label { font-size: 12px; color: var(--mute); }
-.input { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
+.input { background: var(--bg); border: 1px solid var(--field); border-radius: 8px; padding: 8px 10px; width: 100%; }
 .input:focus-visible { outline-offset: 0; border-color: var(--accent); }
 .err { color: var(--bad); font-size: 13px; }
 .muted { color: var(--mute); }

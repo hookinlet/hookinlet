@@ -10,6 +10,10 @@ describe('buckets', () => {
     expect(got[HOURS - 2]).toBe(1)
     expect(got[0]).toBe(1) // 23.5 hours ago
   })
+  it('counts a message from a few minutes ahead of this clock in the last hour', () => {
+    const got = buckets(['2026-10-12T12:05:00Z', '2026-10-12T13:00:00Z'], now)
+    expect(got[HOURS - 1]).toBe(1)
+  })
   it('ignores what is outside the window or not a time', () => {
     const got = buckets(['2026-10-10T00:00:00Z', '2026-10-12T13:00:00Z', 'nope'], now)
     expect(got.reduce((a, b) => a + b, 0)).toBe(0)

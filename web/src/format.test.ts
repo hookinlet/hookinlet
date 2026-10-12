@@ -21,6 +21,8 @@ describe('compact', () => {
     expect(compact(88016)).toBe('88K')
     expect(compact(4200000)).toBe('4.2M')
     expect(compact(2_104_882)).toBe('2.1M')
+    expect(compact(999_999)).toBe('1M')
+    expect(compact(999_500_000)).toBe('1B')
   })
 })
 

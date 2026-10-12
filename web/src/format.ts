@@ -21,10 +21,13 @@ export function compact(n: number): string {
     [1e6, 'M'],
     [1e3, 'K'],
   ]
-  for (const [size, suffix] of units) {
+  for (const [i, [size, suffix]] of units.entries()) {
     if (n >= size) {
       const v = n / size
-      return `${v < 10 ? v.toFixed(1).replace(/\.0$/, '') : Math.round(v)}${suffix}`
+      const text = v < 10 ? v.toFixed(1).replace(/\.0$/, '') : String(Math.round(v))
+      const bigger = units[i - 1]
+      if (bigger && Number(text) >= 1000) return `1${bigger[1]}` // 999,999 is 1M, not 1000K
+      return `${text}${suffix}`
     }
   }
   return String(n)

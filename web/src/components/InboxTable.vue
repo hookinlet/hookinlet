@@ -4,8 +4,7 @@ import { compact } from '../format'
 import { activity } from '../views/useActivity'
 import Sparkline from './Sparkline.vue'
 
-defineProps<{ inboxes: Inbox[] }>()
-const empty = new Array<number>(24).fill(0)
+defineProps<{ inboxes: Inbox[]; loadingLines?: boolean }>()
 </script>
 
 <template>
@@ -25,7 +24,8 @@ const empty = new Array<number>(24).fill(0)
       </span>
       <span role="cell" class="right num">{{ compact(i.last_seq) }}</span>
       <span role="cell" class="spark">
-        <Sparkline :values="activity[i.slug]?.series ?? empty" />
+        <Sparkline v-if="activity[i.slug]" :values="activity[i.slug]!.series" />
+        <span v-else class="muted" :title="loadingLines ? 'Loading' : 'Activity was not loaded for this inbox'">{{ loadingLines ? '…' : '–' }}</span>
         <small v-if="activity[i.slug]?.capped" class="muted" title="More than 200 in the last day; the line shows the newest 200">200+</small>
       </span>
       <span role="cell" class="right muted">

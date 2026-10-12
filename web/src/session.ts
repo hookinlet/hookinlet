@@ -6,6 +6,13 @@ import { ApiError, getStatus } from './api/client'
 const token = ref('')
 export const signedIn = ref(false)
 
+// Whatever holds data read with the token registers here, so that signing out (by the
+// person, or because the server said 401) drops all of it.
+const onSignOut: Array<() => void> = []
+export function whenSignedOut(fn: () => void): void {
+  onSignOut.push(fn)
+}
+
 export function currentToken(): string {
   return token.value
 }
@@ -19,6 +26,7 @@ export async function signIn(candidate: string): Promise<void> {
 export function signOut(): void {
   token.value = ''
   signedIn.value = false
+  for (const fn of onSignOut) fn()
 }
 
 // guard runs an API call with the session's token. A 401 means the token was revoked or

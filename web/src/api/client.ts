@@ -40,14 +40,15 @@ export async function request<T>(token: string, path: string, init: RequestInit 
 export const getStatus = (token: string) => request<Status>(token, '/v1/admin/status')
 
 // every collects all pages of a list endpoint, up to a safety limit.
-async function every<T, K extends string>(token: string, path: string, key: K, max = 2000): Promise<T[]> {
+async function every<T, K extends string>(token: string, path: string, key: K, max = 20000): Promise<T[]> {
   const out: T[] = []
   let after = 0
   for (;;) {
     const sep = path.includes('?') ? '&' : '?'
     const page = await request<Record<K, T[]> & { next: string | null }>(token, `${path}${sep}limit=500&after=${after}`)
     out.push(...page[key])
-    if (!page.next || page[key].length === 0 || out.length >= max) return out
+    if (!page.next || page[key].length === 0) return out
+    if (out.length >= max) throw new Error(`More than ${max} entries; list the rest with the command line.`)
     const m = /[?&]after=(\d+)/.exec(page.next)
     if (!m) return out
     after = Number(m[1])

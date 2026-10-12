@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import InboxTable from '../components/InboxTable.vue'
 import { inboxes } from '../store'
-import { loadActivity } from './useActivity'
+import { loadActivity, loadingActivity } from './useActivity'
 
 const q = ref('')
 const shown = computed(() => {
@@ -26,7 +26,7 @@ onMounted(async () => {
     <input id="q" v-model="q" class="input filter" type="search" placeholder="Filter by name, slug or verifier" autocomplete="off" />
   </header>
   <p v-if="inboxes.error.value" class="err" role="alert">{{ inboxes.error.value }}</p>
-  <InboxTable v-if="inboxes.data.value && shown.length" :inboxes="shown" />
+  <InboxTable v-if="inboxes.data.value && shown.length" :inboxes="shown" :loading-lines="loadingActivity" />
   <section v-else-if="inboxes.data.value" class="card empty">
     <h2>{{ q ? 'No inbox matches' : 'No inboxes yet' }}</h2>
     <p class="muted">{{ q ? 'Try a different word.' : 'Create one with hookinlet inbox create or the admin API.' }}</p>

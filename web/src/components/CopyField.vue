@@ -27,7 +27,7 @@ async function copy() {
 
 <template>
   <div class="copy">
-    <span ref="field" class="mono value" :aria-label="label">{{ value }}</span>
+    <span ref="field" class="mono value" role="group" :aria-label="label">{{ value }}</span>
     <button type="button" class="btn quiet" @click="copy">
       <Icon :name="copied ? 'check' : 'copy'" />
       <span aria-live="polite">{{ copied ? 'Copied' : 'Copy' }}</span>

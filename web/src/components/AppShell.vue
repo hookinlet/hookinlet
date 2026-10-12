@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { bytes } from '../format'
 import { link, navigate, route, href } from '../router'
 import { signOut } from '../session'
-import { reset, status } from '../store'
+import { status } from '../store'
 import { cycleTheme, theme } from '../theme'
 import Icon from './Icon.vue'
 
@@ -18,13 +18,17 @@ const free = computed(() => (status.data.value?.free_bytes === undefined ? '' : 
 
 function out() {
   signOut()
-  reset()
   navigate('/')
 }
 
-onMounted(() => {
-  if (!status.data.value) void status.refresh()
-})
+const main = ref<HTMLElement | null>(null)
+// A page change is announced by moving focus to the new page, for screen readers and keyboards.
+watch(
+  () => route.value.name,
+  () => void nextTick(() => main.value?.focus({ preventScroll: true })),
+)
+
+onMounted(() => void status.refresh())
 </script>
 
 <template>
@@ -49,7 +53,7 @@ onMounted(() => {
         <button type="button" class="btn quiet" @click="out"><Icon name="logout" />Sign out</button>
       </div>
     </aside>
-    <main class="main"><slot /></main>
+    <main ref="main" class="main" tabindex="-1"><slot /></main>
   </div>
 </template>
 
@@ -74,6 +78,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .tools { display: flex; justify-content: space-between; }
 .tools .btn { padding: 6px 8px; }
 .main { padding: 28px 32px 56px; min-width: 0; max-width: 1180px; width: 100%; }
+.main:focus { outline: none; }
 
 @media (max-width: 760px) {
   .shell { grid-template-columns: minmax(0, 1fr); }

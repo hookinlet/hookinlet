@@ -23,7 +23,8 @@ const choices = computed(() => {
   const needle = filter.value.trim().toLowerCase()
   return (inboxes.data.value ?? []).filter((i) => !needle || i.slug.includes(needle))
 })
-const canCreate = computed(() => name.value.trim() !== '' && (scope.value === 'all' || chosen.value.length > 0))
+const MAX_PICKS = 100 // the API accepts at most this many inboxes in one token
+const canCreate = computed(() => name.value.trim() !== '' && (scope.value === 'all' || (chosen.value.length > 0 && chosen.value.length <= MAX_PICKS)))
 const baseUrl = window.location.origin
 
 async function create() {
@@ -80,7 +81,7 @@ onMounted(() => {
   <header class="top">
     <h1>Tokens</h1>
     <span class="grow"></span>
-    <button type="button" class="btn primary" @click="showForm = !showForm; created = null"><Icon name="plus" />New token</button>
+    <button type="button" class="btn primary" :disabled="created !== null" :title="created ? 'Store the new token first' : undefined" @click="showForm = !showForm"><Icon name="plus" />New token</button>
   </header>
   <p class="muted lead">Agent tokens let an agent read inboxes. They cannot use the admin API. Revoke one and it stops working at once.</p>
 
@@ -91,7 +92,7 @@ onMounted(() => {
     <p class="warn"><Icon name="alert" /> It is shown once. Only its hash is stored, so it cannot be shown again.</p>
     <div>
       <p class="label">Try it</p>
-      <pre class="code">curl -s {{ baseUrl }}/v1/inboxes/<span class="muted">SLUG</span>/messages?after=0 \
+      <pre class="code">curl -s "{{ baseUrl }}/v1/inboxes/<span class="muted">SLUG</span>/messages?after=0" \
   -H "Authorization: Bearer {{ created.token }}"</pre>
     </div>
     <div><button type="button" class="btn" @click="created = null">I have stored it</button></div>
@@ -113,6 +114,7 @@ onMounted(() => {
       <div class="picks">
         <label v-for="i in choices" :key="i.id" class="radio"><input v-model="chosen" type="checkbox" :value="i.slug" /> <span class="mono">{{ i.slug }}</span></label>
         <p v-if="inboxes.data.value && !choices.length" class="muted">No inbox to pick.</p>
+        <p v-if="chosen.length > MAX_PICKS" class="err">A token can name at most {{ MAX_PICKS }} inboxes; pick fewer, or choose every inbox.</p>
       </div>
     </div>
     <p v-if="formError" class="err" role="alert">{{ formError }}</p>
@@ -122,11 +124,12 @@ onMounted(() => {
     </div>
   </form>
 
+  <p class="sr-only" aria-live="polite">{{ armed !== null ? 'Press the highlighted Revoke button again to confirm.' : '' }}</p>
   <p v-if="tokens.error.value" class="err" role="alert">{{ tokens.error.value }}</p>
   <p v-if="rowError" class="err" role="alert">{{ rowError }}</p>
 
   <div v-if="tokens.data.value && tokens.data.value.length" class="tbl" role="table" aria-label="Tokens">
-    <div class="row head" role="row"><span role="columnheader">Name</span><span role="columnheader">Can read</span><span role="columnheader">Created</span><span role="columnheader"></span></div>
+    <div class="row head" role="row"><span role="columnheader">Name</span><span role="columnheader">Can read</span><span role="columnheader">Created</span><span role="columnheader"><span class="sr-only">Actions</span></span></div>
     <div v-for="t in tokens.data.value" :key="t.id" class="row" role="row">
       <span role="cell" class="n">{{ t.name }}<small class="mono muted">#{{ t.id }}</small></span>
       <span role="cell" class="scope">

@@ -4,13 +4,13 @@ import InboxTable from '../components/InboxTable.vue'
 import { ago, compact } from '../format'
 import { link, href } from '../router'
 import { inboxes, status } from '../store'
-import { activity, loadActivity } from './useActivity'
+import { activity, incomplete, loadActivity, loadingActivity } from './useActivity'
 
 const list = computed(() => inboxes.data.value ?? [])
 const received = computed(() => list.value.reduce((n, i) => n + i.last_seq, 0))
 const disabled = computed(() => list.value.filter((i) => i.disabled).length)
 const lastDay = computed(() => Object.values(activity.value).reduce((n, a) => n + a.series.reduce((x, y) => x + y, 0), 0))
-const capped = computed(() => Object.values(activity.value).some((a) => a.capped))
+const capped = computed(() => incomplete.value || Object.values(activity.value).some((a) => a.capped))
 const retention = computed(() => {
   const s = status.data.value
   if (!s) return null
@@ -53,7 +53,7 @@ onMounted(load)
     <h2>No inboxes yet</h2>
     <p class="muted">An inbox is a named place webhooks arrive. Create one with <code>hookinlet inbox create</code> or the admin API; creating from this console comes in a later release.</p>
   </section>
-  <InboxTable v-else-if="inboxes.data.value" :inboxes="list" />
+  <InboxTable v-else-if="inboxes.data.value" :inboxes="list" :loading-lines="loadingActivity" />
   <div v-else class="card skel"><div class="skeleton line"></div><div class="skeleton line"></div><div class="skeleton line"></div></div>
 
   <p class="muted foot">Tokens are managed on the <a :href="href('/tokens')" @click="link($event, '/tokens')">Tokens page</a>.</p>
