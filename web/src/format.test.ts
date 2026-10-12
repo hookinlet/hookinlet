@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, bytes, compact } from './format'
+import { ago, bytes, compact, visible } from './format'
 
 describe('bytes', () => {
   it('writes sizes for people', () => {
@@ -38,5 +38,13 @@ describe('ago', () => {
   it('accepts a timestamp string and survives a bad one', () => {
     expect(ago('2026-10-12T11:46:00Z', now)).toBe('14 min ago')
     expect(ago('nope', now)).toBe('-')
+  })
+})
+
+describe('visible', () => {
+  it('shows invisible and direction-changing characters', () => {
+    expect(visible('invoice.paid')).toBe('invoice.paid')
+    expect(visible('evil\u202Efdp.exe')).toBe('evil<U+202E>fdp.exe')
+    expect(visible('a\u200Bb')).toBe('a<U+200B>b')
   })
 })

@@ -39,9 +39,13 @@ export function href(path: string): string {
 
 export function navigate(path: string): void {
   const target = href(path)
+  const before = current.value
   if (target !== window.location.pathname) window.history.pushState({}, '', target)
   current.value = parse(target)
-  window.scrollTo(0, 0)
+  // Moving between the messages of one inbox keeps the page where it is; any other move starts at the top.
+  const after = current.value
+  const sameInbox = before.name === 'inbox' && after.name === 'inbox' && before.slug === after.slug
+  if (!sameInbox) window.scrollTo(0, 0)
 }
 
 window.addEventListener('popstate', () => {

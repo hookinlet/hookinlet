@@ -47,6 +47,9 @@ export interface StreamHandlers {
   gap: (g: StreamGap) => void
   state: (s: 'connecting' | 'live' | 'retrying') => void
   unauthorized: () => void
+  // failed means the stream cannot work (the inbox is gone, a filter is refused): retrying would
+  // only repeat the answer, so the loop ends and says why.
+  failed: (reason: string) => void
 }
 
 // follow reads the live stream of an inbox until signal aborts. It reconnects after a drop,
@@ -67,6 +70,9 @@ export async function follow(token: string, slug: string, f: Filters, after: num
         signal,
       })
       if (res.status === 401) return h.unauthorized()
+      if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+        return h.failed(res.status === 404 ? 'This inbox no longer exists.' : `The server refused the stream (${res.status}).`)
+      }
       if (!res.ok || !res.body) throw new ApiError(res.status, res.statusText)
       h.state('live')
       delay = 1000
@@ -80,7 +86,11 @@ export async function follow(token: string, slug: string, f: Filters, after: num
             last = Math.max(last, m.seq)
             h.message(m)
           } else if (ev.event === 'gap') {
-            h.gap(JSON.parse(ev.data) as StreamGap)
+            const g = JSON.parse(ev.data) as StreamGap
+            // The messages before oldest_seq are gone; the stream carries on from there, and a
+            // reconnect must not ask for them again.
+            last = Math.max(last, g.oldest_seq - 1)
+            h.gap(g)
           }
         }
         if (parser.retry !== null) delay = parser.retry

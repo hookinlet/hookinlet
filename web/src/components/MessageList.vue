@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Message } from '../api/messages'
-import { ago } from '../format'
+import { ago, visible } from '../format'
 
 defineProps<{ messages: Message[]; selected: number | null; fresh: Set<number> }>()
 defineEmits<{ select: [seq: number] }>()
@@ -13,18 +13,18 @@ function status(m: Message): { cls: string; text: string } {
 </script>
 
 <template>
-  <ul class="list" role="listbox" aria-label="Messages">
-    <li v-for="m in messages" :key="m.seq" role="option" :aria-selected="selected === m.seq" class="msg" :class="{ on: selected === m.seq, fresh: fresh.has(m.seq) }">
-      <button type="button" @click="$emit('select', m.seq)">
+  <ul class="list" aria-label="Messages">
+    <li v-for="m in messages" :key="m.seq" :data-seq="m.seq" class="msg" :class="{ on: selected === m.seq, fresh: fresh.has(m.seq) }">
+      <button type="button" :aria-current="selected === m.seq ? 'true' : undefined" @click="$emit('select', m.seq)">
         <span class="l1">
           <span class="seq mono">#{{ m.seq }}</span>
-          <span class="ev">{{ m.event_type ?? `${m.method} ${m.path || '/'}` }}</span>
+          <span class="ev">{{ visible(m.event_type ?? `${m.method} ${m.path || '/'}`) }}</span>
           <time class="t" :datetime="m.received_at" :title="m.received_at">{{ ago(m.received_at) }}</time>
         </span>
         <span class="l2">
           <span class="pill" :class="status(m).cls">{{ status(m).text }}</span>
           <span class="mono muted">{{ m.size }} B</span>
-          <span v-if="m.delivery_id" class="mono muted id">{{ m.delivery_id }}</span>
+          <span v-if="m.delivery_id" class="mono muted id">{{ visible(m.delivery_id) }}</span>
         </span>
       </button>
     </li>

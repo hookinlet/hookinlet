@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ApiError, type Inbox } from '../api/client'
 import { follow, getInbox, newest, type Filters, type Message } from '../api/messages'
 import CopyField from '../components/CopyField.vue'
@@ -20,12 +20,17 @@ const hasMore = ref(false)
 const listError = ref('')
 const fresh = ref(new Set<number>())
 const gapNotice = ref('')
+const liveNote = ref('')
+const latest = ref(0) // the newest seq the server has told us about
 
+// What the person has typed or picked, and what the list on screen was loaded with. They differ
+// for the moment between a change and the reload that follows it.
 const filters = reactive<Filters>({ type: '', verified: '', since: '' })
 const window_ = ref<'' | '1h' | '24h' | '7d'>('')
+let active: Filters = { ...filters }
 const MAX_KEPT = 1000
 
-let generation = 0 // a load or a stream belongs to the filters it started with
+let generation = 0 // a load, a page of older messages, or a stream belongs to the filters it started with
 
 function sinceOf(w: string): string {
   const hours = w === '1h' ? 1 : w === '24h' ? 24 : w === '7d' ? 168 : 0
@@ -36,6 +41,7 @@ async function loadInfo() {
   infoError.value = ''
   try {
     info.value = await guard((t) => getInbox(t, props.slug))
+    latest.value = Math.max(latest.value, info.value.last_seq)
   } catch (e) {
     info.value = null
     infoError.value = e instanceof ApiError && e.status === 404 ? 'There is no inbox with that name.' : 'Could not load the inbox.'
@@ -47,12 +53,13 @@ async function loadList() {
   stopLive()
   loading.value = true
   listError.value = ''
-  filters.since = sinceOf(window_.value)
+  active = { ...filters, since: sinceOf(window_.value) }
   try {
-    const page = await guard((t) => newest(t, props.slug, filters, 0))
+    const page = await guard((t) => newest(t, props.slug, active, 0))
     if (mine !== generation) return
     items.value = page.messages
     hasMore.value = page.messages.length > 0 && page.next !== null
+    latest.value = Math.max(latest.value, page.latest_seq)
     gapNotice.value = ''
   } catch (e) {
     if (mine === generation) listError.value = e instanceof ApiError ? e.message : 'Could not load messages.'
@@ -68,12 +75,12 @@ async function loadOlder() {
   const mine = generation
   loadingMore.value = true
   try {
-    const page = await guard((t) => newest(t, props.slug, filters, oldest.seq))
+    const page = await guard((t) => newest(t, props.slug, active, oldest.seq))
     if (mine !== generation) return
     items.value = [...items.value, ...page.messages]
     hasMore.value = page.messages.length > 0 && page.next !== null
   } catch (e) {
-    listError.value = e instanceof ApiError ? e.message : 'Could not load older messages.'
+    if (mine === generation) listError.value = e instanceof ApiError ? e.message : 'Could not load older messages.'
   } finally {
     loadingMore.value = false
   }
@@ -81,22 +88,27 @@ async function loadOlder() {
 
 // ---- live tail ----
 const wantLive = ref(false)
-const liveState = ref<'off' | 'connecting' | 'live' | 'retrying'>('off')
+const liveState = ref<'off' | 'connecting' | 'live' | 'retrying' | 'failed'>('off')
 let abort: AbortController | null = null
 
 function startLive() {
   stopLive()
   abort = new AbortController()
   liveState.value = 'connecting'
-  const after = Math.max(items.value[0]?.seq ?? 0, info.value?.last_seq ?? 0)
+  liveNote.value = ''
+  // Follow from the newest seq known, from the list or from the server's own latest_seq, so an
+  // inbox whose list is empty (a filter that matches nothing yet) does not start from zero.
+  const after = Math.max(items.value[0]?.seq ?? 0, latest.value)
   void follow(
     currentToken(),
     props.slug,
-    filters,
+    active,
     after,
     {
       message: (m) => {
+        latest.value = Math.max(latest.value, m.seq)
         if (items.value.some((x) => x.seq === m.seq)) return
+        if (items.value.length >= MAX_KEPT) hasMore.value = true // the tail that falls off can be loaded again
         items.value = [m, ...items.value].slice(0, MAX_KEPT)
         fresh.value = new Set([...fresh.value, m.seq])
         window.setTimeout(() => {
@@ -107,11 +119,18 @@ function startLive() {
         if (info.value) info.value = { ...info.value, last_seq: Math.max(info.value.last_seq, m.seq), message_count: (info.value.message_count ?? 0) + 1 }
       },
       gap: (g) => {
-        gapNotice.value = `Retention removed messages before #${g.oldest_seq} while this page was open. The list was reloaded.`
-        void loadList()
+        // Retention removed messages this page had not seen. The stream carries on from the
+        // oldest that is left, so there is nothing to reload; say so, and refresh the counts.
+        gapNotice.value = `Retention removed messages up to #${g.oldest_seq - 1} before they were shown.`
+        void loadInfo()
       },
       state: (s) => (liveState.value = s),
       unauthorized: () => signOut(),
+      failed: (reason) => {
+        liveState.value = 'failed'
+        liveNote.value = reason
+        wantLive.value = false
+      },
     },
     abort.signal,
   )
@@ -120,21 +139,32 @@ function startLive() {
 function stopLive() {
   abort?.abort()
   abort = null
-  liveState.value = 'off'
+  if (liveState.value !== 'failed') liveState.value = 'off'
 }
 
 function toggleLive() {
   wantLive.value = !wantLive.value
+  liveNote.value = ''
   if (wantLive.value) startLive()
   else stopLive()
 }
 
 // ---- selection and keys ----
-function select(seq: number) {
+const detail = ref<InstanceType<typeof MessageDetail> | null>(null)
+
+// select opens a message. A click moves focus to it (on a phone the list is hidden behind it);
+// j and k keep the focus where it is, and keep the chosen row in view.
+function select(seq: number, focus = true) {
   navigate(`/inboxes/${props.slug}/messages/${seq}`)
+  void nextTick(() => {
+    document.querySelector(`[data-seq="${seq}"]`)?.scrollIntoView({ block: 'nearest' })
+    if (focus) detail.value?.focus()
+  })
 }
 function close() {
+  const was = props.seq
   navigate(`/inboxes/${props.slug}`)
+  void nextTick(() => (document.querySelector(`[data-seq="${was}"] button`) as HTMLElement | null)?.focus())
 }
 
 function onKey(e: KeyboardEvent) {
@@ -146,7 +176,7 @@ function onKey(e: KeyboardEvent) {
   const at = props.seq === null ? -1 : list.findIndex((m) => m.seq === props.seq)
   const next = e.key === 'j' ? Math.min(list.length - 1, at + 1) : Math.max(0, at - 1) // j goes down the page, to older messages
   const target = list[next]
-  if (target) select(target.seq)
+  if (target) select(target.seq, false)
 }
 
 const retention = computed(() => {
@@ -161,11 +191,18 @@ function clearFilters() {
   window_.value = ''
 }
 
+// A change to a filter ends what the old filters were loading at once; the reload waits for the
+// typing to pause.
 let typed = 0
-watch(() => [filters.type, filters.verified, window_.value], () => {
-  window.clearTimeout(typed)
-  typed = window.setTimeout(() => void loadList(), 300) // wait for the typing to pause
-})
+watch(
+  () => [filters.type, filters.verified, window_.value],
+  () => {
+    generation++
+    loadingMore.value = false
+    window.clearTimeout(typed)
+    typed = window.setTimeout(() => void loadList(), 300)
+  },
+)
 
 onMounted(() => {
   window.addEventListener('keydown', onKey)
@@ -193,6 +230,7 @@ onBeforeUnmount(() => {
     </button>
   </header>
   <p v-if="infoError" class="err" role="alert">{{ infoError }}</p>
+  <p v-if="liveNote" class="err" role="alert">Live stopped: {{ liveNote }}</p>
 
   <section v-if="info" class="facts card" aria-label="Inbox">
     <div><span class="k">Stored</span><span class="v num">{{ compact(info.message_count ?? 0) }}</span></div>
@@ -217,7 +255,7 @@ onBeforeUnmount(() => {
       <div v-if="loading" class="pad"><div class="skeleton row"></div><div class="skeleton row"></div><div class="skeleton row"></div></div>
       <template v-else-if="items.length">
         <MessageList :messages="items" :selected="seq" :fresh="fresh" @select="select" />
-        <div v-if="hasMore" class="more"><button type="button" class="btn" :disabled="loadingMore" @click="loadOlder">{{ loadingMore ? 'Loading…' : 'Older messages' }}</button></div>
+        <div v-if="hasMore" class="more"><button type="button" class="btn" :disabled="loadingMore || loading" @click="loadOlder">{{ loadingMore ? 'Loading…' : 'Older messages' }}</button></div>
         <p class="hint muted">j and k move through the list.</p>
       </template>
       <div v-else class="pad empty">
@@ -225,7 +263,7 @@ onBeforeUnmount(() => {
         <p class="muted">{{ hasFilters ? 'Change or clear a filter.' : 'Send the inbox a webhook, or go live to see the next one arrive.' }}</p>
       </div>
     </div>
-    <MessageDetail v-if="seq !== null" :slug="slug" :seq="seq" @close="close" />
+    <MessageDetail v-if="seq !== null" ref="detail" :slug="slug" :seq="seq" @close="close" />
     <div v-else class="placeholder card"><p class="muted">Pick a message to read it.</p></div>
   </div>
 </template>
