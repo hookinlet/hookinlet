@@ -310,12 +310,41 @@ func TestPingFailsWhenTheVolumeIsNearlyFull(t *testing.T) {
 	if err := s.Ping(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	free = MinFreeBytes - 1
+	free = MinFreeBytes / 2 // far enough below that the database's own spare pages cannot lift it
 	if err := s.Ping(t.Context()); !errors.Is(err, inbox.ErrStorageFull) {
 		t.Errorf("Ping on a nearly full volume: %v", err)
 	}
 	free = MinFreeBytes
 	if err := s.Ping(t.Context()); err != nil {
 		t.Errorf("Ping with exactly the minimum: %v", err)
+	}
+}
+
+// Room the database has freed inside its own file is room: once pruning has
+// emptied pages, a volume that reports little free space is not full.
+func TestPingCountsThePagesTheDatabaseCanReuse(t *testing.T) {
+	free := uint64(MinFreeBytes - 1<<20)
+	s, err := Open(t.Context(), t.TempDir(), WithFreeSpace(func(string) (uint64, error) { return free, nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	in := &inbox.Inbox{Slug: "spare", IngestKey: "spare", Name: "s", Verifier: "none"}
+	if err := s.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Body: make([]byte, 1<<20), Verified: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.wdb.ExecContext(t.Context(), `DELETE FROM messages`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ping(t.Context()); err != nil {
+		t.Errorf("Ping with several MiB of reusable pages: %v", err)
+	}
+	if got := s.reusableBytes(t.Context()); got < 2<<20 {
+		t.Errorf("reusable bytes: %d", got)
 	}
 }

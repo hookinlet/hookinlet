@@ -106,7 +106,8 @@ const LockFileName = "hookinlet.lock"
 func WithLogger(l *slog.Logger) Option { return func(c *config) { c.log = l } }
 
 // WithExclusiveLock makes Open take a lock on the data directory that no other
-// exclusive Open can share, and fails with *LockedError if another holds it. A
+// exclusive Open can share, and which is also what permits Open to apply pending
+// migrations (an Open without it refuses a database that needs them), and fails with *LockedError if another holds it. A
 // server uses it, so that a second server started on the same directory stops at
 // once and not after it has done harm; so do the commands that must not run beside
 // one (rekey, renew-epochs). Stores opened without it are not blocked by it, which
@@ -196,7 +197,7 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 		_ = wdb.Close()
 		return nil, fmt.Errorf("sqlite: open %s: %w", abs, err)
 	}
-	if s.applied, err = migrate(ctx, wdb, abs); err != nil {
+	if s.applied, err = migrate(ctx, wdb, abs, cfg.lock, cfg.log); err != nil {
 		_ = wdb.Close()
 		return nil, err
 	}
@@ -292,13 +293,25 @@ func (s *Store) Ping(ctx context.Context) error {
 		free, measured = f, true
 	}
 	switch {
-	case measured && free < MinFreeBytes:
+	case measured && free < MinFreeBytes && free+s.reusableBytes(ctx) < MinFreeBytes:
 		return fmt.Errorf("%w: %d bytes are left on the data directory's volume", inbox.ErrStorageFull, free)
 	case s.now().UnixNano() < s.fullUntil.Load():
 		// The volume may report room (a quota, a size limit) while writes fail.
 		return fmt.Errorf("%w: a write failed for lack of room a moment ago", inbox.ErrStorageFull)
 	}
 	return nil
+}
+
+// reusableBytes is the room inside the database file that deleted rows have left:
+// new writes use it before the file grows, so it counts as room even though the
+// volume does not report it. A failure to measure counts as none.
+func (s *Store) reusableBytes(ctx context.Context) uint64 {
+	var pages, size int64
+	if s.rdb.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&pages) != nil ||
+		s.rdb.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&size) != nil || pages < 0 || size < 0 {
+		return 0
+	}
+	return uint64(pages) * uint64(size) //nolint:gosec // both are checked not to be negative
 }
 
 // ---- transactions and errors ----

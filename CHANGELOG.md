@@ -56,6 +56,15 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 
 ### Release review fixes
 
+- **A command that does not hold the data-directory lock no longer migrates the database.** It
+  refuses and says to stop the server and run `hookinlet migrate` (which takes the lock). Before,
+  `inbox show` run with the new binary beside the old server upgraded the schema under it.
+- **A rolled-back upgrade no longer keeps a stale pre-migration copy.** If the marker says no
+  migration was applied, the next upgrade takes a fresh copy. Migrations are logged, with the
+  place the copy was kept, and a copy that fails leaves no `-journal` behind.
+- **`/readyz` counts pages the database can reuse as room**, so it recovers after retention
+  has freed space on a volume that is still nearly full.
+
 - **A client that asks for a big answer and never reads it can no longer pin memory.**
   Responses have a write deadline (`server.Options.ResponseTimeout`, 2 minutes), and a read slot
   is kept until the response has been written, so at most 16 pages are in flight (it was 16

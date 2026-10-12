@@ -5,6 +5,7 @@ package sqlite_test
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,7 +49,7 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 	}
 	_ = raw.Close()
 
-	s, err := sqlite.Open(t.Context(), dir)
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
 	if err != nil {
 		t.Fatalf("opening the earlier database: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestADatabaseIsCopiedBeforeItIsMigrated(t *testing.T) {
 	dir := t.TempDir()
 	writeVersion2Database(t, dir)
 
-	s, err := sqlite.Open(t.Context(), dir)
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func checkCopy(t *testing.T, dir string) {
 
 	// Nothing pending, nothing copied: the same copy stays, and no other appears.
 	before, _ := os.Stat(snap)
-	s, err := sqlite.Open(t.Context(), dir)
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func checkCopy(t *testing.T, dir string) {
 
 func TestANewDatabaseIsNotCopied(t *testing.T) {
 	dir := t.TempDir()
-	s, err := sqlite.Open(t.Context(), dir)
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +206,7 @@ func TestANewDatabaseIsNotCopied(t *testing.T) {
 // its id, and its indexes.
 func TestTheBodyIsTheLastColumnAfterTheUpgrade(t *testing.T) {
 	dir := t.TempDir()
-	s, err := sqlite.Open(t.Context(), dir)
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +260,7 @@ func TestARetriedUpgradeKeepsTheCopyItAlreadyHas(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, sqlite.DBFileName+".migrating"), []byte("1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s, err := sqlite.Open(t.Context(), dir)
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +291,7 @@ func TestAFailedCopyLeavesTheEarlierOneAndTheDatabaseAlone(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sqlite.Open(t.Context(), dir); err == nil {
+	if _, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock()); err == nil {
 		t.Fatal("Open migrated without a copy")
 	}
 	b, err := os.ReadFile(earlier) //nolint:gosec // a path in this test's own temp directory
@@ -343,5 +344,56 @@ func TestTheWriteAheadLogIsBounded(t *testing.T) {
 	}
 	if info.Size() > 4*limit {
 		t.Errorf("the write-ahead log is %d bytes after the burst, want it cut back near %d", info.Size(), limit)
+	}
+}
+
+// Without the lock, a database that needs migrating is refused and left as it was:
+// the command line may look at a server's data, but not upgrade it from underneath.
+func TestAnOpenWithoutTheLockDoesNotMigrate(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+	_, err := sqlite.Open(t.Context(), dir)
+	var need *sqlite.NeedsMigrationError
+	if !errors.As(err, &need) || need.From != 2 {
+		t.Fatalf("opening an old database without the lock: %v", err)
+	}
+	if all, _ := filepath.Glob(filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"*")); len(all) != 0 {
+		t.Errorf("a copy was made: %v", all)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sqlite.DBFileName+".migrating")); err == nil {
+		t.Error("a marker was left")
+	}
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	s, err = sqlite.Open(t.Context(), dir) // now current: no lock needed
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+}
+
+// An upgrade that was rolled back (the copy put back over the database, the marker
+// left) must not keep that stale copy for the next attempt.
+func TestARolledBackUpgradeGetsAFreshCopyNextTime(t *testing.T) {
+	dir := t.TempDir()
+	writeVersion2Database(t, dir)
+	stale := filepath.Join(dir, sqlite.MigrationSnapshotPrefix+"2.bak")
+	if err := os.WriteFile(stale, []byte("a copy from before deliveries arrived"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, sqlite.DBFileName+".migrating"), []byte("2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	b, err := os.ReadFile(stale) //nolint:gosec // a path in this test's own temp directory
+	if err != nil || string(b) == "a copy from before deliveries arrived" {
+		t.Errorf("the stale copy was kept: %q, %v", b, err)
 	}
 }
