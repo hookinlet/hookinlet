@@ -54,7 +54,7 @@ func raiseFileLimit(t *testing.T, want uint64) uint64 {
 	return lim.Cur
 }
 
-// The Phase 4 gate: 500 idle streams use less than 50 MB of resident memory.
+// The memory budget for streams: 500 idle streams use less than 50 MB of resident memory.
 // This runs the real binary as a separate process and measures it with ps, since
 // measuring inside the test process would count the 500 clients too.
 func TestFiveHundredIdleStreamsStayUnderFiftyMegabytes(t *testing.T) {

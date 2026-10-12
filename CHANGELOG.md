@@ -37,7 +37,7 @@ REST, a live event stream, or MCP.
   and unauthenticated ingest has a memory budget. The admin API can be off, or on its own
   address. `/metrics`, `hookinlet healthcheck`, draining on shutdown, and secrets from files.
 - **Ships verifiably.** Static binaries for Linux and macOS (amd64, arm64) and a multi-arch image,
-  with checksums, SBOMs, signed build provenance, and the licenses of everything inside.
+  with checksums, SBOMs, signed build provenance for the archives (once the repository is public), and the licenses of everything inside.
   Releases are cut only from a commit on main that passed CI, after a vulnerability check.
 
 **Upgrading from 0.1.0-rc.1.** Run it on the same data directory: migrations 0003 to 0007 apply
