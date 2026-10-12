@@ -80,7 +80,7 @@ func New(key []byte) (*Box, error) {
 func (b *Box) KeyID() string { return hex.EncodeToString(b.id[:]) }
 
 // Seal encrypts plaintext and binds it to context, which Open must be given again
-// (the inbox's slug, for a verifier secret). The result is version || key id ||
+// (inbox.VerifierSecretContext(slug), for a verifier secret). The result is version || key id ||
 // nonce || ciphertext+tag.
 func (b *Box) Seal(plaintext, context []byte) ([]byte, error) {
 	nonce := make([]byte, b.aead.NonceSize())

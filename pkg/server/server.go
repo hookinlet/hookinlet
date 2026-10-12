@@ -53,8 +53,8 @@ type Options struct {
 	// has a verifier secret; a delivery to an inbox that does fails with a
 	// server error.
 	SecretBox inbox.SecretBox
-	// Notifier is told after each newly stored message. Defaults to a notifier
-	// that never signals.
+	// Notifier is told after each newly stored message. Defaults to the
+	// in-process notifier (pkg/notify/local), which signals streams and waits at once.
 	Notifier inbox.Notifier
 	// Hooks gates and observes ingest. Defaults to inbox.NopHooks.
 	Hooks inbox.Hooks
@@ -87,6 +87,12 @@ type Options struct {
 	// counted. Defaults to 256 MiB, must be at least the largest body an inbox may take
 	// (10 MiB), and a negative value turns the bound off.
 	IngestMemoryBudget int64
+	// ResponseTimeout bounds how long a response may take to be written to the client,
+	// from the moment the request has been checked. A client that sends a request and
+	// does not read the answer would otherwise keep the answer (a page of messages, a
+	// raw body) in memory for as long as it likes. Streams, MCP waits and backups manage
+	// their own deadlines. Defaults to 2 minutes.
+	ResponseTimeout time.Duration
 	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
 	// to the ingest endpoint. Defaults to 60s.
 	ReadBodyTimeout time.Duration
@@ -129,7 +135,8 @@ type Options struct {
 	// AdminAddr, if set, serves the admin API on its own listener at this address
 	// and not on Addr. That lets the admin surface sit on a loopback or private
 	// interface while ingest and the read API are public. Empty serves everything
-	// on Addr. Serve listens on it itself; ServeAdmin takes a listener instead.
+	// on Addr. Run listens on it; with listeners of your own, use ServeAdmin (Serve alone
+	// would leave the admin API unreachable, so it refuses).
 	AdminAddr string
 	// DisableMCP turns off the MCP endpoint (/mcp), which is otherwise served
 	// whenever an Authenticator is set.
@@ -197,7 +204,7 @@ func New(opts Options) (*Server, error) {
 		name string
 		v    int64
 	}{
-		{"ShutdownTimeout", int64(opts.ShutdownTimeout)}, {"ReadBodyTimeout", int64(opts.ReadBodyTimeout)},
+		{"ShutdownTimeout", int64(opts.ShutdownTimeout)}, {"ResponseTimeout", int64(opts.ResponseTimeout)}, {"ReadBodyTimeout", int64(opts.ReadBodyTimeout)},
 		{"MaxHeaderBytes", int64(opts.MaxHeaderBytes)}, {"MaxConcurrentReads", int64(opts.MaxConcurrentReads)},
 		{"ReadWaitTimeout", int64(opts.ReadWaitTimeout)}, {"MaxStreams", int64(opts.MaxStreams)},
 		{"MaxStreamsPerInbox", int64(opts.MaxStreamsPerInbox)}, {"StreamRevalidateInterval", int64(opts.StreamRevalidateInterval)},
@@ -237,6 +244,9 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.IngestMemoryBudget > 0 && opts.IngestMemoryBudget < inbox.MaxBodyBytesCeiling {
 		return nil, fmt.Errorf("server: Options.IngestMemoryBudget must be at least %d bytes, the largest body an inbox may take, or a delivery that is allowed could never be received", inbox.MaxBodyBytesCeiling)
+	}
+	if opts.ResponseTimeout == 0 {
+		opts.ResponseTimeout = 2 * time.Minute
 	}
 	if opts.ReadBodyTimeout <= 0 {
 		opts.ReadBodyTimeout = 60 * time.Second
@@ -369,12 +379,22 @@ func (s *Server) Run(ctx context.Context) error {
 // Serve is like Run but accepts an existing listener. With Options.AdminAddr
 // set it serves only the public surface; ServeAdmin takes the second listener.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	if ln == nil {
+		return errors.New("server: Serve needs a listener")
+	}
+	if s.adminHTTP != nil {
+		_ = ln.Close()
+		return errors.New("server: Options.AdminAddr is set, so the admin API is on its own listener; use ServeAdmin with a listener for each, or Run")
+	}
 	return s.serve(ctx, ln, nil)
 }
 
 // ServeAdmin is Serve for a server with Options.AdminAddr set, given a listener
 // for each address. The admin API is served on adminLn and nothing else is.
 func (s *Server) ServeAdmin(ctx context.Context, ln, adminLn net.Listener) error {
+	if ln == nil || adminLn == nil {
+		return errors.New("server: ServeAdmin needs a listener for each address")
+	}
 	if s.adminHTTP == nil {
 		_ = adminLn.Close()
 		return errors.New("server: ServeAdmin needs Options.AdminAddr")

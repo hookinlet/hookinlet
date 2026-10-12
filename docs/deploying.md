@@ -293,7 +293,9 @@ wait for hookinlet.
 One instance is small. Idle, the process uses about 10 to 12 MiB of memory on
 Linux. Each open SSE stream costs about 50 KiB, so 500 of them come to about
 35 MiB. A page of messages is built in memory and bounded (16 MiB at most), and
-reads are limited to 16 at a time. Deliveries are not limited in number: each one
+reads are limited to 16 at a time, a slot being held until the response has been written
+to the client or `ResponseTimeout` (2 minutes) has passed, so a client that asks and never
+reads cannot pin more than 16 pages. Deliveries are not limited in number: each one
 is held in memory while it is read and checked, up to the inbox's body limit
 (1 MiB by default, at most 10 MiB), so a burst of large deliveries uses that much
 each. The total is bounded: deliveries being received hold at most

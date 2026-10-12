@@ -54,6 +54,17 @@ keep working; run `hookinlet rekey` once to bring them up to the current format.
 Everything below is the detail behind the summary above, phase by phase: what changed in the public
 Go packages, the API, and the configuration, in the order it happened. The newest is first.
 
+### Release review fixes
+
+- **A client that asks for a big answer and never reads it can no longer pin memory.**
+  Responses have a write deadline (`server.Options.ResponseTimeout`, 2 minutes), and a read slot
+  is kept until the response has been written, so at most 16 pages are in flight (it was 16
+  being built and any number waiting on slow clients).
+- **A JSON body with a number or escape that common parsers refuse is delivered as `body_text`**
+  (number literals over 100 characters or outside float64, unpaired surrogate escapes), so one
+  such body cannot make every page that holds it unreadable.
+- The example clients keep the epoch with the cursor (see the Phase 14 notes).
+
 ### Phase 16: the public face
 
 #### Changed

@@ -4588,11 +4588,11 @@
             ]
           },
           "body": {
-            "description": "The body, when it is valid UTF-8, valid JSON, and nested no deeper than 64 levels. It is JSON here, not a string containing JSON."
+            "description": "The body, when it is valid UTF-8, valid JSON, nested no deeper than 64 levels, and holding only what common parsers accept (no number literal over 100 characters or outside float64, no unpaired surrogate escape). It is JSON here, not a string containing JSON."
           },
           "body_text": {
             "type": "string",
-            "description": "The body, when it is valid UTF-8 but not JSON (or is too deeply nested)."
+            "description": "The body, when it is valid UTF-8 but not JSON (or is JSON that is not embedded: too deeply nested, or with a number or escape that parsers refuse)."
           },
           "body_base64": {
             "type": "string",

@@ -214,3 +214,34 @@ func TestEncodingDoesNotShareMemoryWithTheStoredMessage(t *testing.T) {
 		t.Errorf("the encoded body changed with the stored one: %s", enc.Body)
 	}
 }
+
+func TestOnlyJSONThatParsersAcceptIsEmbedded(t *testing.T) {
+	long := strings.Repeat("9", 5000)
+	for name, tc := range map[string]struct {
+		body     string
+		embedded bool
+	}{
+		"an ordinary object":            {`{"a":1,"b":[true,null,"x"],"c":-1.5e3}`, true},
+		"a long number that is fine":    {`{"n":` + strings.Repeat("1", 60) + `}`, true},
+		"thousands of digits":           {`{"n":` + long + `}`, false},
+		"a number past float64":         {`{"n":1e400}`, false},
+		"a number past float64, signed": {`[-1e999]`, false},
+		"a tiny number":                 {`{"n":1e-400}`, true},
+		"digits inside a string":        {`{"s":"` + long + `"}`, true},
+		"a surrogate pair":              {`{"s":"😀"}`, true},
+		"a lone high surrogate":         {`{"s":"\ud800"}`, false},
+		"a lone low surrogate":          {`{"s":"\udc00 x"}`, false},
+		"a high surrogate then text":    {`{"s":"\ud800A"}`, false},
+		"an escaped backslash then u":   {`{"s":"\\ud800"}`, true},
+		"an escaped quote in a string":  {`{"s":"a\"1e999"}`, true},
+	} {
+		m := Message{}
+		m.setBody([]byte(tc.body))
+		if got := m.Body != nil; got != tc.embedded {
+			t.Errorf("%s: embedded as JSON = %v, want %v", name, got, tc.embedded)
+		}
+		if !tc.embedded && (m.BodyText == nil || *m.BodyText != tc.body) {
+			t.Errorf("%s: the text form must carry the body exactly", name)
+		}
+	}
+}

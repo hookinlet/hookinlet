@@ -408,6 +408,12 @@ func (a *readAPI) slot(ctx context.Context) (release func(), busy *api.Overloade
 	release, err = a.s.readSlot(ctx)
 	switch {
 	case err == nil:
+		// The handler releases (defer release()) when it returns, which is before its answer
+		// has been written; the slot is kept until enforce says the response is done.
+		if rr, ok := ctx.Value(readKey).(*readRequest); ok && rr.hold == nil {
+			rr.hold = release
+			return func() {}, nil, nil
+		}
 		return release, nil, nil
 	case errors.Is(err, errBusy):
 		b := overloaded(ctx, "1", "the server is busy; retry shortly")

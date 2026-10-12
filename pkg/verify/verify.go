@@ -215,6 +215,9 @@ func (r *Registry) New(name string, config json.RawMessage) (Verifier, error) {
 		}
 		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
+	if v == nil {
+		return nil, fmt.Errorf("%w: the factory for %q returned no verifier", ErrConfig, name)
+	}
 	return v, nil
 }
 

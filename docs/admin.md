@@ -429,3 +429,8 @@ hookinlet renew-epochs --data-dir ./data
 ```
 
 which gives every inbox a new epoch in place.
+
+**A restore also undoes what changed after the snapshot.** A token revoked, an ingest key
+rotated, or an inbox disabled because something leaked is live again in a database restored from
+before. After a restore, check `hookinlet token list` and the ingest URLs of your inboxes, and revoke
+and rotate again what you had.

@@ -64,17 +64,28 @@ func newFixture(t *testing.T, admin string) *fixture {
 	return f
 }
 
+// revoke withdraws a token the way an admin does.
+func (f *fixture) revoke(tok string) {
+	rec, err := f.store.GetTokenByHash(context.Background(), token.Hash(tok))
+	if err != nil {
+		panic(err)
+	}
+	if err := f.store.DeleteToken(context.Background(), rec.ID); err != nil {
+		panic(err)
+	}
+}
+
 func TestConformance(t *testing.T) {
 	inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
 		f := newFixture(t, adminToken)
 		return inboxtest.AuthFixture{
-			Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, AdminToken: adminToken,
+			Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, AdminToken: adminToken, Revoke: f.revoke,
 		}
 	})
 	t.Run("without an admin token", func(t *testing.T) {
 		inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
 			f := newFixture(t, "")
-			return inboxtest.AuthFixture{Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll}
+			return inboxtest.AuthFixture{Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, Revoke: f.revoke}
 		})
 	})
 }
