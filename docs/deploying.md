@@ -213,6 +213,7 @@ lists them all.
 | `HOOKINLET_ADMIN_ENABLED` | `true` | Serve the admin API (`/v1/admin/...`). `false` leaves inboxes and tokens to the command line. |
 | `HOOKINLET_ADMIN_LISTEN_ADDR` | none | Serve the admin API on this address instead of `HOOKINLET_LISTEN_ADDR`, and nothing else there. |
 | `HOOKINLET_MCP_ENABLED` | `true` | Serve `/mcp`. |
+| `HOOKINLET_ADMIN_UI` | `true` | Serve the admin console at `/admin`, on the same listener as the admin API. It needs the admin API on (`HOOKINLET_ADMIN_ENABLED`). |
 | `HOOKINLET_MCP_INLINE_BODY_BYTES` | `16384` | Largest body MCP tools return inline (at most 65536). |
 | `HOOKINLET_INGEST_MEMORY_BUDGET` | `268435456` | Most bytes of request bodies held in memory at once by deliveries being received; more get 503. `0` turns the bound off. |
 | `HOOKINLET_DRAIN_DELAY` | `0` | After being told to stop, keep serving for this long with `/readyz` at 503, so a load balancer takes the instance out of rotation first. |

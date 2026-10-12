@@ -55,6 +55,12 @@ Everything below is the detail behind the summary above, phase by phase: what ch
 Go packages, the API, and the configuration, in the order it happened. The newest is first.
 
 ### Release review fixes
+
+- **Admin console, first part.** A web console is served at `/admin` (switch off with
+  `HOOKINLET_ADMIN_UI=false`). This release carries the plumbing and a sign-in page that shows
+  the server's status; the screens follow. New admin endpoint `GET /v1/admin/status`. New in
+  `pkg/`: `Options.DisableUI`, the optional `inbox.StatusReporter` (implemented by the SQLite store).
+  The built app is committed under `internal/ui/dist` and built from `web/`.
 - **A database restored with a wide file mode is made private when it is opened** (and its `-wal` and
   `-shm` files), with a warning in the log. Before, the server kept whatever mode the copy came with.
 - **`/readyz` no longer fails for the whole server because one inbox's secret does not open.**

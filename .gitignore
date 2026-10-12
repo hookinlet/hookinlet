@@ -13,3 +13,5 @@
 /PLAN.md
 /CLAUDE.md
 /GUARDRAILS.md
+/web/node_modules/
+/web/.vite/

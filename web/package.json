@@ -1,0 +1,25 @@
+{
+  "name": "hookinlet-admin-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The admin console served by hookinlet at /admin. Built into internal/ui/dist.",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "test": "vitest run",
+    "types": "openapi-typescript ../docs/openapi.json -o src/api/schema.d.ts"
+  },
+  "dependencies": {
+    "vue": "3.5.43"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.10",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.4",
+    "vue-tsc": "3.3.13"
+  }
+}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -386,11 +387,34 @@ func (a *adminAPI) Metrics(ctx context.Context, _ api.MetricsRequestObject) (api
 	return api.Metrics200TextResponse{Body: b.String(), Headers: api.Metrics200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
 }
 
+// AdminStatus reports the server's own state for the admin console.
+func (a *adminAPI) AdminStatus(ctx context.Context, _ api.AdminStatusRequestObject) (api.AdminStatusResponseObject, error) {
+	s := a.s
+	out := api.AdminStatus{Version: s.opts.Version, RetentionIntervalSeconds: max(0, int(s.opts.RetentionInterval/time.Second))}
+	if rep, ok := s.opts.Store.(inbox.StatusReporter); ok {
+		st, err := rep.Status(ctx)
+		if err != nil {
+			return api.AdminStatus500JSONResponse{InternalJSONResponse: s.fell(ctx, s.classify(ctx, "status", err))}, nil
+		}
+		out.SchemaVersion, out.DatabaseBytes = st.SchemaVersion, int(st.DatabaseBytes)
+		if st.FreeKnown {
+			free := int(min(st.FreeBytes, math.MaxInt)) //nolint:gosec // bounded just above
+			out.FreeBytes = &free
+		}
+	}
+	if at, n, ok := s.retained.last(); ok {
+		deleted := int(n)
+		out.LastRetentionAt, out.LastRetentionDeleted = &at, &deleted
+	}
+	return api.AdminStatus200JSONResponse{Body: out, Headers: api.AdminStatus200ResponseHeaders{XRequestId: requestIDOf(ctx)}}, nil
+}
+
 func (a *adminAPI) RunRetention(ctx context.Context, _ api.RunRetentionRequestObject) (api.RunRetentionResponseObject, error) {
 	start := time.Now()
 	ctx, cancel := a.s.closingContext(ctx)
 	defer cancel()
 	n, err := a.s.adm.RunRetention(ctx)
+	a.s.retained.record(a.s.opts.Now(), n, err)
 	if err != nil {
 		f := a.s.classify(ctx, "retention", err)
 		if f.status == http.StatusConflict {

@@ -427,6 +427,30 @@ type AdminList struct {
 	Next    *string `json:"next"`
 }
 
+// AdminStatus The server's status, for the admin console and for monitoring that already speaks to the admin API.
+type AdminStatus struct {
+	// DatabaseBytes Size of the database file, not counting its write-ahead log.
+	DatabaseBytes int `json:"database_bytes"`
+
+	// FreeBytes Bytes free on the volume that holds the data directory. Absent when the server cannot measure it.
+	FreeBytes *int `json:"free_bytes,omitempty"`
+
+	// LastRetentionAt When retention last finished in this process, scheduled or asked for. Absent until it has run.
+	LastRetentionAt *time.Time `json:"last_retention_at,omitempty"`
+
+	// LastRetentionDeleted How many messages that run deleted. Absent until it has run.
+	LastRetentionDeleted *int `json:"last_retention_deleted,omitempty"`
+
+	// RetentionIntervalSeconds How often scheduled retention runs. `0` means it is off.
+	RetentionIntervalSeconds int `json:"retention_interval_seconds"`
+
+	// SchemaVersion The newest applied database migration.
+	SchemaVersion int `json:"schema_version"`
+
+	// Version The release, such as `0.1.0`, or `dev-<commit>` for a build from a checkout.
+	Version string `json:"version"`
+}
+
 // CreateInbox defines model for CreateInbox.
 type CreateInbox struct {
 	// EventTypePointer An RFC 6901 JSON pointer such as `/type`, or empty for none.
@@ -1200,6 +1224,9 @@ type ServerInterface interface {
 	// RunRetention Apply retention now
 	// (POST /v1/admin/retention/run)
 	RunRetention(w http.ResponseWriter, r *http.Request)
+	// AdminStatus Server status
+	// (GET /v1/admin/status)
+	AdminStatus(w http.ResponseWriter, r *http.Request)
 	// ListTokens List tokens
 	// (GET /v1/admin/tokens)
 	ListTokens(w http.ResponseWriter, r *http.Request, params ListTokensParams)
@@ -1662,6 +1689,20 @@ func (siw *ServerInterfaceWrapper) RunRetention(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RunRetention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminStatus operation middleware
+func (siw *ServerInterfaceWrapper) AdminStatus(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminStatus(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2585,6 +2626,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/inboxes/{slug}/rotate-ingest-key", wrapper.RotateIngestKey)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/inboxes/{slug}/secret", wrapper.SetVerifierSecret)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/retention/run", wrapper.RunRetention)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/status", wrapper.AdminStatus)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/tokens", wrapper.ListTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/tokens", wrapper.CreateToken)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/admin/tokens/{id}", wrapper.RevokeToken)
@@ -6333,6 +6375,146 @@ func (response RunRetentiondefaultTextResponse) VisitRunRetentionResponse(w http
 	return err
 }
 
+type AdminStatusRequestObject struct {
+}
+
+type AdminStatusResponseObject interface {
+	VisitAdminStatusResponse(w http.ResponseWriter) error
+}
+
+type AdminStatus200ResponseHeaders struct {
+	XRequestId string
+}
+
+type AdminStatus200JSONResponse struct {
+	Body    AdminStatus
+	Headers AdminStatus200ResponseHeaders
+}
+
+func (response AdminStatus200JSONResponse) VisitAdminStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdminStatus401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AdminStatus401JSONResponse) VisitAdminStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdminStatus403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AdminStatus403JSONResponse) VisitAdminStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdminStatus405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response AdminStatus405JSONResponse) VisitAdminStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdminStatus500JSONResponse struct{ InternalJSONResponse }
+
+func (response AdminStatus500JSONResponse) VisitAdminStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdminStatusdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type AdminStatusdefaultJSONResponse struct {
+	Body       Error
+	Headers    AdminStatusdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response AdminStatusdefaultJSONResponse) VisitAdminStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdminStatusdefaultTextResponse struct {
+	Body       string
+	Headers    AdminStatusdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response AdminStatusdefaultTextResponse) VisitAdminStatusResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
 type ListTokensRequestObject struct {
 	Params ListTokensParams
 }
@@ -8597,6 +8779,9 @@ type StrictServerInterface interface {
 	// RunRetention Apply retention now
 	// (POST /v1/admin/retention/run)
 	RunRetention(ctx context.Context, request RunRetentionRequestObject) (RunRetentionResponseObject, error)
+	// AdminStatus Server status
+	// (GET /v1/admin/status)
+	AdminStatus(ctx context.Context, request AdminStatusRequestObject) (AdminStatusResponseObject, error)
 	// ListTokens List tokens
 	// (GET /v1/admin/tokens)
 	ListTokens(ctx context.Context, request ListTokensRequestObject) (ListTokensResponseObject, error)
@@ -9185,6 +9370,30 @@ func (sh *strictHandler) RunRetention(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RunRetentionResponseObject); ok {
 		if err := validResponse.VisitRunRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AdminStatus operation middleware
+func (sh *strictHandler) AdminStatus(w http.ResponseWriter, r *http.Request) {
+	var request AdminStatusRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AdminStatus(ctx, request.(AdminStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AdminStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AdminStatusResponseObject); ok {
+		if err := validResponse.VisitAdminStatusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -3481,6 +3481,78 @@
         ]
       }
     },
+    "/v1/admin/status": {
+      "get": {
+        "operationId": "adminStatus",
+        "summary": "Server status",
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "The server's status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStatus"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "description": "What an operator wants to see first: the version, the database schema, how big the database is, how much room is left, and when retention last ran. It is read from the running server and changes nothing."
+      }
+    },
     "/v1/admin/backup": {
       "get": {
         "operationId": "backup",
@@ -5354,6 +5426,52 @@
           "epoch": {
             "type": "string",
             "description": "The inbox's current epoch."
+          }
+        }
+      },
+      "AdminStatus": {
+        "type": "object",
+        "description": "The server's status, for the admin console and for monitoring that already speaks to the admin API.",
+        "required": [
+          "version",
+          "schema_version",
+          "database_bytes",
+          "retention_interval_seconds"
+        ],
+        "properties": {
+          "version": {
+            "type": "string",
+            "description": "The release, such as `0.1.0`, or `dev-<commit>` for a build from a checkout."
+          },
+          "schema_version": {
+            "type": "integer",
+            "description": "The newest applied database migration.",
+            "minimum": 0
+          },
+          "database_bytes": {
+            "type": "integer",
+            "description": "Size of the database file, not counting its write-ahead log.",
+            "minimum": 0
+          },
+          "free_bytes": {
+            "type": "integer",
+            "description": "Bytes free on the volume that holds the data directory. Absent when the server cannot measure it.",
+            "minimum": 0
+          },
+          "retention_interval_seconds": {
+            "type": "integer",
+            "description": "How often scheduled retention runs. `0` means it is off.",
+            "minimum": 0
+          },
+          "last_retention_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When retention last finished in this process, scheduled or asked for. Absent until it has run."
+          },
+          "last_retention_deleted": {
+            "type": "integer",
+            "description": "How many messages that run deleted. Absent until it has run.",
+            "minimum": 0
           }
         }
       }

@@ -18,6 +18,15 @@ updates:
       actions:
         patterns: ["*"]
     open-pull-requests-limit: 5
+  # The console's build tools and runtime. Production changes to the built files are part
+  # of the pull request, because CI rebuilds and compares them.
+  - package-ecosystem: npm
+    directory: /web
+    schedule: { interval: weekly }
+    groups:
+      web-dependencies:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }

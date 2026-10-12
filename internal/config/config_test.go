@@ -37,7 +37,7 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if c.ListenAddr != ":8080" || c.DataDir != "./data" || c.LogFormat != "json" ||
 		c.LogLevel != slog.LevelInfo || c.SSEHeartbeat != 15*time.Second ||
-		c.SSERecheckInterval != 0 || !c.MCPEnabled || c.MCPInlineBodyBytes != 16384 ||
+		c.SSERecheckInterval != 0 || !c.MCPEnabled || !c.AdminUI || c.MCPInlineBodyBytes != 16384 ||
 		c.RetentionInterval != time.Hour || c.ShutdownTimeout != 10*time.Second {
 		t.Fatalf("unexpected defaults: %+v", c)
 	}
@@ -152,12 +152,13 @@ func TestParsedValues(t *testing.T) {
 	e["HOOKINLET_PUBLIC_BASE_URL"] = "https://hooks.example.com/"
 	e["HOOKINLET_SSE_RECHECK_INTERVAL"] = "5s"
 	e["HOOKINLET_MCP_ENABLED"] = "false"
+	e["HOOKINLET_ADMIN_UI"] = "false"
 	c, err := Load(nil, env(e), io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(c.TrustedProxies) != 2 || c.PublicBaseURL != "https://hooks.example.com" ||
-		c.SSERecheckInterval != 5*time.Second || c.MCPEnabled {
+		c.SSERecheckInterval != 5*time.Second || c.MCPEnabled || c.AdminUI {
 		t.Fatalf("unexpected: %+v", c)
 	}
 }

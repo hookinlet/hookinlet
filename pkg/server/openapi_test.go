@@ -235,10 +235,10 @@ func TestEveryOperationIsRegisteredAndNothingIsRegisteredByHand(t *testing.T) {
 	}
 
 	// A route registered anywhere else would be served without the document's
-	// credential, parameter, and body checks. Registration happens in two files, and
-	// only the catch-all is written out.
+	// credential, parameter, and body checks. Registration happens in routes.go, and
+	// only the catch-all and the console (static files, which are not operations) are written out.
 	re := regexp.MustCompile(`\.(HandleFunc|Handle)\(`)
-	allowed := map[string]int{"routes.go": 3, "server.go": 1} // docRouter's three; the catch-all 404
+	allowed := map[string]int{"routes.go": 3, "server.go": 1, "console.go": 2} // docRouter's three; the catch-all 404; the console's static files
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
@@ -537,6 +537,17 @@ func (f *faulty) ListTokens(ctx context.Context, p inbox.TokenListParams) ([]*in
 		return nil, errBoom
 	}
 	return f.Store.ListTokens(ctx, p)
+}
+
+// Status makes a Store that can report one fail when told to.
+func (f *faulty) Status(ctx context.Context) (inbox.StoreStatus, error) {
+	if f.failing() {
+		return inbox.StoreStatus{}, errBoom
+	}
+	if r, ok := f.Store.(inbox.StatusReporter); ok {
+		return r.Status(ctx)
+	}
+	return inbox.StoreStatus{}, nil
 }
 
 func (f *faulty) DeleteToken(ctx context.Context, id inbox.TokenID) error {

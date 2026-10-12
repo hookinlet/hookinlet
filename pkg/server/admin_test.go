@@ -140,7 +140,7 @@ func TestAdminAPIRequiresTheAdminToken(t *testing.T) {
 		{"PATCH", "/v1/admin/inboxes/agent-a"}, {"DELETE", "/v1/admin/inboxes/agent-a"},
 		{"PUT", "/v1/admin/inboxes/agent-a/secret"}, {"POST", "/v1/admin/inboxes/agent-a/rotate-ingest-key"},
 		{"POST", "/v1/admin/tokens"}, {"GET", "/v1/admin/tokens"}, {"DELETE", "/v1/admin/tokens/1"},
-		{"POST", "/v1/admin/retention/run"}, {"GET", "/v1/admin/backup"}, {"GET", "/metrics"},
+		{"POST", "/v1/admin/retention/run"}, {"GET", "/v1/admin/status"}, {"GET", "/v1/admin/backup"}, {"GET", "/metrics"},
 	}
 	for _, r := range routes {
 		for name, tok := range map[string]string{"no token": "", "bad token": "nope", "an agent token": a.tokenA} {
@@ -170,7 +170,7 @@ func TestAdminAPIWrongMethodIsJSON405(t *testing.T) {
 	a := newAdminEnv(t)
 	for path, allow := range map[string]string{
 		"/v1/admin/inboxes": "GET, POST", "/v1/admin/inboxes/agent-a": "DELETE, GET, PATCH", "/v1/admin/inboxes/agent-a/secret": "PUT",
-		"/v1/admin/inboxes/agent-a/rotate-ingest-key": "POST", "/v1/admin/tokens": "GET, POST", "/v1/admin/tokens/1": "DELETE", "/v1/admin/retention/run": "POST", "/v1/admin/backup": "GET", "/metrics": "GET",
+		"/v1/admin/inboxes/agent-a/rotate-ingest-key": "POST", "/v1/admin/tokens": "GET, POST", "/v1/admin/tokens/1": "DELETE", "/v1/admin/retention/run": "POST", "/v1/admin/status": "GET", "/v1/admin/backup": "GET", "/metrics": "GET",
 	} {
 		status, hdr, body := a.call("OPTIONS", path, nil, testAdminToken)
 		if status != http.StatusMethodNotAllowed || hdr.Get("Allow") != allow || errorCodeOfBody(t, body) != "method_not_allowed" {
@@ -1037,4 +1037,31 @@ func TestManualRetentionStopsWhenShutdownBegins(t *testing.T) {
 		t.Fatal("shutdown never finished")
 	}
 	<-reply
+}
+
+// The status endpoint reports the release, the schema, the database, and the last
+// retention run once there has been one.
+func TestAdminStatusReportsTheServer(t *testing.T) {
+	a := newAdminEnv(t, func(o *Options) { o.Version = "9.9.9"; o.RetentionInterval = 90 * time.Minute })
+	type status struct {
+		Version              string  `json:"version"`
+		SchemaVersion        int     `json:"schema_version"`
+		DatabaseBytes        int64   `json:"database_bytes"`
+		FreeBytes            *int64  `json:"free_bytes"`
+		RetentionInterval    int     `json:"retention_interval_seconds"`
+		LastRetentionAt      *string `json:"last_retention_at"`
+		LastRetentionDeleted *int64  `json:"last_retention_deleted"`
+	}
+	first := unjson[status](t, a.mustAdmin("GET", "/v1/admin/status", nil, 200))
+	if first.Version != "9.9.9" || first.SchemaVersion < 7 || first.DatabaseBytes <= 0 || first.RetentionInterval != 5400 {
+		t.Errorf("status: %+v", first)
+	}
+	if first.FreeBytes == nil || *first.FreeBytes <= 0 {
+		t.Errorf("free bytes: %v", first.FreeBytes)
+	}
+	a.mustAdmin("POST", "/v1/admin/retention/run", nil, 200)
+	second := unjson[status](t, a.mustAdmin("GET", "/v1/admin/status", nil, 200))
+	if second.LastRetentionAt == nil || second.LastRetentionDeleted == nil {
+		t.Errorf("no last retention after a run: %+v", second)
+	}
 }

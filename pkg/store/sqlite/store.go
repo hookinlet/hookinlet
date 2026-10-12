@@ -345,6 +345,22 @@ func (s *Store) reusableBytes(ctx context.Context) uint64 {
 	return uint64(pages) * uint64(size) //nolint:gosec // both are checked not to be negative
 }
 
+// Status implements inbox.StatusReporter.
+func (s *Store) Status(ctx context.Context) (inbox.StoreStatus, error) {
+	v, err := s.SchemaVersion(ctx)
+	if err != nil {
+		return inbox.StoreStatus{}, err
+	}
+	st := inbox.StoreStatus{SchemaVersion: v}
+	if fi, err := os.Stat(s.path); err == nil {
+		st.DatabaseBytes = fi.Size()
+	}
+	if free, err := s.freeSpace(filepath.Dir(s.path)); err == nil {
+		st.FreeBytes, st.FreeKnown = free, true
+	}
+	return st, nil
+}
+
 // ---- transactions and errors ----
 
 // ctxErr reports the context's error in place of err when the context was

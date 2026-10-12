@@ -87,6 +87,7 @@ type Config struct {
 	SSEHeartbeat       time.Duration
 	SSERecheckInterval time.Duration
 	MCPEnabled         bool
+	AdminUI            bool
 	AdminEnabled       bool
 	AdminListenAddr    string
 	MCPInlineBodyBytes int
@@ -112,6 +113,7 @@ func (c *Config) LogValue() slog.Value {
 		slog.Duration("sse_heartbeat", c.SSEHeartbeat),
 		slog.Duration("sse_recheck_interval", c.SSERecheckInterval),
 		slog.Bool("mcp_enabled", c.MCPEnabled),
+		slog.Bool("admin_ui", c.AdminUI),
 		slog.Bool("admin_enabled", c.AdminEnabled),
 		slog.String("admin_listen_addr", c.AdminListenAddr),
 		slog.Int("mcp_inline_body_bytes", c.MCPInlineBodyBytes),
@@ -143,6 +145,7 @@ var specs = []spec{
 	{name: "sse-recheck-interval", def: "0", usage: "re-read the store on this interval even without a notifier signal; 0 disables"},
 	{name: "admin-enabled", def: "true", usage: "serve the admin API under /v1/admin; false leaves inboxes and tokens to the command line, which works in the data directory"},
 	{name: "admin-listen-addr", usage: "serve the admin API on its own address (such as 127.0.0.1:9090) and not on --listen-addr; empty serves it on --listen-addr"},
+	{name: "admin-ui", def: "true", usage: "serve the admin console at /admin, beside the admin API (it needs --admin-enabled)"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
 	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},
 	{name: "ingest-memory-budget", def: "268435456", usage: "most bytes of request bodies held in memory at once by deliveries being received; more are answered 503 with Retry-After (0 turns the bound off)"},
@@ -366,6 +369,9 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 	}
 	if c.ShutdownTimeout, err = parseDuration(vals, "shutdown-timeout", true); err != nil {
 		collect(err)
+	}
+	if c.AdminUI, err = strconv.ParseBool(vals["admin-ui"]); err != nil {
+		collect(fieldErr("admin-ui", "must be true or false"))
 	}
 	if c.MCPEnabled, err = strconv.ParseBool(vals["mcp-enabled"]); err != nil {
 		collect(fieldErr("mcp-enabled", "must be true or false"))
