@@ -41,6 +41,8 @@ jobs:
           sha256sum internal/api/api.gen.go > /tmp/first.sha
           go generate ./internal/api
           sha256sum -c /tmp/first.sha
+      - name: Our one changed generator template is still upstream's plus the recorded edits
+        run: scripts/check-template.sh
       # The race detector doubles the time and is for main, not for every push to a
       # review.
       - name: Test (everything but pkg/server, which has its own job)
