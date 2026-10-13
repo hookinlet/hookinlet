@@ -6,6 +6,44 @@ applies.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.1.1 - 2026-10-13
+
+Upgrade from 0.1.0 by starting the new version on the same data directory; there is no
+migration. It closes two ways for anyone who can reach the server, without a credential, to hold
+connections open (see Security below), so it is worth taking promptly.
+
+**Security**
+
+- **A request could hold its connection open for good, without a credential.** One that promised
+  a body and never sent it waited forever anywhere but at a known ingest key (on `/healthz`, a
+  `404`, an unknown ingest key, or `/mcp` without a token), and so did one whose client sent
+  requests one after another on a connection and never read the answers. With nothing else
+  happening, that exhausts descriptors and memory. Every request's body now has
+  `ReadBodyTimeout` to arrive, and every answer `ResponseTimeout` to be taken. An operation that
+  waits before it answers (a free read slot, an MCP wait) counts that from when its answer is
+  ready, and an ingest's answer counts from when the delivery has been handled.
+- **A client with a valid token could do the same with requests that are refused early**, such
+  as a stream asked for with a stale `epoch`, which the per-credential limits did not count. Such
+  an answer now gets `ResponseTimeout` plus the longest wait the request could have made. The admin
+  API, whose caller holds the admin token, is unchanged.
+
+**Fixes**
+
+- **An empty `hookinlet.db` is refused.** A restore or copy that did not finish leaves a
+  zero-byte file, which the server (and `hookinlet check`) used to take for a new database and
+  start on, with none of the data. `sqlite.Open` now returns an error for it, also when a
+  leftover `-wal` is beside it. Do not create the file ahead of time (`touch`, a single-file bind
+  mount): let hookinlet make it.
+- **A backup that fails no longer leaves its journal in the data directory.** A snapshot that
+  ran out of room left `backup-N.tmp-journal` behind for good; it is removed with the snapshot,
+  and swept like it at the next start.
+- **A delivery that queued for the database writer was stamped with a time that had already
+  passed**, and the store then logged "the clock is behind a message already stored" for a clock
+  that had not moved. The time is now read once the delivery holds the writer.
+- **`GET /v1/admin/tokens` no longer fails with "not found" when an inbox is deleted while it
+  runs.** The vanished inbox is left out of the listing.
 - **`hookinlet version` after `go install`.** A binary installed with
   `go install github.com/hookinlet/hookinlet/cmd/hookinlet@v0.1.0` printed `dev`; it now prints
   the module version without its `v` (`0.1.0`), as the release builds do. A build from a checkout
@@ -15,37 +53,16 @@ applies.
   the config of both platforms), but some runtimes do not report it, such as Podman's
   Docker-compatible API; [deploying](docs/deploying.md#health-checks) says how to set
   the check there. CI and the release workflow now fail if a platform's image config lacks it.
-- **An empty `hookinlet.db` is refused.** A restore or copy that did not finish leaves a
-  zero-byte file, which the server (and `hookinlet check`) used to take for a new database and
-  start on, with none of the data. `sqlite.Open` now returns an error for it, also when a
-  leftover `-wal` is beside it.
-- **A backup that fails no longer leaves its journal in the data directory.** A snapshot that
-  ran out of room left `backup-N.tmp-journal` behind for good; it is removed with the snapshot,
-  and swept like it at the next start.
-- The backup and restore documentation says what a restore must not leave behind (an old `-wal`
-  or `-shm`), what a reader that sends no `epoch` sees after a restore, and how to restore into a
-  Docker volume.
-- **A delivery that queued for the database writer was stamped with a time that had already
-  passed**, and the store then logged "the clock is behind a message already stored" for a clock that
-  had not moved. The time is now read once the delivery holds the writer.
-- **`GET /v1/admin/tokens` no longer fails with "not found" when an inbox is deleted while it
-  runs.** The vanished inbox is left out of the listing.
-- The administration guide says that the write-ahead log can grow well past its usual size while
-  a backup of a large database runs under heavy load.
 
-**Security**
+**Documentation**
 
-- A request could hold its connection open for good without a credential. One that promised a
-  body and never sent it waited forever anywhere but at a known ingest key (on `/healthz`, a
-  `404`, an unknown ingest key, or `/mcp` without a token), and one whose client never read
-  the answers to requests sent one after another on a connection waited forever to write
-  them. Every request's body now has `ReadBodyTimeout` to arrive, and every answer
-  `ResponseTimeout` to be taken. An operation that needs a credential still counts that from
-  when it starts building its answer, MCP answers are now bound by it too, and an ingest's
-  answer counts from when the delivery has been handled.
-  A request with a valid token is given the same time, plus the longest wait it could have made
-  (a free read slot, or an MCP wait), where before one that was refused early and never read, such as
-  a stream asked for with a stale `epoch`, held its connection for good.
+- Restore: what a restore must not leave behind (an old `-wal` or `-shm`), what a reader that
+  sends no `epoch` sees after a restore, and how to restore into a Docker volume.
+- A backup of a large database under heavy load can make the write-ahead log grow well past its
+  usual size while it runs.
+- The Caddy and nginx examples no longer leave the console sign-in page (`/admin`) public; the
+  verifiers walk-through keeps the master key that is already set; a quarantined macOS binary
+  and the other small gaps found by installing from the published artifacts.
 
 **Go API**
 
