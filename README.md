@@ -319,7 +319,7 @@ pay. It will be built on this code through the same public interfaces described 
 Pre-1.0. The HTTP API and the command line are what the documentation says. The Go packages under `pkg/` can
 still change; [CHANGELOG.md](CHANGELOG.md) lists every change to them, and after v1.0.0 semantic versioning applies.
 
-Bug reports, questions, and ideas are welcome as issues. Code contributions are by invitation for now; see
+Bug reports, questions, and ideas are welcome as issues, under the [code of conduct](CODE_OF_CONDUCT.md). Code contributions are by invitation for now; see
 [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md) and please do not
 open a public issue.
 

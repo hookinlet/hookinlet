@@ -16,6 +16,8 @@ problem reproducible.
 
 ## Pull requests are by invitation
 
+Everyone taking part is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
+
 No outside code is being merged for now. Please open an issue to propose a change first. If the maintainer invites
 a pull request, you will be asked to sign a contributor license agreement before it can be merged (its text will be
 published before any invitation is sent), so that contributed code can ship in both the open-source and the
