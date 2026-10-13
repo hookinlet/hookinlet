@@ -202,7 +202,11 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: false
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
+          provenance: mode=max
+          sbom: true
+      - name: Every platform's image carries its healthcheck
+        run: scripts/check-image-healthcheck.sh "$RUNNER_TEMP/image.tar"
 
   # The documentation is code too: its examples must run, and the OpenAPI
   # document must be valid (a Go test also checks it against the server).
