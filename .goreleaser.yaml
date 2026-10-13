@@ -30,29 +30,34 @@ archives:
     # One directory, so unpacking in a Downloads folder does not scatter files.
     wrap_in_directory: true
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    # The same bytes, owner and time for every file on every build, so two builds of one
-    # commit make the same archive.
-    builds_info: &info
+    # The same bytes, owner, time and mode for every entry on every build, so two builds of one
+    # commit make the same archive, whoever builds it and with whatever umask.
+    builds_info:
       owner: root
       group: root
+      mode: 0755
       mtime: "{{ .CommitDate }}"
     files:
-      - {src: LICENSE, info: *info}
-      - {src: NOTICE, info: *info}
-      - {src: LICENSING.md, info: *info}
-      - {src: THIRD_PARTY_LICENSES, info: *info}
-      - {src: README.md, info: *info}
-      - {src: CHANGELOG.md, info: *info}
-      - {src: SECURITY.md, info: *info}
-      - {src: CONTRIBUTING.md, info: *info}
-      - {src: CODE_OF_CONDUCT.md, info: *info}
-      - {src: "docs/*.md", info: *info}
-      - {src: docs/openapi.json, info: *info}
-      - {src: "docs/images/*.png", info: *info}
-      - {src: ".github/banner-*.png", info: *info}
-      - {src: examples/README.md, info: *info}
-      - {src: examples/LICENSE, info: *info}
-      - {src: "examples/**/*", info: *info}
+      - {src: LICENSE, info: &file {owner: root, group: root, mode: 0644, mtime: "{{ .CommitDate }}"}}
+      - {src: NOTICE, info: *file}
+      - {src: LICENSING.md, info: *file}
+      - {src: THIRD_PARTY_LICENSES, info: *file}
+      - {src: README.md, info: *file}
+      - {src: CHANGELOG.md, info: *file}
+      - {src: SECURITY.md, info: *file}
+      - {src: CONTRIBUTING.md, info: *file}
+      - {src: CODE_OF_CONDUCT.md, info: *file}
+      - {src: "docs/*.md", info: *file}
+      - {src: docs/openapi.json, info: *file}
+      - {src: "docs/images/*.png", info: *file}
+      - {src: ".github/banner-*.png", info: *file}
+      - {src: examples/README.md, info: *file}
+      - {src: examples/LICENSE, info: *file}
+      - {src: "examples/*/*.go", info: *file}
+      - {src: examples/relay/echo-receiver.py, info: *file}
+      # the example scripts that are run directly
+      - {src: "examples/curl/*.sh", info: &script {owner: root, group: root, mode: 0755, mtime: "{{ .CommitDate }}"}}
+      - {src: examples/python/agent.py, info: *script}
 
 checksum:
   name_template: checksums.txt

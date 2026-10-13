@@ -47,35 +47,37 @@ func (s *Server) readSlot(ctx context.Context) (release func(), err error) {
 	// and never reads them keeps its slots until ResponseTimeout, and without this it
 	// could hold every one, so that every other inbox's readers are turned away.
 	if rr, ok := ctx.Value(readKey).(*readRequest); ok && rr.r != nil {
+		started := time.Now()
 		giveBack, err := s.readShares.acquire(ctx, holderOf(rr.r, rr.principal), s.opts.MaxReadsPerCredential, s.opts.ReadWaitTimeout)
 		if err != nil {
 			return nil, err
 		}
-		slot, err := s.globalReadSlot(ctx)
+		// ReadWaitTimeout bounds the whole wait, for the credential's share and the shared slot together.
+		slot, err := s.globalReadSlot(ctx, max(0, s.opts.ReadWaitTimeout-time.Since(started)))
 		if err != nil {
 			giveBack()
 			return nil, err
 		}
 		return func() { slot(); giveBack() }, nil
 	}
-	return s.globalReadSlot(ctx)
+	return s.globalReadSlot(ctx, s.opts.ReadWaitTimeout)
 }
 
-// globalReadSlot takes one of the shared slots.
-func (s *Server) globalReadSlot(ctx context.Context) (release func(), err error) {
+// globalReadSlot takes one of the shared slots, waiting up to wait.
+func (s *Server) globalReadSlot(ctx context.Context, wait time.Duration) (release func(), err error) {
 	select {
 	case s.reads <- struct{}{}:
 		return func() { <-s.reads }, nil
 	default:
 	}
-	wait := time.NewTimer(s.opts.ReadWaitTimeout)
-	defer wait.Stop()
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	select {
 	case s.reads <- struct{}{}:
 		return func() { <-s.reads }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-wait.C:
+	case <-timer.C:
 		return nil, errBusy
 	}
 }

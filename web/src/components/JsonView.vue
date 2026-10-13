@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { visibleInBody } from '../format'
 import { tokens } from '../json-tokens'
 
 // A pretty-printed JSON value, drawn token by token as text. Nothing here is ever parsed as
@@ -10,7 +11,7 @@ const laid = computed(() => tokens(props.value))
 
 <template>
   <div>
-    <pre class="json"><template v-for="(t, i) in laid.tokens" :key="i"><span :class="t.kind">{{ t.text }}</span></template></pre>
+    <pre class="json"><template v-for="(t, i) in laid.tokens" :key="i"><span :class="t.kind">{{ t.kind === 'str' || t.kind === 'key' ? visibleInBody(t.text) : t.text }}</span></template></pre>
     <p v-if="laid.truncated" class="muted note">This body is large, so only the start is drawn. Use the Raw tab for every byte.</p>
   </div>
 </template>

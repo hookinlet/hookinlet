@@ -47,15 +47,25 @@ export function ago(then: Date | string, now: Date = new Date()): string {
   return `${Math.round(h / 24)} days ago`
 }
 
-// visible makes the characters that change how text is laid out (bidirectional controls,
-// zero-width and invisible formatting) show as <U+XXXX>, so that a sender cannot use them to
-// make an event type or a header read as something it is not.
+// visible makes the characters that change how text is laid out or that cannot be seen show as
+// <U+XXXX>, so that a sender cannot use them to make an event type, a header or a path read as
+// something it is not: every default-ignorable code point (zero-width and soft hyphens, fillers,
+// variation selectors, invisible operators), the bidirectional controls, the other format
+// characters, and the line and paragraph separators.
+const STRICT = /[\p{Default_Ignorable_Code_Point}\p{Bidi_Control}\p{Cf}\p{Zl}\p{Zp}]/gu
+
+// In a message body the joiners and variation selectors that make up emoji and many scripts are
+// text and stay as they are. Only what can reorder the text or hide it is marked: the
+// bidirectional controls, the line and paragraph separators, and the tag characters.
+const IN_BODY = /[\p{Bidi_Control}\u2028\u2029\u{e0000}-\u{e007f}]/gu
+
+const mark = (c: string) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`
+
 export function visible(text: string): string {
-  return text.replace(INVISIBLE, (c) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`)
+  return text.replace(STRICT, mark)
 }
 
-// The characters that change how text is laid out or that cannot be seen: soft hyphen, the Arabic
-// letter mark, the Mongolian vowel separator, zero-width and direction marks and overrides, line and
-// paragraph separators, word joiners and invisible operators, direction isolates, interlinear
-// annotation marks, the byte order mark, and the tag characters.
-const INVISIBLE = /[\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu
+// visibleInBody is visible for the text of a message body.
+export function visibleInBody(text: string): string {
+  return text.replace(IN_BODY, mark)
+}

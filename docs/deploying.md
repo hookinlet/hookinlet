@@ -328,7 +328,7 @@ reads cannot pin more than 16 pages. One credential may hold only a quarter of t
 (4 of 16), so that a client that never reads cannot hold them all and turn every other inbox's
 readers away; the admin token is not limited. In the same way one credential may hold only a
 tenth of the stream slots (100 of 1000) and one inbox's deliveries only an eighth of the
-budget below (32 MiB of 256), so that a token or an ingest key cannot take what everyone
+budget below (32 MiB of 256; never less than its largest body), so that a token or an ingest key cannot take what everyone
 shares. The first two are settings (`HOOKINLET_MAX_READS_PER_CREDENTIAL`,
 `HOOKINLET_MAX_STREAMS_PER_CREDENTIAL`). Deliveries are not limited in number: each one
 is held in memory while it is read and checked, up to the inbox's body limit

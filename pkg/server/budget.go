@@ -23,11 +23,13 @@ type byteBudget struct {
 }
 
 // perInbox is the most of the budget one inbox's deliveries may hold at once: an eighth of
-// it, but never less than two of its largest bodies. Whoever has an inbox's key can send
-// slow bodies, and without a share of its own that one inbox could fill the whole budget
-// and turn every other inbox's deliveries away.
+// it, but never less than its largest body (or one delivery at that size could not be
+// received at all). Whoever has an inbox's key can send slow bodies, and without a share of
+// its own that one inbox could fill the whole budget and turn every other inbox's deliveries
+// away. With a budget only a little larger than the largest bodies the share is large too,
+// since one such delivery needs it.
 func (b *byteBudget) perInbox(maxBody int64) int64 {
-	return max(b.limit/8, 2*maxBody)
+	return max(b.limit/8, maxBody)
 }
 
 // add holds n more bytes for an inbox, or refuses: because the budget is full, or because

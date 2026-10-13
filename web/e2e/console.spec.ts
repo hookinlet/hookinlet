@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { ADMIN_TOKEN } from '../playwright.config'
-import { deliver, makeInbox, SECRET, signIn } from './helpers'
+import { deliver, githubSignature, makeInbox, SECRET, signIn } from './helpers'
 
 // Each test makes the inbox it needs through the API, so any one can run alone.
 
@@ -149,4 +149,17 @@ test('a reload signs out, because the token is only in memory', async ({ page })
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible()
   expect(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).not.toContain('e2e-admin-token')
+})
+
+test('direction-changing characters in a body, a path and headers are shown as code points', async ({ page, request }) => {
+  const { ingestUrl } = await makeInbox(request, 'github-spoof')
+  const body = JSON.stringify({ 'k‮ey': 'val‮ue' })
+  await request.post(`${ingestUrl}/invoice%E2%80%AEfdp.exe`, {
+    data: body,
+    headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': githubSignature(SECRET, body), 'X-GitHub-Event': 'push' },
+  })
+  await signIn(page, '/admin/inboxes/github-spoof/messages/1')
+  await expect(page.getByText('<U+202E>').first()).toBeVisible()
+  const html = await page.getByRole('main').innerHTML()
+  expect(html).not.toContain('‮') // none of the raw characters reached the page
 })
