@@ -4,9 +4,12 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -111,9 +114,8 @@ func TestOneInboxCannotUseUpTheIngestMemoryBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 		conns = append(conns, c)
-		if _, err := fmt.Fprintf(c, "POST /in/agent-a HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", 1<<20, part); err != nil {
-			t.Fatal(err)
-		}
+		// A sender the server has already turned away may have its connection closed under it.
+		_, _ = fmt.Fprintf(c, "POST /in/agent-a HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", 1<<20, part)
 	}
 	defer func() {
 		for _, c := range conns {
@@ -130,5 +132,66 @@ func TestOneInboxCannotUseUpTheIngestMemoryBudget(t *testing.T) {
 	}
 	if status, body := do2(t, "POST", base+"/in/other", nil, "hello"); status != http.StatusOK {
 		t.Errorf("a delivery to another inbox while the first is stalled: %d %s", status, body)
+	}
+}
+
+// The share is per credential, not per spelling of the Authorization header: the scheme is
+// case-insensitive, so changing its case must not give a token a new share.
+func TestChangingTheCaseOfTheSchemeDoesNotMultiplyAShare(t *testing.T) {
+	a := newAdminEnv(t, func(o *Options) {
+		o.MaxStreams, o.MaxStreamsPerInbox, o.MaxStreamsPerCredential = 20, 20, 2
+	})
+	a.newInbox("agent-b", "trusted", "")
+	made := unjson[struct {
+		Token string `json:"token"`
+	}](t, a.mustAdmin("POST", "/v1/admin/tokens", map[string]any{"name": "all", "all_inboxes": true}, http.StatusCreated))
+
+	open := func(scheme string) int {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, a.base+"/v1/inboxes/agent-a/stream", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", scheme+" "+made.Token)
+		resp, err := sseHTTP.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp.StatusCode
+	}
+	got := []int{open("Bearer"), open("bearer"), open("BEARER"), open("bEaReR")}
+	if got[0] != 200 || got[1] != 200 || got[2] != http.StatusServiceUnavailable || got[3] != http.StatusServiceUnavailable {
+		t.Errorf("four spellings of one credential, with a share of two: %v, want 200 200 503 503", got)
+	}
+}
+
+// ReadWaitTimeout bounds the whole wait for a read slot, for the credential's share and the shared
+// slot together, not each in turn.
+func TestAReadWaitsAtMostReadWaitTimeoutInAll(t *testing.T) {
+	e := newAgentEnv2(t, func(o *Options) {
+		o.MaxConcurrentReads, o.MaxReadsPerCredential = 1, 1
+		o.ReadWaitTimeout = 400 * time.Millisecond
+	})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/x", nil)
+	req.Header.Set("Authorization", "Bearer someone")
+	ctx := context.WithValue(t.Context(), readKey, &readRequest{r: req})
+
+	// The credential's share is held for most of the wait, and the shared slot for all of it.
+	h := holderOf(req, nil)
+	giveBack, err := e.server.readShares.acquire(t.Context(), h, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.server.reads <- struct{}{}
+	defer func() { <-e.server.reads }()
+	time.AfterFunc(300*time.Millisecond, giveBack)
+
+	start := time.Now()
+	_, err = e.server.readSlot(ctx)
+	if !errors.Is(err, errBusy) {
+		t.Fatalf("readSlot: %v, want errBusy", err)
+	}
+	if took := time.Since(start); took > 550*time.Millisecond {
+		t.Errorf("the refusal came after %v; ReadWaitTimeout is 400ms", took)
 	}
 }

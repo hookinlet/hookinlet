@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,12 +25,15 @@ type holder struct {
 }
 
 // holderOf identifies the credential a request was made with. The key is a digest of the
-// Authorization header, kept only in memory, so a token is never stored or logged.
+// credential, kept only in memory, so a token is never stored or logged. The scheme is
+// compared without regard to case ("Bearer", "bearer" and "BEARER" are one credential, as the
+// authenticator treats them), so a caller cannot multiply its share by changing the case.
 func holderOf(r *http.Request, p inbox.Principal) holder {
 	if p != nil && p.CanAdmin() {
 		return holder{admin: true}
 	}
-	sum := sha256.Sum256([]byte(r.Header.Get("Authorization")))
+	scheme, credential, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	sum := sha256.Sum256([]byte(strings.ToLower(scheme) + " " + credential))
 	return holder{key: hex.EncodeToString(sum[:8])}
 }
 

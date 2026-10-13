@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, bytes, compact, visible } from './format'
+import { ago, bytes, compact, visible, visibleInBody } from './format'
 
 describe('bytes', () => {
   it('writes sizes for people', () => {
@@ -48,5 +48,22 @@ describe('visible', () => {
     expect(visible('a\u200Bb')).toBe('a<U+200B>b')
     expect(visible('x\u061Cy\u2028z\u{E0041}')).toBe('x<U+061C>y<U+2028>z<U+E0041>')
     expect(visible('plain text, ünïcödé ok')).toBe('plain text, ünïcödé ok')
+  })
+})
+
+describe('visible, more thoroughly', () => {
+  it('marks fillers, variation selectors and invisible operators', () => {
+    expect(visible('a\u3164b')).toBe('a<U+3164>b')
+    expect(visible('a\uFE0Fb')).toBe('a<U+FE0F>b')
+    expect(visible('a\u2062b')).toBe('a<U+2062>b')
+    expect(visible('a\u034Fb')).toBe('a<U+034F>b')
+  })
+})
+
+describe('visibleInBody', () => {
+  it('marks what reorders or hides text, and leaves emoji and scripts alone', () => {
+    expect(visibleInBody('k\u202Eey')).toBe('k<U+202E>ey')
+    expect(visibleInBody('x\u2028y')).toBe('x<U+2028>y')
+    expect(visibleInBody('\u{1F468}\u200D\u{1F469}\u200D\u{1F467} \u2764\uFE0F')).toBe('\u{1F468}\u200D\u{1F469}\u200D\u{1F467} \u2764\uFE0F')
   })
 })

@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { ApiError } from '../api/client'
 import { getMessage, rawBytes, type Message } from '../api/messages'
-import { ago, visible } from '../format'
+import { ago, visible, visibleInBody } from '../format'
 import { guard } from '../session'
 import CopyField from './CopyField.vue'
 import Icon from './Icon.vue'
@@ -140,7 +140,7 @@ async function copyCurl() {
             <JsonView :value="message.body" />
             <p class="muted note parsed">Shown as parsed. Very large numbers and repeated keys can differ from the bytes; the Raw tab has the exact bytes.</p>
           </template>
-          <pre v-else-if="message.body_text !== undefined" class="plain">{{ message.body_text }}</pre>
+          <pre v-else-if="message.body_text !== undefined" class="plain">{{ visibleInBody(message.body_text) }}</pre>
           <p v-else-if="message.body_base64 !== undefined" class="muted">This body is not text ({{ message.size }} bytes). The Raw tab shows it as bytes.</p>
           <p v-else class="muted">This delivery had no body.</p>
         </template>
