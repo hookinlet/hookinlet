@@ -23,7 +23,8 @@ echoed; otherwise one is generated.
 ## Read API
 
 Agents read an inbox's messages over plain HTTP. Every endpoint is `GET` (or
-`HEAD`) and returns JSON, except `/raw`.
+`HEAD`) and returns JSON, except `/raw`. The examples write `$BASE` for the
+server's address (`export BASE=http://localhost:8080`) and `$TOKEN` for an agent token.
 
 ```
 GET /v1/inboxes/{slug}                       the inbox's metadata
