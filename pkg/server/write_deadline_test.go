@@ -23,7 +23,12 @@ import (
 // another, and a write that the client does not take blocks until a deadline ends it.
 // Nothing here needs a credential except the MCP case, whose answers are held in memory.
 func TestAClientThatDoesNotReadCannotHoldAConnection(t *testing.T) {
-	ae, base, _ := streamEnv(t, func(o *Options) { o.ResponseTimeout = 300 * time.Millisecond })
+	// The server's send buffer is made small as well as the client's receive buffer. Without that a
+	// Linux server parks megabytes of answers in the kernel and is never stuck writing: the
+	// requests that cost it some work (an ingest, an MCP call) then only keep it busy, and the
+	// test cannot tell a server that is slow from one that waits for the client.
+	lc := net.ListenConfig{Control: func(_, _ string, c rawConn) error { return smallSendBuffer(c) }}
+	ae, base, _ := streamEnvOn(t, lc, func(o *Options) { o.ResponseTimeout = 300 * time.Millisecond })
 	addr := strings.TrimPrefix(base, "http://")
 	mcpCall := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
 	for name, req := range map[string]string{ //nolint:gosec // requests, one with a test token

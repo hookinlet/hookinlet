@@ -363,7 +363,11 @@ func TestBodiesOverTheInlineLimitAreTruncatedAndFetchableWhole(t *testing.T) {
 // ---- wait_for_messages ----
 
 func TestWaitReturnsPromptlyOnIngest(t *testing.T) {
-	ae, base, _ := mcpEnv(t)
+	// The wait is woken by the notifier, not by the periodic re-read, which is set far
+	// beyond the bound below so that a wake-up that did not work could not pass for one
+	// that did. The bound itself is generous because a shared CI runner can take a
+	// couple of hundred milliseconds to run an ingest and an MCP answer.
+	ae, base, _ := mcpEnv(t, func(o *Options) { o.SSERecheckInterval = 10 * time.Second })
 	cs := connectMCP(t, base, ae.tokenA)
 
 	type result struct {
@@ -388,8 +392,8 @@ func TestWaitReturnsPromptlyOnIngest(t *testing.T) {
 		if r.err != "" {
 			t.Fatal(r.err)
 		}
-		if lag := r.at.Sub(sent); lag > 100*time.Millisecond {
-			t.Errorf("wait returned %v after the ingest, want under 100ms", lag)
+		if lag := r.at.Sub(sent); lag > time.Second {
+			t.Errorf("wait returned %v after the ingest, want under 1s", lag)
 		}
 		if got := seqsOf(r.p.Messages); !reflect.DeepEqual(got, []int64{1}) {
 			t.Errorf("messages = %v", got)

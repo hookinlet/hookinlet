@@ -19,7 +19,12 @@ import (
 // serveOn runs the env's server on a real socket and returns its base URL.
 func serveOn(t *testing.T, e *env) string {
 	t.Helper()
-	var lc net.ListenConfig
+	return serveOnWith(t, e, net.ListenConfig{})
+}
+
+// serveOnWith is serveOn on a listener made with lc.
+func serveOnWith(t *testing.T, e *env, lc net.ListenConfig) string {
+	t.Helper()
 	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

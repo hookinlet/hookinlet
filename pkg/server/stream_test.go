@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -181,6 +182,12 @@ func (ae *agentEnv) streamURL(base, slug, query string) string {
 // streamEnv is an agentEnv with a local notifier it can inspect, served on a socket.
 func streamEnv(t *testing.T, mods ...func(*Options)) (*agentEnv, string, *local.Notifier) {
 	t.Helper()
+	return streamEnvOn(t, net.ListenConfig{}, mods...)
+}
+
+// streamEnvOn is streamEnv served on a listener made with lc.
+func streamEnvOn(t *testing.T, lc net.ListenConfig, mods ...func(*Options)) (*agentEnv, string, *local.Notifier) {
+	t.Helper()
 	n := local.New()
 	all := append([]func(*Options){func(o *Options) { o.Notifier = n }}, mods...)
 	e := newAgentEnv2(t, all...)
@@ -190,7 +197,7 @@ func streamEnv(t *testing.T, mods ...func(*Options)) (*agentEnv, string, *local.
 	b := e.newInbox("agent-b", "trusted", "")
 	ae.b = b
 	ae.tokenB = e.tokenFor(b)
-	return ae, serveOn(t, ae.env), n
+	return ae, serveOnWith(t, ae.env, lc), n
 }
 
 // ---- format and basics ----
