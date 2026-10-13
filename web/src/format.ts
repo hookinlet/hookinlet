@@ -51,5 +51,11 @@ export function ago(then: Date | string, now: Date = new Date()): string {
 // zero-width and invisible formatting) show as <U+XXXX>, so that a sender cannot use them to
 // make an event type or a header read as something it is not.
 export function visible(text: string): string {
-  return text.replace(/[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, (c) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`)
+  return text.replace(INVISIBLE, (c) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}>`)
 }
+
+// The characters that change how text is laid out or that cannot be seen: soft hyphen, the Arabic
+// letter mark, the Mongolian vowel separator, zero-width and direction marks and overrides, line and
+// paragraph separators, word joiners and invisible operators, direction isolates, interlinear
+// annotation marks, the byte order mark, and the tag characters.
+const INVISIBLE = /[\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb\u{e0000}-\u{e007f}]/gu

@@ -47,27 +47,29 @@ REST, a live event stream, or MCP.
 the configuration, newest first. Of interest mainly to people embedding the Go packages.</summary>
 
 ### Late changes before the first release
-
+- **The console works on a separate admin listener.** With `HOOKINLET_ADMIN_LISTEN_ADDR` the console was
+  served on the admin address but could not read messages there (the read API was on the public
+  address only). The admin listener now also serves the read API when the console is on.
+- **The console marks invisible and direction-changing characters** in the request path, query and
+  content type as well, and in more kinds of them (Arabic letter mark, line and paragraph separators,
+  tag characters).
 - **One credential cannot use up what everyone shares.** A read token may hold only a quarter of the
   read slots and a tenth of the stream slots (the admin token is not limited), and one inbox's
   deliveries may hold only an eighth of the ingest memory budget, so a token that never reads its
   answers, or an ingest key that sends slow bodies, no longer turns every other inbox away. New in
   `pkg/server`: `Options.MaxReadsPerCredential` and `Options.MaxStreamsPerCredential` (settings
   `HOOKINLET_MAX_READS_PER_CREDENTIAL` and `HOOKINLET_MAX_STREAMS_PER_CREDENTIAL`).
-
 - **Admin console: managing, searching and testing.** The console can now manage: a new-inbox form with a section for each
   kind of sender (Stripe, GitHub, Slack, Standard Webhooks, HMAC, shared token, none) that shows the
   agent token and ingest URL once; a Settings tab per inbox (general settings, verification, replacing
   the secret, rotating the ingest URL, deleting with a typed confirmation); a Maintenance page (status,
   run retention, download a backup); and a command palette (`⌘K`). The console has Playwright
   end-to-end tests and an axe accessibility scan of every screen in both themes, run in CI.
-
 - **Admin console: inboxes and messages.** Each inbox has a page: its facts and ingest path, and its messages, newest
   first, with filters (event type, verification, time), older messages on request, and a live mode that
   follows the stream. A message opens at its own address (`/admin/inboxes/SLUG/messages/SEQ`) and shows
   its body, headers, exact raw bytes (as text or hex) and details, with a copy-as-curl for reading it back.
   Everything a sender wrote is drawn as text, with a reminder that it is untrusted.
-
 - **Admin console: shell, themes, overview and tokens.** The console now has an overview (inbox count, messages received,
   the last 24 hours, the last retention run, and an activity line per inbox), an inbox list with a
   filter, and a Tokens page that issues tokens (shown once, with a ready curl line) and revokes them.

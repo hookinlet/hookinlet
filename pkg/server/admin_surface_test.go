@@ -55,8 +55,19 @@ func TestTheAdminAPIOnItsOwnListenerIsNotOnThePublicOne(t *testing.T) {
 	if status, _ := do2(t, "POST", pubURL+"/v1/admin/tokens", adminAuth(), `{"name":"x","all_inboxes":true}`); status != 404 {
 		t.Errorf("the public listener creates tokens: %d", status)
 	}
+	// The admin listener also serves the read API the console shows messages with, to the
+	// admin token (and to a read token, as anywhere else).
+	if status, body := do2(t, "GET", admURL+"/v1/inboxes/surface", adminAuth(), ""); status != 200 || !strings.Contains(body, "surface") {
+		t.Errorf("the read API on the admin listener, for the console: %d %s", status, body)
+	}
+	if status, _ := do2(t, "GET", admURL+"/v1/inboxes/surface", nil, ""); status != 401 {
+		t.Errorf("the read API on the admin listener without a token: %d, want 401", status)
+	}
+	if status, _ := do2(t, "GET", pubURL+"/v1/inboxes/surface", adminAuth(), ""); status != 200 {
+		t.Errorf("the read API on the public listener: %d", status)
+	}
 	// And the admin listener serves nothing else.
-	for _, path := range []string{"/healthz", "/v1/inboxes/surface", "/mcp"} {
+	for _, path := range []string{"/healthz", "/mcp"} {
 		if status, _ := do2(t, "GET", admURL+path, adminAuth(), ""); status != 404 {
 			t.Errorf("admin listener %s: %d, want 404", path, status)
 		}
@@ -237,5 +248,31 @@ func TestTheConsoleFollowsTheAdminListener(t *testing.T) {
 	}
 	if code, _ := do2(t, "GET", "http://"+adm.Addr().String()+"/admin", nil, ""); code != 200 && code != 301 {
 		t.Errorf("/admin without the slash: %d", code)
+	}
+}
+
+// With the console off, the admin listener is the admin API and nothing else.
+func TestTheAdminListenerWithoutTheConsoleHasNoReadAPI(t *testing.T) {
+	e := newEnv(t, withAuth, func(o *Options) { o.AdminAddr = "127.0.0.1:1"; o.DisableUI = true })
+	e.newInbox("surface", "trusted", "")
+	var lc net.ListenConfig
+	pub, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adm, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- e.server.ServeAdmin(ctx, pub, adm) }()
+	t.Cleanup(func() { cancel(); <-done })
+	admURL := "http://" + adm.Addr().String()
+	if status, _ := do2(t, "GET", admURL+"/v1/admin/inboxes", adminAuth(), ""); status != 200 {
+		t.Errorf("the admin API: %d", status)
+	}
+	if status, _ := do2(t, "GET", admURL+"/v1/inboxes/surface", adminAuth(), ""); status != 404 {
+		t.Errorf("the read API on an admin listener with no console: %d, want 404", status)
 	}
 }
