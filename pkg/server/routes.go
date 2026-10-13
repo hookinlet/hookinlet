@@ -279,6 +279,14 @@ func (s *Server) enforce(next http.Handler) http.Handler {
 		rr.deadline = func() {
 			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.opts.ResponseTimeout))
 		}
+		// The deadline every request starts with (see deadlines) counts from its arrival.
+		// An operation with a credential may run long before it answers (an admin call,
+		// an MCP wait), so it bounds its answer itself, from when it starts building it
+		// (rr.deadline). One without a credential keeps it: a health check answers at
+		// once, and an ingest starts its answer's deadline again when it is ready.
+		if op.Security() != specvalidate.Open {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+		}
 		// However the handler ends, even by aborting the connection, the slot goes back.
 		defer func() {
 			if rr.hold != nil {

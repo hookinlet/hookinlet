@@ -92,9 +92,11 @@ type Options struct {
 	// does not read the answer would otherwise keep the answer (a page of messages, a
 	// raw body) in memory for as long as it likes. It is a fixed budget for the whole
 	// answer from when the server starts building it, so a client must read at roughly
-	// 16 MiB per ResponseTimeout to take the largest page. Ingest, the admin API, streams
-	// and backups are not bound by it (streams and backups manage their own deadlines).
-	// Defaults to 2 minutes.
+	// 16 MiB per ResponseTimeout to take the largest page. An answer given before a
+	// request reaches an operation (a 404, a 401) is bound by it from when the request
+	// arrives, and an ingest's from when the delivery has been handled. The admin API,
+	// streams and backups are not bound by it (streams and backups manage their own
+	// deadlines). Defaults to 2 minutes.
 	ResponseTimeout time.Duration
 	// ReadBodyTimeout bounds how long a client gets to deliver a request body, to
 	// the ingest endpoint or anywhere else. Defaults to 60s.
@@ -359,11 +361,14 @@ func (s *Server) build(surface surface) http.Handler {
 	// Outermost first. accessLog must see the same *http.Request the mux
 	// annotates with r.Pattern, so nothing between it and the mux may clone
 	// the request.
-	return requestID(accessLog(s.log, recoverer(s.log, s.counting(protective(s.bodyDeadline(mux))))))
+	return requestID(accessLog(s.log, recoverer(s.log, s.counting(protective(s.deadlines(mux))))))
 }
 
-// bodyDeadline gives every request that comes with a body ReadBodyTimeout to deliver
-// it, whatever it is sent to. Without it, a request that promises a body and never
+// deadlines bounds how long any request may take to send and to be answered,
+// whatever it is sent to, until an operation of the document takes it over (see
+// enforce).
+//
+// Every request that comes with a body gets ReadBodyTimeout to deliver it. Without it, a request that promises a body and never
 // sends it holds its connection for good: net/http reads what a handler left unread
 // before it answers (so that the connection can be used again), and that read has no
 // deadline of its own. That would let anyone, without a credential, hold any number of
@@ -374,12 +379,22 @@ func (s *Server) build(surface surface) http.Handler {
 // clears it to watch the connection for the client going away, so an operation that
 // runs long after that (an MCP wait, a stream) is not cut short. A request without a
 // body is given none, since that watch has already begun.
-func (s *Server) bodyDeadline(next http.Handler) http.Handler {
+//
+// Every request also gets ResponseTimeout for its answer to be taken. net/http
+// answers a connection's requests one after another, and a write to a client that
+// does not read blocks with no deadline of its own: without this, a client could
+// send many requests on one connection (to /healthz, or anything answered 404 or
+// 401) and never read the answers, and hold the connection for good. An operation
+// that may run long before it answers lifts this, and bounds its answer itself
+// (see enforce and readRequest.deadline).
+func (s *Server) deadlines(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Servers that cannot set a deadline (a test recorder) do without one.
+		rc := http.NewResponseController(w)
 		if r.ContentLength != 0 { // a length, or -1 for a chunked body
-			// Servers that cannot set a deadline (a test recorder) do without one.
-			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.opts.ReadBodyTimeout))
+			_ = rc.SetReadDeadline(time.Now().Add(s.opts.ReadBodyTimeout))
 		}
+		_ = rc.SetWriteDeadline(time.Now().Add(s.opts.ResponseTimeout))
 		next.ServeHTTP(w, r)
 	})
 }
