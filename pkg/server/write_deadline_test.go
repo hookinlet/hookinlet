@@ -28,7 +28,10 @@ func TestAClientThatDoesNotReadCannotHoldAConnection(t *testing.T) {
 	// requests that cost it some work (an ingest, an MCP call) then only keep it busy, and the
 	// test cannot tell a server that is slow from one that waits for the client.
 	lc := net.ListenConfig{Control: func(_, _ string, c rawConn) error { return smallSendBuffer(c) }}
-	ae, base, _ := streamEnvOn(t, lc, func(o *Options) { o.ResponseTimeout = 300 * time.Millisecond })
+	ae, base, _ := streamEnvOn(t, lc, func(o *Options) {
+		o.ResponseTimeout = 300 * time.Millisecond
+		o.ReadWaitTimeout = 100 * time.Millisecond
+	})
 	addr := strings.TrimPrefix(base, "http://")
 	mcpCall := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
 	for name, req := range map[string]string{ //nolint:gosec // requests, one with a test token
@@ -36,6 +39,10 @@ func TestAClientThatDoesNotReadCannotHoldAConnection(t *testing.T) {
 		"a path that does not exist": "GET /nowhere HTTP/1.1\r\nHost: x\r\n\r\n",
 		"reads without a token":      "GET /v1/inboxes/agent-a HTTP/1.1\r\nHost: x\r\n\r\n",
 		"an unknown ingest key":      "POST /in/no-such-key HTTP/1.1\r\nHost: x\r\nContent-Length: 0\r\n\r\n",
+		// With a credential, the early refusals are bound too: they are answered before any
+		// operation has begun to build an answer.
+		"a stream refused for its epoch, with a token": "GET /v1/inboxes/agent-a/stream?epoch=00000000000000000000000000000000 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + ae.tokenA + "\r\n\r\n",
+		"a bad parameter, with a token":                "GET /v1/inboxes/agent-a/messages?limit=abc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + ae.tokenA + "\r\n\r\n",
 		"MCP with a token": "POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\n" +
 			"Authorization: Bearer " + ae.tokenA + "\r\nContent-Length: " + strconv.Itoa(len(mcpCall)) + "\r\n\r\n" + mcpCall,
 	} {

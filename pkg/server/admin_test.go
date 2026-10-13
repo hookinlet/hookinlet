@@ -85,6 +85,23 @@ func (a *adminEnv) admin(method, path string, body any) (int, []byte) {
 	return status, data
 }
 
+// runRetention runs retention by hand. A server that has just started may be running
+// its first pass, and a second run is refused as busy until that one ends, so a refusal is
+// tried again for a few seconds.
+func (a *adminEnv) runRetention(t *testing.T) []byte {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		status, body := a.admin("POST", "/v1/admin/retention/run", nil)
+		if status == http.StatusOK {
+			return body
+		}
+		if status != http.StatusConflict || time.Now().After(deadline) {
+			t.Fatalf("POST /v1/admin/retention/run: status %d: %s", status, body)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func (a *adminEnv) mustAdmin(method, path string, body any, want int) []byte {
 	a.t.Helper()
 	status, data := a.admin(method, path, body)
@@ -642,7 +659,7 @@ func TestRunningRetentionByAgeByCountAndBoth(t *testing.T) {
 		}
 	}
 
-	got := unjson[map[string]int64](t, a.mustAdmin("POST", "/v1/admin/retention/run", nil, 200))
+	got := unjson[map[string]int64](t, a.runRetention(t))
 	// By age (2 days): messages older than two days at day 9 are days 0..6; days 7, 8, 9 stay.
 	// By count (3): the newest 3 stay. Both (2 days, 4 messages): the stricter of the two, which is 3 (age) here.
 	want := map[string]int64{"by-age": 3, "by-count": 3, "by-both": 3, "keeps-all": 10}
@@ -655,13 +672,13 @@ func TestRunningRetentionByAgeByCountAndBoth(t *testing.T) {
 		t.Errorf("deleted = %d, want 21", got["deleted"])
 	}
 	// And it is idempotent.
-	if again := unjson[map[string]int64](t, a.mustAdmin("POST", "/v1/admin/retention/run", nil, 200)); again["deleted"] != 0 {
+	if again := unjson[map[string]int64](t, a.runRetention(t)); again["deleted"] != 0 {
 		t.Errorf("a second sweep deleted %d", again["deleted"])
 	}
 
 	// Both rules together: the count rule wins when it is the stricter one.
 	a.mustAdmin("PATCH", "/v1/admin/inboxes/by-both", map[string]any{"retention_days": 30, "retention_max_count": 2}, 200)
-	a.mustAdmin("POST", "/v1/admin/retention/run", nil, 200)
+	a.runRetention(t)
 	if c := count("by-both"); c != 2 {
 		t.Errorf("by-both holds %d after tightening the count, want 2", c)
 	}
@@ -1067,7 +1084,7 @@ func TestAdminStatusReportsTheServer(t *testing.T) {
 	if first.FreeBytes == nil || *first.FreeBytes <= 0 {
 		t.Errorf("free bytes: %v", first.FreeBytes)
 	}
-	a.mustAdmin("POST", "/v1/admin/retention/run", nil, 200)
+	a.runRetention(t)
 	second := unjson[status](t, a.mustAdmin("GET", "/v1/admin/status", nil, 200))
 	if second.LastRetentionAt == nil || second.LastRetentionDeleted == nil {
 		t.Errorf("no last retention after a run: %+v", second)
