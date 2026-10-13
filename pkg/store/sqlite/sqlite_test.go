@@ -551,3 +551,71 @@ func TestAClockThatSteppedBackIsLogged(t *testing.T) {
 		t.Errorf("the jump was logged %d times, want once:\n%s", got, logs.String())
 	}
 }
+
+// A delivery that waits for the single write connection is stamped when it is
+// stored, not when it arrived. Stamped on arrival, one that queued behind a
+// slower write came out with a time earlier than the message stored before it,
+// and the store reported a clock that had stepped back when nothing had.
+func TestQueueingForTheWriterIsNotAClockStep(t *testing.T) {
+	var logs bytes.Buffer
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	var armed atomic.Bool
+	var calls atomic.Int64
+	inClock := make(chan struct{})
+	gate := make(chan struct{})
+	clock := func() time.Time {
+		if !armed.Load() {
+			return base
+		}
+		switch calls.Add(1) {
+		case 1: // the first delivery's read of the clock: hold it there
+			close(inClock)
+			<-gate
+			return base
+		default: // everything after it happens two seconds later
+			return base.Add(2 * time.Second)
+		}
+	}
+	s, err := sqlite.Open(t.Context(), t.TempDir(), sqlite.WithClock(clock),
+		sqlite.WithLogger(slog.New(slog.NewJSONHandler(&logs, nil))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	in := newInbox("queueing")
+	if err := s.CreateInbox(t.Context(), in); err != nil {
+		t.Fatal(err)
+	}
+	armed.Store(true)
+
+	add := func() (*inbox.Message, error) {
+		m, _, err := s.Append(t.Context(), in.ID, &inbox.NewMessage{Method: "POST", Verified: true})
+		return m, err
+	}
+	type result struct {
+		m   *inbox.Message
+		err error
+	}
+	first, second := make(chan result, 1), make(chan result, 1)
+	go func() { m, err := add(); first <- result{m, err} }()
+	<-inClock // the first delivery is in the middle of stamping itself
+	go func() { m, err := add(); second <- result{m, err} }()
+	// Whether the second is stored now (the clock is read before the writer is
+	// taken) or must wait for the first (it is read after) is what is under test;
+	// either way, let the first go after a moment.
+	time.Sleep(300 * time.Millisecond)
+	close(gate)
+	a, b := <-first, <-second
+	if a.err != nil || b.err != nil {
+		t.Fatalf("append: %v, %v", a.err, b.err)
+	}
+	if a.m.Seq > b.m.Seq {
+		t.Fatalf("the delivery that started stamping first was stored second (seq %d, %d)", a.m.Seq, b.m.Seq)
+	}
+	if !b.m.ReceivedAt.Equal(base.Add(2 * time.Second)) {
+		t.Errorf("second delivery received_at = %v, want its own time %v", b.m.ReceivedAt, base.Add(2*time.Second))
+	}
+	if strings.Contains(logs.String(), "the clock is behind") {
+		t.Errorf("waiting for the writer was reported as a clock that stepped back:\n%s", logs.String())
+	}
+}
