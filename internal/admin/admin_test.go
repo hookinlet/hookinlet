@@ -260,3 +260,63 @@ func TestPatchWithTheSameVerifierKeepsTheSecret(t *testing.T) {
 		t.Fatalf("another verifier: %+v, %v", v, err)
 	}
 }
+
+// vanishing deletes an inbox right after the tokens are read, as a delete from
+// another request would between the two reads a token listing makes.
+type vanishing struct {
+	inbox.Store
+	victim inbox.ID
+	done   atomic.Bool
+}
+
+func (s *vanishing) ListTokens(ctx context.Context, p inbox.TokenListParams) ([]*inbox.Token, error) {
+	tokens, err := s.Store.ListTokens(ctx, p)
+	if err == nil && s.done.CompareAndSwap(false, true) {
+		err = s.Store.DeleteInbox(ctx, s.victim)
+	}
+	return tokens, err
+}
+
+// An inbox deleted while tokens are being listed is not a reason to fail the
+// listing: the other tokens are still wanted, and the deleted inbox's tokens are
+// being revoked.
+func TestListingTokensSurvivesAnInboxDeletedMeanwhile(t *testing.T) {
+	_, _, real := newService(t, 0)
+	ctx := t.Context()
+	st := &vanishing{Store: real}
+	svc := &admin.Service{Store: st}
+	for _, slug := range []string{"keeps", "goes"} {
+		if _, err := svc.Create(ctx, admin.CreateParams{Slug: slug, Verifier: "none"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	goes, err := real.GetInboxBySlug(ctx, "goes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.victim = goes.ID
+	both, err := svc.CreateToken(ctx, admin.TokenParams{Name: "both", Inboxes: []string{"keeps", "goes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	views, _, err := svc.ListTokens(ctx, 0, 0, "")
+	if err != nil {
+		t.Fatalf("listing while an inbox was being deleted: %v", err)
+	}
+	var seen bool
+	for _, v := range views {
+		if v.ID == both.Record.ID {
+			seen = true
+			if !reflect.DeepEqual(v.Inboxes, []string{"keeps"}) {
+				t.Errorf("the token's inboxes = %v, want only the one that is left", v.Inboxes)
+			}
+		}
+		if v.Name == admin.DefaultTokenName && len(v.Inboxes) == 0 {
+			t.Errorf("a token with no inbox left was listed: %+v", v)
+		}
+	}
+	if !seen {
+		t.Errorf("the token for both inboxes is missing from %+v", views)
+	}
+}
