@@ -91,7 +91,9 @@ make run    # serve with throwaway development credentials
 
 Before a change is ready, run `make lint test`, and `scripts/test-docs.sh` if you touched the documentation or
 the examples. Go is pinned in `go.mod`. The Docker image and its smoke test are `make docker` and
-`scripts/smoke-docker.sh hookinlet:dev`.
+`scripts/smoke-docker.sh hookinlet:dev`. `scripts/soak` drives a built binary with a mixed workload for half an hour
+and checks that nothing acknowledged is lost (`go run -tags soak ./scripts/soak -h`); it is behind a build tag and
+is not part of `go build ./...` or `go test ./...`.
 
 A pull request runs the fast checks: build, vet, unit tests (without the race detector), lint, the static
 checks on the OpenAPI document and the generated code, and the admin console's build, unit tests and end-to-end
