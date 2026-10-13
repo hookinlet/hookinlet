@@ -26,7 +26,7 @@ func TestAClientThatDoesNotReadCannotHoldAConnection(t *testing.T) {
 	ae, base, _ := streamEnv(t, func(o *Options) { o.ResponseTimeout = 300 * time.Millisecond })
 	addr := strings.TrimPrefix(base, "http://")
 	mcpCall := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
-	for name, req := range map[string]string{
+	for name, req := range map[string]string{ //nolint:gosec // requests, one with a test token
 		"health checks":              "GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n",
 		"a path that does not exist": "GET /nowhere HTTP/1.1\r\nHost: x\r\n\r\n",
 		"reads without a token":      "GET /v1/inboxes/agent-a HTTP/1.1\r\nHost: x\r\n\r\n",
