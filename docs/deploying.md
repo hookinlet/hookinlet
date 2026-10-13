@@ -140,9 +140,9 @@ a test delivery and a stream.
 
 ```caddyfile
 hooks.example.com {
-	# The admin API and metrics are for you, not the internet. Reach them on the
+	# The admin API, its console and metrics are for you, not the internet. Reach them on the
 	# admin address instead (HOOKINLET_ADMIN_LISTEN_ADDR=127.0.0.1:9090) and block them here.
-	@private path /v1/admin/* /metrics
+	@private path /v1/admin/* /admin /admin/* /metrics
 	respond @private 404
 
 	request_body {
@@ -164,7 +164,7 @@ server {
 
     client_max_body_size 11m;
 
-    location ~ ^/(v1/admin/|metrics) { return 404; }   # use the admin address instead
+    location ~ ^/(v1/admin/|admin(/|$)|metrics) { return 404; }   # API, console, metrics: use the admin address instead
 
     location / {
         proxy_pass http://127.0.0.1:8080;

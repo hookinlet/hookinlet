@@ -71,6 +71,9 @@ or a change could not be settled (or a sweep or backup is already running),
 `501` when a verifier secret is given but no master key is configured, or the
 Store cannot make backups.
 
+The examples below write `$BASE` for the server's address (`export BASE=http://localhost:8080`)
+and `$HOOKINLET_ADMIN_TOKEN` for the admin token.
+
 ### Create
 
 <!-- exercise -->

@@ -115,8 +115,10 @@ default; pass `bodies: true`, or fetch one with `get_message`. **`epoch_changed`
 
 `hookinlet inbox ...` talks to a running server when `HOOKINLET_URL` is set (it needs
 `HOOKINLET_ADMIN_TOKEN`), and works in the data directory otherwise. Giving both a
-URL and a data directory is an error. The binary on macOS downloaded in a browser is
-quarantined: `xattr -d com.apple.quarantine hookinlet`.
+URL and a data directory is an error. A macOS binary downloaded in a browser is
+quarantined (it is not notarized), and then dies at once with `Killed: 9`, or macOS says it
+cannot check it for malware: `xattr -d com.apple.quarantine hookinlet` lets it run. One fetched
+with `curl` or `gh release download` is not quarantined.
 
 ## Lost something
 
