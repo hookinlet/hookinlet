@@ -112,6 +112,16 @@ type Options struct {
 	ReadWaitTimeout time.Duration
 	// MaxStreams bounds how many SSE streams are open at once. Defaults to 1000.
 	MaxStreams int
+	// MaxStreamsPerCredential bounds how many streams and MCP waits one credential may
+	// hold at once, so that a token that can read several inboxes cannot take every slot.
+	// Defaults to a tenth of MaxStreams, but never less than 20 (or MaxStreams, if that is
+	// smaller). The admin token is not limited.
+	MaxStreamsPerCredential int
+	// MaxReadsPerCredential bounds how many of the read slots one credential may hold at
+	// once, so that a client that never reads its answers cannot hold them all. Defaults
+	// to a quarter of MaxConcurrentReads, but never less than 2 (or MaxConcurrentReads, if that
+	// is smaller). The admin token is not limited.
+	MaxReadsPerCredential int
 	// MaxStreamsPerInbox bounds how many of them may follow one inbox, so that a
 	// single token cannot use every slot. Defaults to half of MaxStreams, and at
 	// least 1: one inbox can be followed widely, but never to the exclusion of
@@ -194,6 +204,8 @@ type Server struct {
 	streams      chan struct{} // a slot per open SSE stream
 	streamMu     sync.Mutex
 	streamCounts map[inbox.ID]int // open streams per inbox
+	streamShares shares           // streams and waits held per credential (under streamMu)
+	readShares   shares           // read slots held per credential
 
 	// closeCtx is cancelled when the server starts shutting down. Streams watch
 	// it, and a write that is blocked on a client that stopped reading is
@@ -215,7 +227,7 @@ func New(opts Options) (*Server, error) {
 		{"ShutdownTimeout", int64(opts.ShutdownTimeout)}, {"ResponseTimeout", int64(opts.ResponseTimeout)}, {"ReadBodyTimeout", int64(opts.ReadBodyTimeout)},
 		{"MaxHeaderBytes", int64(opts.MaxHeaderBytes)}, {"MaxConcurrentReads", int64(opts.MaxConcurrentReads)},
 		{"ReadWaitTimeout", int64(opts.ReadWaitTimeout)}, {"MaxStreams", int64(opts.MaxStreams)},
-		{"MaxStreamsPerInbox", int64(opts.MaxStreamsPerInbox)}, {"StreamRevalidateInterval", int64(opts.StreamRevalidateInterval)},
+		{"MaxStreamsPerInbox", int64(opts.MaxStreamsPerInbox)}, {"MaxStreamsPerCredential", int64(opts.MaxStreamsPerCredential)}, {"MaxReadsPerCredential", int64(opts.MaxReadsPerCredential)}, {"StreamRevalidateInterval", int64(opts.StreamRevalidateInterval)},
 		{"SSEHeartbeat", int64(opts.SSEHeartbeat)}, {"SSERecheckInterval", int64(opts.SSERecheckInterval)},
 		{"MCPInlineBodyBytes", int64(opts.MCPInlineBodyBytes)}, {"DrainDelay", int64(opts.DrainDelay)},
 	} {
@@ -271,6 +283,12 @@ func New(opts Options) (*Server, error) {
 	}
 	if opts.MaxStreams <= 0 {
 		opts.MaxStreams = 1000
+	}
+	if opts.MaxStreamsPerCredential <= 0 {
+		opts.MaxStreamsPerCredential = max(opts.MaxStreams/10, min(opts.MaxStreams, 20))
+	}
+	if opts.MaxReadsPerCredential <= 0 {
+		opts.MaxReadsPerCredential = max(opts.MaxConcurrentReads/4, min(opts.MaxConcurrentReads, 2))
 	}
 	if opts.MaxStreamsPerInbox <= 0 {
 		opts.MaxStreamsPerInbox = max(1, opts.MaxStreams/2)

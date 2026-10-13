@@ -85,7 +85,7 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	// the signature has not been checked yet. How much may be held at once is
 	// bounded: the bytes are counted as they arrive, and a delivery that would take
 	// the total over is told to come back.
-	br := &budgetReader{r: http.MaxBytesReader(w, r.Body, in.MaxBodyBytes), b: &s.ingestBudget}
+	br := &budgetReader{r: http.MaxBytesReader(w, r.Body, in.MaxBodyBytes), b: &s.ingestBudget, id: in.ID, share: s.ingestBudget.perInbox(in.MaxBodyBytes)}
 	defer br.release()
 	body, err := io.ReadAll(br)
 	s.metrics.bodyBytes.Add(int64(len(body)))

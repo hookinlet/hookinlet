@@ -20,25 +20,28 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
+// noShare is a per-inbox share that never limits: these tests are about the whole budget.
+const noShare = int64(1) << 60
+
 func TestByteBudget(t *testing.T) {
 	b := &byteBudget{limit: 100}
-	if !b.add(60) {
+	if !b.add(1, noShare, 60) {
 		t.Fatal("60 of 100 refused")
 	}
-	if b.add(50) {
+	if b.add(1, noShare, 50) {
 		t.Error("110 of 100 granted")
 	}
-	if !b.add(40) {
+	if !b.add(1, noShare, 40) {
 		t.Error("exactly the rest refused")
 	}
-	b.sub(60)
-	if !b.add(60) {
+	b.sub(1, 60)
+	if !b.add(1, noShare, 60) {
 		t.Error("the 60 given back were not available")
 	}
-	if off := (&byteBudget{limit: -1}); !off.add(1 << 40) {
+	if off := (&byteBudget{limit: -1}); !off.add(1, noShare, 1<<40) {
 		t.Error("an unlimited budget refused")
 	}
-	if !(&byteBudget{limit: 5}).add(0) {
+	if !(&byteBudget{limit: 5}).add(1, noShare, 0) {
 		t.Error("nothing was refused")
 	}
 
@@ -49,13 +52,13 @@ func TestByteBudget(t *testing.T) {
 	for range 64 {
 		wg.Go(func() {
 			for range 200 {
-				if !c.add(100) {
+				if !c.add(1, noShare, 100) {
 					continue
 				}
 				c.mu.Lock()
 				most.Store(max(most.Load(), c.used))
 				c.mu.Unlock()
-				c.sub(100)
+				c.sub(1, 100)
 			}
 		})
 	}
@@ -73,11 +76,11 @@ func TestByteBudget(t *testing.T) {
 // ended.
 func TestTheBudgetCountsBytesNotPromises(t *testing.T) {
 	b := &byteBudget{limit: 100}
-	br := &budgetReader{r: strings.NewReader(strings.Repeat("x", 80)), b: b}
+	br := &budgetReader{r: strings.NewReader(strings.Repeat("x", 80)), b: b, id: 1, share: noShare}
 	if got, err := io.ReadAll(br); err != nil || len(got) != 80 || b.used != 80 {
 		t.Fatalf("read %d, used %d, %v", len(got), b.used, err)
 	}
-	over := &budgetReader{r: strings.NewReader(strings.Repeat("y", 50)), b: b}
+	over := &budgetReader{r: strings.NewReader(strings.Repeat("y", 50)), b: b, id: 1, share: noShare}
 	if _, err := io.ReadAll(over); !errors.Is(err, errOverBudget) {
 		t.Errorf("a delivery over the budget: %v", err)
 	}
@@ -86,7 +89,7 @@ func TestTheBudgetCountsBytesNotPromises(t *testing.T) {
 	if b.used != 0 {
 		t.Errorf("%d bytes still held after both were released", b.used)
 	}
-	idle := &budgetReader{r: strings.NewReader(""), b: b}
+	idle := &budgetReader{r: strings.NewReader(""), b: b, id: 1, share: noShare}
 	_, _ = io.ReadAll(idle)
 	if b.used != 0 {
 		t.Error("a delivery that sent nothing held something")
@@ -98,7 +101,7 @@ func TestTheBudgetCountsBytesNotPromises(t *testing.T) {
 func TestIngestRefusesWhatWouldExceedTheMemoryBudget(t *testing.T) {
 	e := newEnv(t, func(o *Options) { o.IngestMemoryBudget = inbox.MaxBodyBytesCeiling })
 	in := e.newInbox("budgeted", "trusted", "", func(i *inbox.Inbox) { i.MaxBodyBytes = inbox.MaxBodyBytesCeiling })
-	if !e.server.ingestBudget.add(inbox.MaxBodyBytesCeiling - 100) {
+	if !e.server.ingestBudget.add(1, noShare, inbox.MaxBodyBytesCeiling-100) {
 		t.Fatal("could not hold the budget")
 	}
 	rec := e.post("/in/budgeted", strings.Repeat("x", 200))
@@ -111,7 +114,7 @@ func TestIngestRefusesWhatWouldExceedTheMemoryBudget(t *testing.T) {
 	if e.server.ingestBudget.used != inbox.MaxBodyBytesCeiling-100 {
 		t.Errorf("the refused delivery kept %d bytes", e.server.ingestBudget.used-(inbox.MaxBodyBytesCeiling-100))
 	}
-	e.server.ingestBudget.sub(inbox.MaxBodyBytesCeiling - 100)
+	e.server.ingestBudget.sub(1, inbox.MaxBodyBytesCeiling-100)
 	if rec := e.post("/in/budgeted", strings.Repeat("x", 200)); rec.Code != http.StatusOK {
 		t.Errorf("with the budget free again: %d %s", rec.Code, rec.Body)
 	}

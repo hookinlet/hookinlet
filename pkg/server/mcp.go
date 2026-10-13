@@ -563,7 +563,7 @@ func (t *mcpTools) waitForMessages(ctx context.Context, _ *mcp.CallToolRequest, 
 	// A wait holds a connection, a subscription, and timers for up to a minute, so
 	// the same limits apply as to a stream: overall, and per inbox.
 	if wait > 0 {
-		releaseWait, refusal := s.takeStream(in.ID)
+		releaseWait, refusal := s.takeStream(in.ID, holderOf(t.caller.req, t.caller.principal))
 		if refusal != "" {
 			return nil, nil, toolError("too many waits are in progress; retry shortly")
 		}

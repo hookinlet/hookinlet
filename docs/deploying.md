@@ -321,7 +321,13 @@ Linux. Each open SSE stream costs about 50 KiB, so 500 of them come to about
 35 MiB. A page of messages is built in memory and bounded (16 MiB at most), and
 reads are limited to 16 at a time, a slot being held until the response has been written
 to the client or `ResponseTimeout` (2 minutes) has passed, so a client that asks and never
-reads cannot pin more than 16 pages. Deliveries are not limited in number: each one
+reads cannot pin more than 16 pages. One credential may hold only a quarter of those slots
+(4 of 16), so that a client that never reads cannot hold them all and turn every other inbox's
+readers away; the admin token is not limited. In the same way one credential may hold only a
+tenth of the stream slots (100 of 1000) and one inbox's deliveries only an eighth of the
+budget below (32 MiB of 256), so that a token or an ingest key cannot take what everyone
+shares. Embedders can change the first two with `Options.MaxReadsPerCredential` and
+`Options.MaxStreamsPerCredential`. Deliveries are not limited in number: each one
 is held in memory while it is read and checked, up to the inbox's body limit
 (1 MiB by default, at most 10 MiB), so a burst of large deliveries uses that much
 each. The total is bounded: deliveries being received hold at most
