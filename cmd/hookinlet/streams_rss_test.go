@@ -75,6 +75,7 @@ func TestFiveHundredIdleStreamsStayUnderFiftyMegabytes(t *testing.T) {
 		"HOOKINLET_ADMIN_TOKEN=admin-token-for-the-memory-test-0123456789",
 		"HOOKINLET_MASTER_KEY="+masterKey(),
 		"HOOKINLET_LOG_LEVEL=warn",
+		"HOOKINLET_MAX_STREAMS_PER_CREDENTIAL=1000", // one token holds all 500 of the streams measured here
 	)
 	create := exec.CommandContext(t.Context(), bin, "inbox", "create", "--slug", "streamed", "--ingest-key", "streamed", "--verifier", "none") //nolint:gosec // runs the binary this test just built
 	create.Env = env

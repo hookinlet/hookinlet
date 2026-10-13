@@ -84,17 +84,20 @@ type Config struct {
 	LogFormat          string
 	MaxStreams         int
 	MaxStreamsPerInbox int
-	SSEHeartbeat       time.Duration
-	SSERecheckInterval time.Duration
-	MCPEnabled         bool
-	AdminUI            bool
-	AdminEnabled       bool
-	AdminListenAddr    string
-	MCPInlineBodyBytes int
-	IngestMemoryBudget int64
-	DrainDelay         time.Duration
-	RetentionInterval  time.Duration
-	ShutdownTimeout    time.Duration
+	// MaxStreamsPerCredential and MaxReadsPerCredential are 0 for the server's defaults.
+	MaxStreamsPerCredential int
+	MaxReadsPerCredential   int
+	SSEHeartbeat            time.Duration
+	SSERecheckInterval      time.Duration
+	MCPEnabled              bool
+	AdminUI                 bool
+	AdminEnabled            bool
+	AdminListenAddr         string
+	MCPInlineBodyBytes      int
+	IngestMemoryBudget      int64
+	DrainDelay              time.Duration
+	RetentionInterval       time.Duration
+	ShutdownTimeout         time.Duration
 }
 
 // LogValue implements slog.LogValuer. Secrets are redacted by their type.
@@ -110,6 +113,8 @@ func (c *Config) LogValue() slog.Value {
 		slog.String("log_format", c.LogFormat),
 		slog.Int("max_streams", c.MaxStreams),
 		slog.Int("max_streams_per_inbox", c.MaxStreamsPerInbox),
+		slog.Int("max_streams_per_credential", c.MaxStreamsPerCredential),
+		slog.Int("max_reads_per_credential", c.MaxReadsPerCredential),
 		slog.Duration("sse_heartbeat", c.SSEHeartbeat),
 		slog.Duration("sse_recheck_interval", c.SSERecheckInterval),
 		slog.Bool("mcp_enabled", c.MCPEnabled),
@@ -141,6 +146,8 @@ var specs = []spec{
 	{name: "log-format", def: "json", usage: "log format: json or text"},
 	{name: "max-streams", def: "1000", usage: "most SSE streams open at once; further ones get 503"},
 	{name: "max-streams-per-inbox", def: "0", usage: "most SSE streams that may follow one inbox; 0 means half of max-streams"},
+	{name: "max-streams-per-credential", def: "0", usage: "most streams and MCP waits one token may hold (the admin token is not limited); 0 means a tenth of max-streams, at least 20"},
+	{name: "max-reads-per-credential", def: "0", usage: "most read slots one token may hold at once (the admin token is not limited); 0 means a quarter of the read slots, at least 2"},
 	{name: "sse-heartbeat", def: "15s", usage: "interval between SSE heartbeat comments"},
 	{name: "sse-recheck-interval", def: "0", usage: "re-read the store on this interval even without a notifier signal; 0 disables"},
 	{name: "admin-enabled", def: "true", usage: "serve the admin API under /v1/admin; false leaves inboxes and tokens to the command line, which works in the data directory"},
@@ -396,6 +403,12 @@ func Load(args []string, getenv func(string) string, usageOut io.Writer) (*Confi
 	}
 	if c.MaxStreamsPerInbox, err = strconv.Atoi(vals["max-streams-per-inbox"]); err != nil || c.MaxStreamsPerInbox < 0 {
 		collect(fieldErr("max-streams-per-inbox", "must be zero or a positive integer"))
+	}
+	if c.MaxStreamsPerCredential, err = strconv.Atoi(vals["max-streams-per-credential"]); err != nil || c.MaxStreamsPerCredential < 0 {
+		collect(fieldErr("max-streams-per-credential", "must be zero or a positive integer"))
+	}
+	if c.MaxReadsPerCredential, err = strconv.Atoi(vals["max-reads-per-credential"]); err != nil || c.MaxReadsPerCredential < 0 {
+		collect(fieldErr("max-reads-per-credential", "must be zero or a positive integer"))
 	}
 	if c.MCPInlineBodyBytes, err = strconv.Atoi(vals["mcp-inline-body-bytes"]); err != nil || c.MCPInlineBodyBytes <= 0 || c.MCPInlineBodyBytes > 64<<10 {
 		collect(fieldErr("mcp-inline-body-bytes", "must be between 1 and 65536"))
