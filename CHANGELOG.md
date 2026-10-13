@@ -17,7 +17,8 @@ applies.
   the check there. CI and the release workflow now fail if a platform's image config lacks it.
 - **An empty `hookinlet.db` is refused.** A restore or copy that did not finish leaves a
   zero-byte file, which the server (and `hookinlet check`) used to take for a new database and
-  start on, with none of the data. `sqlite.Open` now returns an error for it.
+  start on, with none of the data. `sqlite.Open` now returns an error for it, also when a
+  leftover `-wal` is beside it.
 - **A backup that fails no longer leaves its journal in the data directory.** A snapshot that
   ran out of room left `backup-N.tmp-journal` behind for good; it is removed with the snapshot,
   and swept like it at the next start.
@@ -42,6 +43,9 @@ applies.
   `ResponseTimeout` to be taken. An operation that needs a credential still counts that from
   when it starts building its answer, MCP answers are now bound by it too, and an ingest's
   answer counts from when the delivery has been handled.
+  A client with a valid token that sends many requests refused early and never reads the answers
+  can still hold its connection (it is not counted by the per-credential limits); revoking the
+  token ends it.
 
 **Go API**
 
