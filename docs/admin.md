@@ -437,6 +437,11 @@ sensitive with it, so protect it like the data directory.
   than an hour old; until then it is a full copy of the database, so keep the
   data directory private.
 - Only one backup runs at a time (`409` otherwise).
+- While a backup runs, the write-ahead log cannot be reset, so it grows by what is written in the meantime
+  and is cut back afterwards. A 2.4 GB database copied under about 300 deliveries a second and 250 open
+  streams took 2.5 minutes and let the log reach 1.2 GB, on top of the copy; on the same machine with few
+  streams, a 0.7 GB database took 3.5 seconds and the log stayed under 30 MB. Allow room for both, and
+  take backups when the server is not at its busiest.
 - A store that cannot produce one (some embedded backends) answers `501`.
 - The command writes beside the destination and renames, so an interrupted
   backup never leaves a file that looks complete. It refuses to overwrite
