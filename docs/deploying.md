@@ -274,6 +274,11 @@ as its `HEALTHCHECK` with a start period of 60 seconds for a long migration. It 
 the server from the environment, so set `HOOKINLET_LISTEN_ADDR` rather than passing
 `--listen-addr` in the command if you change the port.
 
+The healthcheck is in the image's config. A runtime that ignores it will show no health
+status: Podman's Docker-compatible API (what the `docker` command talks to on some
+systems) does, for example, while `podman run` honours it. There, give the check yourself
+with `--health-cmd "/hookinlet healthcheck"` (or a `healthcheck:` entry in Compose).
+
 ## Metrics
 
 `GET /metrics` serves counters and gauges in the Prometheus text format, with the

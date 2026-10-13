@@ -6,6 +6,15 @@ applies.
 
 ## Unreleased
 
+- **`hookinlet version` after `go install`.** A binary installed with
+  `go install github.com/hookinlet/hookinlet/cmd/hookinlet@v0.1.0` printed `dev`; it now prints
+  the module version without its `v` (`0.1.0`), as the release builds do. A build from a checkout
+  reports the version Go records for it (a pseudo-version such as `0.1.1-0.<time>-<commit>`,
+  with `+dirty` for a modified tree) instead of `dev-<commit>`.
+- **The image's `HEALTHCHECK` is now checked.** The image has carried it since 0.1.0 (it is in
+  the config of both platforms), but some runtimes do not report it, such as Podman's
+  Docker-compatible API; [deploying](docs/deploying.md#health-checks) says how to set
+  the check there. CI and the release workflow now fail if a platform's image config lacks it.
 - **An empty `hookinlet.db` is refused.** A restore or copy that did not finish leaves a
   zero-byte file, which the server (and `hookinlet check`) used to take for a new database and
   start on, with none of the data. `sqlite.Open` now returns an error for it.
