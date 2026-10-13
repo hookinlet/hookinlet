@@ -4,8 +4,9 @@
 package docs
 
 import (
+	"io/fs"
 	"os"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,22 +28,24 @@ var (
 // by hand in HTML is not accepted, because tools that build a site from these
 // files do not all see it.
 func TestLinks(t *testing.T) {
-	files := []string{"../README.md"}
-	more, err := filepath.Glob("*.md")
+	// Paths are relative to the repository root, which is what the links resolve against.
+	root := os.DirFS("..")
+	files := []string{"README.md"}
+	more, err := fs.Glob(root, "docs/*.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	files = append(files, more...)
 
 	anchors := map[string]map[string]bool{}
-	anchorsOf := func(path string) map[string]bool {
-		path = filepath.Clean(path)
-		if a, ok := anchors[path]; ok {
+	anchorsOf := func(file string) map[string]bool {
+		file = path.Clean(file)
+		if a, ok := anchors[file]; ok {
 			return a
 		}
 		a := map[string]bool{}
-		anchors[path] = a
-		if b, err := os.ReadFile(path); err == nil {
+		anchors[file] = a
+		if b, err := fs.ReadFile(root, file); err == nil {
 			seen := map[string]int{}
 			forEachLine(string(b), func(line string, inCode bool) {
 				if inCode {
@@ -65,7 +68,7 @@ func TestLinks(t *testing.T) {
 	}
 
 	for _, f := range files {
-		b, err := os.ReadFile(f)
+		b, err := fs.ReadFile(root, f)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,8 +87,8 @@ func TestLinks(t *testing.T) {
 				pathPart, frag, _ := strings.Cut(dest, "#")
 				target := f
 				if pathPart != "" {
-					target = filepath.Join(filepath.Dir(f), pathPart)
-					if _, err := os.Stat(target); err != nil {
+					target = path.Join(path.Dir(f), pathPart)
+					if _, err := fs.Stat(root, target); err != nil {
 						t.Errorf("%s:%d: link %q: %s does not exist", f, n, dest, target)
 						continue
 					}
