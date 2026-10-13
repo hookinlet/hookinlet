@@ -189,16 +189,16 @@ func Open(ctx context.Context, dir string, opts ...Option) (_ *Store, err error)
 	// a restore or a copy that did not finish, or a file that was emptied, looks like
 	// this, and SQLite would take it for a fresh database. Starting on it would give
 	// a healthy-looking server with none of the data, and a later restore would be
-	// made on top of whatever it then accepted. Data that is only in a write-ahead log
-	// beside it (a crash before the first checkpoint) is not empty.
+	// made on top of whatever it then accepted. A write-ahead log beside it changes
+	// nothing: Open writes the header at once, so this server never leaves an empty
+	// file with a log, and one found that way is a copy that wrote nothing next to the
+	// log of some other database, which would be rebuilt into a partial one.
 	created := false
 	switch st, statErr := os.Stat(abs); {
 	case errors.Is(statErr, os.ErrNotExist):
 		created = true
 	case statErr == nil && st.Size() == 0:
-		if w, walErr := os.Stat(abs + "-wal"); walErr != nil || w.Size() == 0 {
-			return nil, fmt.Errorf("sqlite: %s exists but is empty (0 bytes), which is not a database: if you were restoring a backup, the copy did not complete, so copy it again; if this is a new installation, delete the file", abs)
-		}
+		return nil, fmt.Errorf("sqlite: %s exists but is empty (0 bytes), which is not a database: if you were restoring a backup, the copy did not complete, so copy it again, and remove any %s-wal and %s-shm beside it; if this is a new installation, delete the file", abs, filepath.Base(abs), filepath.Base(abs))
 	}
 	// A file this Open made, and then could not open, is not left behind to be
 	// mistaken for a damaged database on the next try.

@@ -56,3 +56,25 @@ func TestAFirstOpenThatFailsLeavesNoEmptyDatabaseFile(t *testing.T) {
 	}
 	_ = s.Close()
 }
+
+// An empty file beside a leftover write-ahead log is the two restore mistakes made together:
+// a copy that wrote nothing, and a log from another database that was not removed. SQLite
+// would rebuild a partial database from the log, so it is refused like any empty file.
+func TestAnEmptyDatabaseBesideALeftoverLogIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, sqlite.DBFileName)
+	if err := os.WriteFile(db, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(db+"-wal", make([]byte, 4152), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := sqlite.Open(t.Context(), dir)
+	if err == nil {
+		_ = s.Close()
+		t.Fatal("an empty hookinlet.db with a write-ahead log beside it was opened")
+	}
+	if !strings.Contains(err.Error(), "-wal") {
+		t.Errorf("the error does not mention the log: %v", err)
+	}
+}

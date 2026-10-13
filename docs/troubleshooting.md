@@ -54,7 +54,10 @@ log holds deliveries that were acknowledged, and must stay where it is.)
 
 **`hookinlet.db exists but is empty`.** The file has no content, which is what a copy or restore
 that did not finish leaves; it is refused and not started as a new database. Copy the backup
-again. On a new installation with nothing to lose, delete the file.
+again, and remove any `hookinlet.db-wal` and `hookinlet.db-shm` beside it. On a new installation
+with nothing to lose, delete the file. Do not create the file ahead of time (`touch`, a
+single-file bind mount, a `tmpfiles.d` entry): mount or create the directory instead, and let
+hookinlet make the database.
 
 **`database schema version N is newer than this build supports`.** The data was
 written by a newer hookinlet. Run the newer version, or restore a backup taken by an
