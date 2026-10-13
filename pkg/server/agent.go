@@ -43,6 +43,26 @@ func (s *Server) adopt(ctx context.Context, release func()) func() {
 // It fails with errBusy if none comes free and with the context's error if the
 // caller goes away first.
 func (s *Server) readSlot(ctx context.Context) (release func(), err error) {
+	// One credential may hold only some of the slots: a client that asks for big pages
+	// and never reads them keeps its slots until ResponseTimeout, and without this it
+	// could hold every one, so that every other inbox's readers are turned away.
+	if rr, ok := ctx.Value(readKey).(*readRequest); ok && rr.r != nil {
+		giveBack, err := s.readShares.acquire(ctx, holderOf(rr.r, rr.principal), s.opts.MaxReadsPerCredential, s.opts.ReadWaitTimeout)
+		if err != nil {
+			return nil, err
+		}
+		slot, err := s.globalReadSlot(ctx)
+		if err != nil {
+			giveBack()
+			return nil, err
+		}
+		return func() { slot(); giveBack() }, nil
+	}
+	return s.globalReadSlot(ctx)
+}
+
+// globalReadSlot takes one of the shared slots.
+func (s *Server) globalReadSlot(ctx context.Context) (release func(), err error) {
 	select {
 	case s.reads <- struct{}{}:
 		return func() { <-s.reads }, nil

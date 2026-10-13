@@ -49,19 +49,25 @@ func (e *clientGoneError) Unwrap() error { return e.err }
 // for refusing, or a release function. Anything that holds a connection open for a
 // long time on an inbox's behalf, such as an MCP wait, takes a slot this way, so
 // that one token cannot open an unbounded number of them.
-func (s *Server) takeStream(id inbox.ID) (release func(), refusal string) {
+func (s *Server) takeStream(id inbox.ID, h holder) (release func(), refusal string) {
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
 	if s.streamCounts[id] >= s.opts.MaxStreamsPerInbox {
 		return nil, "too many streams are open on this inbox; retry shortly"
 	}
+	giveBack, err := s.streamShares.acquire(context.Background(), h, s.opts.MaxStreamsPerCredential, 0)
+	if err != nil {
+		return nil, "too many streams are open for this credential; retry shortly"
+	}
 	select {
 	case s.streams <- struct{}{}:
 	default:
+		giveBack()
 		return nil, "too many streams are open; retry shortly"
 	}
 	s.streamCounts[id]++
 	return func() {
+		giveBack()
 		s.streamMu.Lock()
 		defer s.streamMu.Unlock()
 		if s.streamCounts[id]--; s.streamCounts[id] <= 0 {

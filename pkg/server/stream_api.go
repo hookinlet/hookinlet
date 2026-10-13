@@ -57,7 +57,7 @@ func (a *streamAPI) StreamMessages(ctx context.Context, request api.StreamMessag
 	// Streams have their own limits. They must not use the read slots, which are
 	// held for the length of a request and would cap the server at a handful of
 	// open streams.
-	release, refusal := s.takeStream(rr.in.ID)
+	release, refusal := s.takeStream(rr.in.ID, holderOf(rr.r, rr.principal))
 	if refusal != "" {
 		var b api.ErrorOverloaded
 		b.Error.Code, b.Error.Message = api.ErrorOverloadedErrorCodeOverloaded, refusal

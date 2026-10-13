@@ -93,9 +93,10 @@ Before a change is ready, run `make lint test`, and `scripts/test-docs.sh` if yo
 the examples. Go is pinned in `go.mod`. The Docker image and its smoke test are `make docker` and
 `scripts/smoke-docker.sh hookinlet:dev`.
 
-A pull request runs the fast checks: build, vet, unit tests (without the race detector), lint, and the static
-checks on the OpenAPI document and the generated code. The race detector, the documentation examples, the image
-build and smoke test, and the release dry run run when a change lands on `main` and every night, so run the ones
-you touched yourself before asking for review.
+A pull request runs the fast checks: build, vet, unit tests (without the race detector), lint, the static
+checks on the OpenAPI document and the generated code, and the admin console's build, unit tests and end-to-end
+tests in a browser. The race detector, the documentation examples, the image build and smoke test, and the release
+dry run run when a change lands on `main` and every night, so run the ones you touched yourself before asking for
+review.
 
 Commit messages say what changed and why, for whoever reads the history later.

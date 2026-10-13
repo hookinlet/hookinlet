@@ -60,7 +60,7 @@ python3 examples/relay/echo-receiver.py 9099 received.log &     # stands in for 
 go build -o relay ./examples/relay
 ./relay -inbox examples-demo -to http://localhost:9099/webhook -state relay.state -start beginning &
 
-for i in $(seq 50); do [ "$(wc -l < received.log 2>/dev/null || echo 0)" -ge 1 ] && break; sleep 0.2; done
+for i in $(seq 50); do [ "$({ wc -l < received.log; } 2>/dev/null || echo 0)" -ge 1 ] && break; sleep 0.2; done
 cat received.log
 ```
 

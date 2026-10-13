@@ -66,6 +66,7 @@ check it, and run it:
 ```sh
 sha256sum -c --ignore-missing checksums.txt
 tar -xzf hookinlet_<version>_linux_amd64.tar.gz
+cd hookinlet_<version>_linux_amd64
 HOOKINLET_ADMIN_TOKEN=… HOOKINLET_MASTER_KEY=… ./hookinlet serve
 ```
 
@@ -208,6 +209,8 @@ lists them all.
 | `HOOKINLET_LOG_FORMAT` | `json` | `json` or `text`. |
 | `HOOKINLET_MAX_STREAMS` | `1000` | SSE streams open at once; more get 503. Also bounds MCP waits. |
 | `HOOKINLET_MAX_STREAMS_PER_INBOX` | half of the above | Most streams or waits on one inbox. |
+| `HOOKINLET_MAX_STREAMS_PER_CREDENTIAL` | a tenth of `HOOKINLET_MAX_STREAMS`, at least 20 | Most streams or waits one token may hold, so that one token cannot take every slot. The admin token is not limited. Raise it for an agent platform that follows many inboxes with one token. |
+| `HOOKINLET_MAX_READS_PER_CREDENTIAL` | a quarter of the 16 read slots | Most read slots one token may hold at once. The admin token is not limited. |
 | `HOOKINLET_SSE_HEARTBEAT` | `15s` | Ping interval on idle streams. |
 | `HOOKINLET_SSE_RECHECK_INTERVAL` | `0` (off) | Re-read the store this often even without a wake-up. Needed only by a notifier that can drop signals; the built-in one does not. |
 | `HOOKINLET_ADMIN_ENABLED` | `true` | Serve the admin API (`/v1/admin/...`). `false` leaves inboxes and tokens to the command line. |
@@ -321,7 +324,13 @@ Linux. Each open SSE stream costs about 50 KiB, so 500 of them come to about
 35 MiB. A page of messages is built in memory and bounded (16 MiB at most), and
 reads are limited to 16 at a time, a slot being held until the response has been written
 to the client or `ResponseTimeout` (2 minutes) has passed, so a client that asks and never
-reads cannot pin more than 16 pages. Deliveries are not limited in number: each one
+reads cannot pin more than 16 pages. One credential may hold only a quarter of those slots
+(4 of 16), so that a client that never reads cannot hold them all and turn every other inbox's
+readers away; the admin token is not limited. In the same way one credential may hold only a
+tenth of the stream slots (100 of 1000) and one inbox's deliveries only an eighth of the
+budget below (32 MiB of 256), so that a token or an ingest key cannot take what everyone
+shares. The first two are settings (`HOOKINLET_MAX_READS_PER_CREDENTIAL`,
+`HOOKINLET_MAX_STREAMS_PER_CREDENTIAL`). Deliveries are not limited in number: each one
 is held in memory while it is read and checked, up to the inbox's body limit
 (1 MiB by default, at most 10 MiB), so a burst of large deliveries uses that much
 each. The total is bounded: deliveries being received hold at most
