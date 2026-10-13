@@ -27,21 +27,32 @@ builds:
 archives:
   - id: hookinlet
     formats: [tar.gz]
+    # One directory, so unpacking in a Downloads folder does not scatter files.
+    wrap_in_directory: true
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # The same bytes, owner and time for every file on every build, so two builds of one
+    # commit make the same archive.
+    builds_info: &info
+      owner: root
+      group: root
+      mtime: "{{ .CommitDate }}"
     files:
-      - LICENSE
-      - NOTICE
-      - LICENSING.md
-      - THIRD_PARTY_LICENSES
-      - README.md
-      - CHANGELOG.md
-      - docs/*.md
-      - docs/openapi.json
-      - SECURITY.md
-      - CONTRIBUTING.md
-      - examples/README.md
-      - examples/LICENSE
-      - examples/**/*
+      - {src: LICENSE, info: *info}
+      - {src: NOTICE, info: *info}
+      - {src: LICENSING.md, info: *info}
+      - {src: THIRD_PARTY_LICENSES, info: *info}
+      - {src: README.md, info: *info}
+      - {src: CHANGELOG.md, info: *info}
+      - {src: SECURITY.md, info: *info}
+      - {src: CONTRIBUTING.md, info: *info}
+      - {src: CODE_OF_CONDUCT.md, info: *info}
+      - {src: "docs/*.md", info: *info}
+      - {src: docs/openapi.json, info: *info}
+      - {src: "docs/images/*.png", info: *info}
+      - {src: ".github/banner-*.png", info: *info}
+      - {src: examples/README.md, info: *info}
+      - {src: examples/LICENSE, info: *info}
+      - {src: "examples/**/*", info: *info}
 
 checksum:
   name_template: checksums.txt
@@ -51,6 +62,12 @@ checksum:
 sboms:
   - id: archives
     artifacts: archive
+    # The licences of the Go modules are listed in THIRD_PARTY_LICENSES, which is read
+    # from each module's own license files. Left to itself syft also reports whatever
+    # licence text it finds anywhere in a module's source tree (a test fixture's GPL file,
+    # say), which is not what is compiled in.
+    env:
+      - SYFT_GOLANG_SEARCH_LOCAL_MOD_CACHE_LICENSES=false
 
 # The changelog is CHANGELOG.md in the archive; GitHub's generated one is not
 # what the project records.
@@ -58,6 +75,17 @@ changelog:
   disable: true
 
 release:
+  header: |
+    ## hookinlet {{ .Tag }}
+
+    Static binaries for Linux and macOS (amd64 and arm64). Each archive has the license, the third-party
+    licenses, the documentation and the examples. The container image is
+    `ghcr.io/hookinlet/hookinlet:{{ .Version }}`.
+  footer: |
+    What changed: [CHANGELOG.md](https://github.com/hookinlet/hookinlet/blob/{{ .Tag }}/CHANGELOG.md).
+
+    Verify what you downloaded: `sha256sum -c --ignore-missing checksums.txt`, and
+    `gh attestation verify <archive> --repo hookinlet/hookinlet`. See [Checking a release](https://github.com/hookinlet/hookinlet/blob/{{ .Tag }}/docs/deploying.md#checking-a-release).
   # So that re-running a release that failed after it was created (an attestation
   # service outage, say) replaces the assets instead of stopping on "already exists".
   replace_existing_artifacts: true

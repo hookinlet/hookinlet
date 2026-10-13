@@ -13,9 +13,11 @@ on:
 permissions:
   contents: read
 
-# Two tags pushed together must not race to move "latest".
+# Two tags pushed together must not race to move "latest". A run waiting behind another one
+# is replaced by a newer waiting run of the same kind, so push release tags one at a time,
+# and let a manual dry run be its own group so it can never replace a tag's run.
 concurrency:
-  group: release
+  group: release-${{ github.event_name }}
   cancel-in-progress: false
 
 env:

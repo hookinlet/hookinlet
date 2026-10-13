@@ -66,6 +66,7 @@ check it, and run it:
 ```sh
 sha256sum -c --ignore-missing checksums.txt
 tar -xzf hookinlet_<version>_linux_amd64.tar.gz
+cd hookinlet_<version>_linux_amd64
 HOOKINLET_ADMIN_TOKEN=… HOOKINLET_MASTER_KEY=… ./hookinlet serve
 ```
 
