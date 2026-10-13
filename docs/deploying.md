@@ -119,17 +119,7 @@ notarized: one downloaded through a browser is quarantined, and
   the current format; they work meanwhile.) A secret sealed under a key you no longer
   have cannot be recovered: set it again with `hookinlet inbox set-secret`.
 - **Secrets from files.** `HOOKINLET_ADMIN_TOKEN`, `HOOKINLET_MASTER_KEY`, `HOOKINLET_OLD_MASTER_KEY` and `HOOKINLET_VERIFIER_SECRET` may each be given as `..._FILE`, the path of a file holding the value (one trailing newline is dropped), the way Docker, Kubernetes and systemd hand secrets over. Giving both forms is an error.
-- <a id="stopping"></a>**SIGTERM or SIGINT to stop it.** With `HOOKINLET_DRAIN_DELAY` set, it first reports itself not ready for that long while still serving. It stops accepting connections, ends streams
-  and waits, and lets deliveries that are being stored finish, for up to
-  `HOOKINLET_SHUTDOWN_TIMEOUT` (10 seconds by default); anything still running
-  then is cut off. It then stops the retention sweep and checkpoints the database,
-  which is quick. With `HOOKINLET_DRAIN_DELAY` set, the platform must wait for the delay *and* the timeout
-  (Docker's default grace period of 10 seconds equals the default timeout alone, so give
-  `docker stop --time` or the orchestrator's termination grace period their sum). A second
-  signal ends the process at once. A platform that waits less than the timeout before killing the
-  process risks cutting off a delivery; killing it at once never damages the data
-  (SQLite recovers from the log), but the delivery in flight is lost, and the
-  sender, who got no answer, will normally retry.
+- **SIGTERM or SIGINT to stop it.** See [Stopping](#stopping).
 - **Nothing else.** It makes no network calls of its own, at startup or later.
 
 ## Behind a proxy
@@ -244,6 +234,10 @@ docker stop hookinlet
 docker run --rm -v hookinlet-data:/data -e HOOKINLET_MASTER_KEY -e HOOKINLET_OLD_MASTER_KEY \
   ghcr.io/hookinlet/hookinlet:latest rekey
 ```
+
+## Stopping
+
+Send `SIGTERM` or `SIGINT`. With `HOOKINLET_DRAIN_DELAY` set, it first reports itself not ready for that long while still serving. It stops accepting connections, ends streams and waits, and lets deliveries that are being stored finish, for up to `HOOKINLET_SHUTDOWN_TIMEOUT` (10 seconds by default); anything still running then is cut off. It then stops the retention sweep and checkpoints the database, which is quick. With `HOOKINLET_DRAIN_DELAY` set, the platform must wait for the delay *and* the timeout (Docker's default grace period of 10 seconds equals the default timeout alone, so give `docker stop --time` or the orchestrator's termination grace period their sum). A second signal ends the process at once. A platform that waits less than the timeout before killing the process risks cutting off a delivery; killing it at once never damages the data (SQLite recovers from the log), but the delivery in flight is lost, and the sender, who got no answer, will normally retry.
 
 ## Health checks
 

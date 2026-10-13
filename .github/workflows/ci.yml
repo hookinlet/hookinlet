@@ -216,6 +216,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Relative links and anchors in the documentation resolve
+        run: go test -count=1 -run TestLinks ./docs
       # Starts servers and runs the examples against them: not for a review.
       - name: Run the examples in the documentation
         if: github.event_name != 'pull_request'
