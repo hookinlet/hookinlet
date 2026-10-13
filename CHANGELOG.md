@@ -43,9 +43,9 @@ applies.
   `ResponseTimeout` to be taken. An operation that needs a credential still counts that from
   when it starts building its answer, MCP answers are now bound by it too, and an ingest's
   answer counts from when the delivery has been handled.
-  A client with a valid token that sends many requests refused early and never reads the answers
-  can still hold its connection (it is not counted by the per-credential limits); revoking the
-  token ends it.
+  A request with a valid token is given the same time, plus the longest wait it could have made
+  (a free read slot, or an MCP wait), where before one that was refused early and never read, such as
+  a stream asked for with a stale `epoch`, held its connection for good.
 
 **Go API**
 
