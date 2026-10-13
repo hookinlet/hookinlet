@@ -11,3 +11,6 @@ type rawConn = syscall.RawConn
 
 // smallReceiveBuffer does nothing here; the test that uses it still runs, less sharply.
 func smallReceiveBuffer(syscall.RawConn) error { return nil }
+
+// smallSendBuffer does nothing here either.
+func smallSendBuffer(syscall.RawConn) error { return nil }
