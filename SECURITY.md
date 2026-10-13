@@ -2,9 +2,13 @@
 
 ## Reporting a vulnerability
 
-Please **do not open a public issue** for a security problem. Report it privately through GitHub:
-[Security, then Report a vulnerability](https://github.com/hookinlet/hookinlet/security/advisories/new) on this
-repository. Include the version (`hookinlet version`), how you run it, and the smallest steps that show the
+Please **do not open a public issue** for a security problem. Report it privately, in either of two ways:
+
+- through GitHub: [Security, then Report a vulnerability](https://github.com/hookinlet/hookinlet/security/advisories/new)
+  on this repository; or
+- by email to **security@hookinlet.com**, if you cannot use GitHub.
+
+Include the version (`hookinlet version`), how you run it, and the smallest steps that show the
 problem. Do not include real tokens, signing secrets, or webhook payloads you would not post publicly.
 
 You will get an acknowledgement, and an assessment, as soon as the maintainer can give one. Fixes are released
