@@ -14,7 +14,7 @@ not trust what arrives. hookinlet is that URL: a single Go binary that receives 
 verifies their signatures, and keeps a queryable history. Agents read it three ways, REST, an SSE stream, or an
 MCP endpoint, using a per-inbox sequence number as the cursor. SQLite by default; runs anywhere.
 
-[Docs](docs) · [Quickstart](#quickstart) · [MCP tools](#read-from-an-agent) · [hookinlet Cloud (waitlist)](https://hookinlet.com/#cloud)
+[Docs](#documentation) · [Quickstart](#quickstart) · [MCP tools](#read-from-an-agent) · [hookinlet Cloud (waitlist)](https://hookinlet.com/#cloud)
 
 ## Quickstart
 
@@ -283,10 +283,9 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
 ## What it does and does not do
 
 - **One node.** SQLite and the in-process notifier assume one process per data directory. On a laptop, with a
-  million messages in an inbox, a page read takes under 20 ms at the 95th percentile (worst case measured: 11 ms),
-  and while a million-row retention sweep runs a delivery waits 18 ms or less at the 99th percentile
-  (longest wait measured: 102 ms, deleting a whole inbox). [Performance](docs/performance.md) says how it was measured.
-- **Ready in milliseconds once migrated.** About 10 MiB of memory idle. (An upgrade that has migrations to apply to a large database takes longer: [Upgrading](docs/deploying.md#upgrading).) No outbound network calls, no telemetry.
+  million messages in an inbox, a page read takes under 20 ms at the 95th percentile (worst p95 measured: 11.4 ms),
+  and while a million-row retention sweep runs a delivery waits 24 ms or less at the 99th percentile. [Performance](docs/performance.md) says how it was measured.
+- **Ready in milliseconds once migrated.** About 10 to 12 MiB of memory idle on Linux. (An upgrade that has migrations to apply to a large database takes longer: [Upgrading](docs/deploying.md#upgrading).) No outbound network calls, no telemetry.
 - **Inboxes as a file.** `hookinlet apply -f inboxes.yaml` creates the inboxes a file declares and changes the ones that
   differ. It never deletes anything. See [applying a file](docs/admin.md#applying-a-file).
 - **Backups while it runs.** `hookinlet backup --out file.db` takes a consistent snapshot.

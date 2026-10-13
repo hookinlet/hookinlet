@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the public `pkg/` API are listed here.
+Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
@@ -37,39 +37,31 @@ REST, a live event stream, or MCP.
   and unauthenticated ingest has a memory budget. The admin API can be off, or on its own
   address. `/metrics`, `hookinlet healthcheck`, draining on shutdown, and secrets from files.
 - **Ships verifiably.** Static binaries for Linux and macOS (amd64, arm64) and a multi-arch image,
-  with checksums, SBOMs, signed build provenance for the archives (once the repository is public), and the licenses of everything inside.
+  with checksums, SBOMs, signed build provenance for the archives, and the licenses of everything inside.
   Releases are cut only from a commit on main that passed CI, after a vulnerability check.
 
-**Upgrading from 0.1.0-rc.1.** Run it on the same data directory: migrations 0003 to 0007 apply
-at start (a copy of the database is kept first; allow about three times its size free for the
-migration that moves message bodies). What breaks, for anyone who used the candidate:
-the admin API is under `/v1/admin` (was `/admin`); `rotate-token` is gone (issue a new token, then
-revoke the old); ingest URLs use a random key (existing inboxes get new ones: `hookinlet inbox
-show SLUG`); a verifier must be named when an inbox is created; MCP messages have a different
-shape; and the Go interfaces changed as listed below. Verifier secrets stored by the candidate
-keep working; run `hookinlet rekey` once to bring them up to the current format.
+## Changes during development
 
-## Development notes by phase, for embedders
+<details>
+<summary>The detail behind the summary above, by area: what changed in the public Go packages, the API and
+the configuration, newest first. Of interest mainly to people embedding the Go packages.</summary>
 
-Everything below is the detail behind the summary above, phase by phase: what changed in the public
-Go packages, the API, and the configuration, in the order it happened. The newest is first.
+### Late changes before the first release
 
-### Release review fixes
-
-- **Admin console, fourth part.** The console can now manage: a new-inbox form with a section for each
+- **Admin console: managing, searching and testing.** The console can now manage: a new-inbox form with a section for each
   kind of sender (Stripe, GitHub, Slack, Standard Webhooks, HMAC, shared token, none) that shows the
   agent token and ingest URL once; a Settings tab per inbox (general settings, verification, replacing
   the secret, rotating the ingest URL, deleting with a typed confirmation); a Maintenance page (status,
   run retention, download a backup); and a command palette (`⌘K`). The console has Playwright
   end-to-end tests and an axe accessibility scan of every screen in both themes, run in CI.
 
-- **Admin console, third part.** Each inbox has a page: its facts and ingest path, and its messages, newest
+- **Admin console: inboxes and messages.** Each inbox has a page: its facts and ingest path, and its messages, newest
   first, with filters (event type, verification, time), older messages on request, and a live mode that
   follows the stream. A message opens at its own address (`/admin/inboxes/SLUG/messages/SEQ`) and shows
   its body, headers, exact raw bytes (as text or hex) and details, with a copy-as-curl for reading it back.
   Everything a sender wrote is drawn as text, with a reminder that it is untrusted.
 
-- **Admin console, second part.** The console now has an overview (inbox count, messages received,
+- **Admin console: shell, themes, overview and tokens.** The console now has an overview (inbox count, messages received,
   the last 24 hours, the last retention run, and an activity line per inbox), an inbox list with a
   filter, and a Tokens page that issues tokens (shown once, with a ready curl line) and revokes them.
   Light and dark themes, a layout that works on a phone, and self-hosted Inter and JetBrains Mono
@@ -77,7 +69,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - **`hookinlet check`** verifies the database file (SQLite's integrity check, or `--quick`), for use after a
   crash, a disk problem or a restore. The server still does not scan the file at startup. New in `pkg/`:
   `sqlite.Store.Check`.
-- **Admin console, first part.** A web console is served at `/admin` (switch off with
+- **Admin console: serving and status.** A web console is served at `/admin` (switch off with
   `HOOKINLET_ADMIN_UI=false`). This release carries the plumbing and a sign-in page that shows
   the server's status; the screens follow. New admin endpoint `GET /v1/admin/status`. New in
   `pkg/`: `Options.DisableUI`, the optional `inbox.StatusReporter` (implemented by the SQLite store).
@@ -90,9 +82,6 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - **`/readyz` no longer fails for the whole server because one inbox's secret does not open.**
   It fails when the master key opens none of the stored secrets (a wrong key), and logs a warning
   naming the inboxes when only some do not open. Starting still refuses until they are fixed.
-- **Upgrading from rc.1: stop the old server first.** rc.1 takes no lock on the data directory, so
-  a migration could run under it and leave message counts wrong. The migration now refuses when
-  another process has the database open.
 - **An MCP `wait_for_messages` holds no read slot while it waits.** Idle waits could use up every
   slot and make reads answer 503; the slot is taken as the answer is returned.
 - **Changes to the public packages:** `sqlite.Open` applies migrations only when given
@@ -119,9 +108,9 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - **A JSON body with a number or escape that common parsers refuse is delivered as `body_text`**
   (number literals over 100 characters or outside float64, unpaired surrogate escapes), so one
   such body cannot make every page that holds it unreadable.
-- The example clients keep the epoch with the cursor (see the Phase 14 notes).
+- The example clients keep the epoch with the cursor (see Cursor integrity).
 
-### Phase 16: the public face
+### The public face
 
 #### Changed
 - **The admin API is under `/v1/admin`** (was `/admin`). `/metrics`, ingest (`/in/...`), and
@@ -149,7 +138,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   stop carrying the same fields, and when the generator template we changed stops being
   upstream's plus the recorded edits (`scripts/check-template.sh`, in CI).
 
-### Phase 15: storage and startup (part 2)
+### Storage and startup (part 2)
 
 #### Added
 - **One server per data directory.** `sqlite.WithExclusiveLock` takes an advisory lock
@@ -185,7 +174,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - `go.mod` says `go 1.27` with `toolchain go1.27.2`, so embedders are not made to use the
   patch release.
 
-### Phase 15: storage and startup (part 1)
+### Storage and startup (part 1)
 
 #### Added
 - **A copy of the database before a migration.** With migrations to apply to a database
@@ -214,12 +203,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   that does not want bodies no longer follows the overflow pages of the ones it skips. The
   table is rebuilt: it takes time and disk space in proportion to the database.
 
-#### Upgrading
-- Migrations 0007 rebuilds the messages table; the copy of the database taken first is
-  your way back (see docs/deploying.md). Verifier secrets sealed by an earlier release
-  keep working; run `hookinlet rekey` at some point to move them to the new format.
-
-### Phase 14: cursor integrity
+### Cursor integrity
 
 #### Added
 - **Epochs.** Every inbox has an `epoch`, an opaque string that is fixed for its life,
@@ -253,12 +237,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   `Page.OldestSeq`, and `Backupper` snapshots must renew epochs (all three are in the
   conformance suites).
 
-#### Upgrading
-- Migration 0006 gives every existing inbox an epoch and a stored count. A cursor a
-  client holds from before the upgrade has no epoch; it keeps working as long as the
-  client does not send one.
-
-### Phase 13: tokens
+### Tokens
 
 #### Added
 - **Several named agent tokens per inbox, each scoped to some inboxes or to all of
@@ -290,12 +269,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - `POST /admin/inboxes/{slug}/rotate-token`, `hookinlet inbox rotate-token`, and
   `admin.Service.RotateToken`. Issue a new token and revoke the old one.
 
-#### Upgrading
-- Migration 0005 turns each inbox's agent token into a token named `default`, scoped to
-  that inbox, so every existing token keeps working. The old column is left in place
-  (unused) because SQLite cannot drop a unique column cheaply.
-
-### Phase 12: the trust model
+### The trust model
 
 #### Changed
 - **A verifier must be named** when an inbox is created (admin API, `hookinlet
@@ -315,18 +289,6 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   (Standard Webhooks needs `whsec_` and base64). Changing an inbox's verifier
   removes its secret. Calls that change an inbox answer with `warnings`.
 
-#### Upgrading
-- Migration 0004 gives **every existing inbox a new random ingest key**, so the URLs
-  senders use change (`hookinlet inbox show SLUG` prints the new one). An ingest key is
-  a capability and the slug is a guessable name, so no inbox keeps its slug as its key.
-- Messages that a `none` inbox stored before the upgrade are marked not verified.
-- A delivery from GitHub or an HMAC sender that is retried across the upgrade, with
-  an id that was already stored, is stored once more: earlier rows are known by the id
-  alone, new ones by the id and the body.
-- Migration 0003 rewrites every message row that has a delivery id, so it takes time
-  and WAL space in proportion to the size of the database (about 5 seconds for a
-  million messages and 580 MB). Take a backup first, as for any upgrade.
-
 #### Added (`pkg/`)
 - `inbox.Inbox.IngestKey`, `inbox.ValidIngestKey`, and `inbox.NewMessage.DedupeKey`.
   `Store.ResolveIngestKey` resolves by ingest key. The key is required: a `Store`
@@ -336,7 +298,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   `verify.SecretChecker`.
 - Migration 0003 (ingest keys, dedupe keys).
 
-### Phase 10: the document drives the server
+### The document drives the server
 
 #### Changed
 - Routes, the credential each operation needs, and the checks on path parameters,
@@ -363,7 +325,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   `wire.RejectParams` (internal): requests are built from the generated parameters
   by `wire.NewPageRequest` and `wire.NewStreamRequest`.
 
-### Phase 9: the spec is the contract, enforced in Go
+### The spec is the contract, enforced in Go
 
 #### Changed
 - The server refuses a request that breaks `docs/openapi.json`: a query parameter
@@ -395,7 +357,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   (98 us to 134 us for 1 KiB on the development machine). No exported API
   changed.
 
-### Phase 8: open-source polish
+### Open-source polish
 
 #### Added
 - `docs/openapi.json`, an OpenAPI 3.1 description of ingest, the read API, the
@@ -417,7 +379,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - `GET /admin/inboxes` refuses a repeated `after` or `limit` (400), as the read API
   does for its parameters. It used to use one of them silently.
 
-### Phase 7: packaging and docs
+### Packaging and docs
 
 #### Added
 - Release automation: GoReleaser configuration for static `linux` and `darwin`
@@ -432,7 +394,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - The Dockerfile cross-compiles for the target platform instead of building under
   emulation. No change to the image's contents or behaviour.
 
-### Phase 6: admin API, retention, backup, CLI
+### Admin API, retention, backup, CLI
 
 #### Added
 - The admin API (`/admin/inboxes`, `/admin/inboxes/{slug}`, `…/secret`,
@@ -467,7 +429,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - The SQLite store prunes 250 rows per transaction (was 5000), so deliveries
   arriving during a large prune wait at most a short batch.
 
-### Phase 5: MCP endpoint
+### MCP endpoint
 
 #### Added
 - `POST /mcp`: a stateless Streamable HTTP MCP endpoint with the read-only tools
@@ -488,7 +450,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
 - The REST message JSON can carry `body_truncated: true`, but only where a size
   cap is requested, which the REST API never does; its responses are unchanged.
 
-### Phase 4: SSE and the notifier
+### SSE and the notifier
 
 #### Added
 - `pkg/notify/local`: `Notifier`, the in-process `inbox.Notifier`.
@@ -508,7 +470,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   context. `StoreSuite` and `NotifierSuite` enforce both.
 - `Server.Shutdown` ends open streams, in addition to stopping new connections.
 
-### Phase 3: the read API
+### The read API
 
 #### Added
 - `pkg/auth/token`: `Authenticator`, an `inbox.Authenticator` that accepts the
@@ -535,7 +497,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   rows. The result is the same; it relies on retention removing only a prefix of
   an inbox, which the conformance suite now verifies against a real walk.
 
-### Phase 2: ingest and verification
+### Ingest and verification
 
 #### Added
 - `pkg/verify`: `Verifier`, `Result`, `Failure`, `Factory`, `HeaderRedactor`, and
@@ -556,7 +518,7 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   the specific reason is logged and, for stored deliveries, kept in
   `verify_error`.
 
-### Phase 1: contracts, store, and suites
+### Contracts, store, and suites
 
 #### Added
 - `pkg/inbox`: the domain types and the `Store`, `Notifier`, `Authenticator`,
@@ -570,3 +532,5 @@ Go packages, the API, and the configuration, in the order it happened. The newes
   comparison.
 - `pkg/server`: `server.New(Options)` with request ids, panic recovery, an
   access log, `/healthz`, and graceful shutdown.
+
+</details>

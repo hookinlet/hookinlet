@@ -52,7 +52,7 @@ with the size of the inbox.
 
 Each commit is synced to disk (`synchronous=FULL`), so a `2xx` from ingest means
 the message survives power loss, not only a crash of the process. The store used
-`synchronous=NORMAL` until this change, which syncs the WAL only at checkpoints
+`synchronous=NORMAL` in earlier versions, which syncs the WAL only at checkpoints
 and can lose the most recent commits on power loss.
 
 `BenchmarkAppendSequential` is one sender appending 1 KiB messages one after
@@ -110,8 +110,10 @@ milliseconds, on the same machine as the figures above:
 | 100 | 1 ms | 10 ms | 44 ms | 14 s |
 
 The gate is a p99 under 50 ms; 250 rows leaves a wide margin and costs two extra
-seconds on a prune nobody is waiting for. Measured with the final settings
-(counting only appends made while the operation runs):
+seconds on a prune nobody is waiting for. Measured
+(counting only appends made while the operation runs). These tables were measured with the earlier
+`synchronous=NORMAL` setting; with the shipped FULL setting the same operations gave append p99 values of
+24, 20 and 17 ms (see above), all inside the 50 ms gate:
 
 | Operation | Append p99 | Longest wait |
 |---|---|---|

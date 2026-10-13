@@ -1,6 +1,6 @@
 # Roadmap
 
-Ideas that are out of scope for the current phase. Each is labelled **OSS**
+Ideas that are not built yet. Each is labelled **OSS**
 (belongs in this repository) or **Cloud** (belongs in the hosted product).
 
 ## Webhook forwarding (relay)
