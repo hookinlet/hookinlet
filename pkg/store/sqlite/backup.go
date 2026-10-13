@@ -49,7 +49,7 @@ func (s *Store) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 	}
 	name := f.Name()
 	if err := f.Close(); err != nil {
-		_ = os.Remove(name)
+		removeSnapshot(name)
 		return nil, 0, fmt.Errorf("sqlite: backup: %w", err)
 	}
 	// VACUUM INTO needs a file that does not exist or is empty; this one is empty.
@@ -59,29 +59,29 @@ func (s *Store) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 	// new file, so it never takes the write lock.
 	conn, err := openDB(s.path, 1, false)
 	if err != nil {
-		_ = os.Remove(name)
+		removeSnapshot(name)
 		return nil, 0, err
 	}
 	conn.SetMaxOpenConns(1)
 	_, err = conn.ExecContext(ctx, `VACUUM INTO ?`, name)
 	_ = conn.Close()
 	if err != nil {
-		_ = os.Remove(name)
+		removeSnapshot(name)
 		return nil, 0, s.ctxErr(ctx, fmt.Errorf("sqlite: backup: %w", err))
 	}
 	if err := renewEpochs(ctx, name); err != nil {
-		_ = os.Remove(name)
+		removeSnapshot(name)
 		return nil, 0, s.ctxErr(ctx, fmt.Errorf("sqlite: backup: %w", err))
 	}
 	snap, err := os.Open(name) //nolint:gosec // a file this function just created in the data directory
 	if err != nil {
-		_ = os.Remove(name)
+		removeSnapshot(name)
 		return nil, 0, fmt.Errorf("sqlite: backup: %w", err)
 	}
 	st, err := snap.Stat()
 	if err != nil {
 		_ = snap.Close()
-		_ = os.Remove(name)
+		removeSnapshot(name)
 		return nil, 0, fmt.Errorf("sqlite: backup: %w", err)
 	}
 	return &snapshotFile{File: snap}, st.Size(), nil
@@ -108,6 +108,21 @@ func renewEpochs(ctx context.Context, path string) error {
 	return nil
 }
 
+// snapshotJournals are the files SQLite may keep beside a snapshot while it is being
+// written: the rollback journal VACUUM INTO and the epoch update use, and the log and
+// its index if the file was ever in WAL mode.
+var snapshotJournals = []string{"-journal", "-wal", "-shm"}
+
+// removeSnapshot deletes a snapshot file and anything SQLite left beside it. A write
+// that failed for lack of room leaves a journal behind, and nothing but this would
+// ever remove it.
+func removeSnapshot(name string) {
+	_ = os.Remove(name)
+	for _, suffix := range snapshotJournals {
+		_ = os.Remove(name + suffix)
+	}
+}
+
 // snapshotFile deletes its file when closed.
 type snapshotFile struct{ *os.File }
 
@@ -115,6 +130,9 @@ func (f *snapshotFile) Close() error {
 	err := f.File.Close()
 	if rmErr := os.Remove(f.Name()); rmErr != nil && !os.IsNotExist(rmErr) && err == nil {
 		err = rmErr
+	}
+	for _, suffix := range snapshotJournals {
+		_ = os.Remove(f.Name() + suffix)
 	}
 	return err
 }
@@ -129,7 +147,10 @@ func removeStaleBackups(dir string, now time.Time) {
 		n := e.Name()
 		// Beside a snapshot that died while its epochs were being renewed there may
 		// be the journal files SQLite keeps for it.
-		base := strings.TrimSuffix(strings.TrimSuffix(n, "-wal"), "-shm")
+		base := n
+		for _, suffix := range snapshotJournals {
+			base = strings.TrimSuffix(base, suffix)
+		}
 		if e.IsDir() || !strings.HasPrefix(base, backupPrefix) || !strings.HasSuffix(base, backupSuffix) {
 			continue
 		}
