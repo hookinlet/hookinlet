@@ -356,7 +356,11 @@ rate limit in front, or in a hook (see [extending](extending.md)). Disk is
 what grows: size the volume for the messages you keep, and set retention on
 inboxes that receive a lot. A backup needs free space in the data directory for a
 second copy of the database while it runs. Each stream or wait holds a file
-descriptor; the default of 1000 needs a limit comfortably above that.
+descriptor; the default of 1000 needs a limit comfortably above that. A connection
+cannot be held open by not sending or not reading: whatever a request is sent to, its
+headers must arrive within 10 seconds and its body within 60, and an answer the client does
+not take is given up after `ResponseTimeout` (an operation that needs a credential counts
+that from when it starts building its answer).
 
 ## Upgrading
 
