@@ -5,9 +5,13 @@ conditions beyond keeping this notice:
   examples/curl, examples/python, examples/go-agent (except agent_test.go), examples/relay
 
 The rest of hookinlet is under the GNU Affero General Public License, version 3 only (see
-../LICENSE). That includes examples/custom-hooks, which embeds the server and so is built from
-AGPL code, and examples/go-agent/agent_test.go, which starts the server to test the client.
-Each file says which licence applies to it in its first lines (SPDX-License-Identifier).
+../LICENSE). That includes examples/custom-hooks, which imports and embeds the server's Go
+packages, and examples/go-agent/agent_test.go, which starts the server to test the client.
+The program you get by building either is governed by the AGPL whatever licence its own files
+carry, because it contains hookinlet's AGPL code; they carry the AGPL header so that nobody
+copies them into a proprietary program thinking otherwise. The clients above talk to hookinlet
+over HTTP and contain none of its code. Each file says which licence applies to it in its first
+lines (SPDX-License-Identifier).
 
 MIT License
 
