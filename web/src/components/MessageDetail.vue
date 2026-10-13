@@ -157,10 +157,10 @@ async function copyCurl() {
         </template>
         <dl v-else class="kv2">
           <dt>Received</dt><dd>{{ message.received_at }} <span class="muted">({{ ago(message.received_at) }})</span></dd>
-          <dt>Request</dt><dd class="mono">{{ message.method }} {{ message.path || '/' }}{{ message.query ? `?${message.query}` : '' }}</dd>
-          <dt>Content type</dt><dd class="mono">{{ message.content_type || 'none' }}</dd>
+          <dt>Request</dt><dd class="mono">{{ message.method }} {{ visible(message.path || '/') }}{{ message.query ? `?${visible(message.query)}` : '' }}</dd>
+          <dt>Content type</dt><dd class="mono">{{ visible(message.content_type || 'none') }}</dd>
           <dt>Size</dt><dd>{{ message.size }} bytes</dd>
-          <dt>Verification</dt><dd>{{ status?.text }}<template v-if="message.verify_error"> <span class="err">({{ message.verify_error }})</span></template></dd>
+          <dt>Verification</dt><dd>{{ status?.text }}<template v-if="message.verify_error"> <span class="err">({{ visible(message.verify_error) }})</span></template></dd>
           <dt>Delivery id</dt><dd class="mono">{{ visible(message.delivery_id ?? 'none') }}</dd>
           <dt>Event type</dt><dd class="mono">{{ visible(message.event_type ?? 'none') }}</dd>
           <dt>Source address</dt><dd class="mono">{{ message.source_ip ?? 'unknown' }}</dd>

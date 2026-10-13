@@ -46,5 +46,7 @@ describe('visible', () => {
     expect(visible('invoice.paid')).toBe('invoice.paid')
     expect(visible('evil\u202Efdp.exe')).toBe('evil<U+202E>fdp.exe')
     expect(visible('a\u200Bb')).toBe('a<U+200B>b')
+    expect(visible('x\u061Cy\u2028z\u{E0041}')).toBe('x<U+061C>y<U+2028>z<U+E0041>')
+    expect(visible('plain text, ünïcödé ok')).toBe('plain text, ünïcödé ok')
   })
 })

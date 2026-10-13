@@ -86,7 +86,11 @@ func (s *Server) serves(op *specvalidate.Operation, surface surface) bool {
 		return false
 	case admin && s.opts.DisableAdmin:
 		return false
-	case admin && surface == surfacePublic, !admin && surface == surfaceAdmin:
+	case admin && surface == surfacePublic:
+		return false
+	case !admin && surface == surfaceAdmin && !(op.HasTag("Read") && !s.opts.DisableUI):
+		// The admin listener serves the admin API, and, for the console it also serves, the read
+		// API the console shows messages with (it is the same authentication as anywhere else).
 		return false
 	}
 	return true

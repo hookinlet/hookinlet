@@ -48,6 +48,13 @@ the configuration, newest first. Of interest mainly to people embedding the Go p
 
 ### Late changes before the first release
 
+- **The console works on a separate admin listener.** With `HOOKINLET_ADMIN_LISTEN_ADDR` the console was
+  served on the admin address but could not read messages there (the read API was on the public
+  address only). The admin listener now also serves the read API when the console is on.
+- **The console marks invisible and direction-changing characters** in the request path, query and
+  content type as well, and in more kinds of them (Arabic letter mark, line and paragraph separators,
+  tag characters).
+
 - **Admin console: managing, searching and testing.** The console can now manage: a new-inbox form with a section for each
   kind of sender (Stripe, GitHub, Slack, Standard Webhooks, HMAC, shared token, none) that shows the
   agent token and ingest URL once; a Settings tab per inbox (general settings, verification, replacing
