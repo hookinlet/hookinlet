@@ -272,7 +272,7 @@ type vanishing struct {
 func (s *vanishing) ListTokens(ctx context.Context, p inbox.TokenListParams) ([]*inbox.Token, error) {
 	tokens, err := s.Store.ListTokens(ctx, p)
 	if err == nil && s.done.CompareAndSwap(false, true) {
-		err = s.Store.DeleteInbox(ctx, s.victim)
+		err = s.DeleteInbox(ctx, s.victim)
 	}
 	return tokens, err
 }
