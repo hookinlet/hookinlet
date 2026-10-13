@@ -5,6 +5,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
@@ -85,6 +86,9 @@ func (s *Service) CreateToken(ctx context.Context, p TokenParams) (*TokenCreated
 	if err != nil {
 		return nil, err
 	}
+	if len(v) == 0 { // its only inboxes were deleted while it was being issued
+		return nil, fmt.Errorf("the inbox was deleted: %w", inbox.ErrNotFound)
+	}
 	return &TokenCreated{Record: v[0], Token: t.Token}, nil
 }
 
@@ -116,9 +120,14 @@ func (s *Service) RevokeToken(ctx context.Context, id inbox.TokenID) error {
 	return s.Store.DeleteToken(ctx, id)
 }
 
-// tokenViews names each token's inboxes by slug.
+// tokenViews names each token's inboxes by slug. The tokens were read a moment
+// ago, so an inbox may have been deleted since: it is left out, and a token that
+// read only inboxes that are gone is left out with them (deleting the inbox revokes it),
+// rather than the whole listing failing with "not found" for something the caller
+// did not ask about.
 func (s *Service) tokenViews(ctx context.Context, tokens []*inbox.Token) ([]TokenView, error) {
 	slugs := map[inbox.ID]string{}
+	gone := map[inbox.ID]bool{}
 	out := make([]TokenView, 0, len(tokens))
 	for _, t := range tokens {
 		v := TokenView{
@@ -126,9 +135,16 @@ func (s *Service) tokenViews(ctx context.Context, tokens []*inbox.Token) ([]Toke
 			CreatedAt: t.CreatedAt.UTC().Format(TimeLayout),
 		}
 		for _, id := range t.InboxIDs {
+			if gone[id] {
+				continue
+			}
 			slug, ok := slugs[id]
 			if !ok {
 				in, err := s.Store.GetInbox(ctx, id)
+				if errors.Is(err, inbox.ErrNotFound) {
+					gone[id] = true
+					continue
+				}
 				if err != nil {
 					return nil, err
 				}
@@ -136,6 +152,9 @@ func (s *Service) tokenViews(ctx context.Context, tokens []*inbox.Token) ([]Toke
 				slugs[id] = slug
 			}
 			v.Inboxes = append(v.Inboxes, slug)
+		}
+		if len(t.InboxIDs) > 0 && len(v.Inboxes) == 0 {
+			continue
 		}
 		out = append(out, v)
 	}

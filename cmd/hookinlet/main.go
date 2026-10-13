@@ -25,28 +25,44 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
 )
 
-// version is overridden at build time with -ldflags "-X main.version=...". A build made
-// with plain `go build` from a checkout reports the commit it was built from instead.
+// version is overridden at build time with -ldflags "-X main.version=..." (the release
+// builds). Without it, the version comes from the build information: the module version of
+// a `go install ...@v0.1.0`, or else the commit a checkout was built from.
 var version = "dev"
 
 func init() {
-	if version != "dev" {
-		return
+	bi, _ := debug.ReadBuildInfo()
+	version = resolveVersion(version, bi)
+}
+
+// resolveVersion picks the version to report. The injected one wins. Otherwise a module
+// version is used, without its leading "v" so that it reads like the injected one (0.1.0,
+// not v0.1.0); the main module's version is "(devel)" or empty when there is none, as in a
+// build from a checkout, which reports its commit instead (dev-<12 characters>, with
+// -dirty for a modified tree). With nothing to go on it is "dev".
+func resolveVersion(injected string, bi *debug.BuildInfo) string {
+	if injected != "dev" || bi == nil {
+		return injected
 	}
-	dirty := false
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		for _, s := range bi.Settings {
-			switch {
-			case s.Key == "vcs.revision" && len(s.Value) >= 12:
-				version = "dev-" + s.Value[:12]
-			case s.Key == "vcs.modified" && s.Value == "true":
-				dirty = true
-			}
-		}
-		if dirty && version != "dev" {
-			version += "-dirty"
+	if v := bi.Main.Version; v != "" && v != "(devel)" {
+		return strings.TrimPrefix(v, "v")
+	}
+	revision, dirty := "", false
+	for _, s := range bi.Settings {
+		switch {
+		case s.Key == "vcs.revision" && len(s.Value) >= 12:
+			revision = s.Value[:12]
+		case s.Key == "vcs.modified" && s.Value == "true":
+			dirty = true
 		}
 	}
+	if revision == "" {
+		return "dev"
+	}
+	if dirty {
+		return "dev-" + revision + "-dirty"
+	}
+	return "dev-" + revision
 }
 
 // Exit codes: 1 is a runtime failure, 2 is a usage or configuration error.
