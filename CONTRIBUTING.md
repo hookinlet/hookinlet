@@ -66,6 +66,8 @@ they are useful if you are only reading.
 
 ## License and file headers
 
+See [`LICENSING.md`](LICENSING.md) for what the license means for people using the project.
+
 hookinlet is licensed under the GNU Affero General Public License, version 3 only (`AGPL-3.0-only`). Every Go
 source file starts with:
 

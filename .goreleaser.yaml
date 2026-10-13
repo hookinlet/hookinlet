@@ -31,6 +31,7 @@ archives:
     files:
       - LICENSE
       - NOTICE
+      - LICENSING.md
       - THIRD_PARTY_LICENSES
       - README.md
       - CHANGELOG.md
