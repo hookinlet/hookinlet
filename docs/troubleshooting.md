@@ -47,7 +47,14 @@ completely full (the log says `storage full`); deliveries answer `503`.
 
 **`database disk image is malformed`, or answers that are wrong or missing.** The file is damaged. Run
 `hookinlet check` (it can run beside the server); if it reports problems, stop the server, copy the data
-directory aside, and restore the latest [backup](admin.md#backups).
+directory aside, and restore the latest [backup](admin.md#backups). If it appears right after a
+restore, the likely cause is an old `hookinlet.db-wal` or `hookinlet.db-shm` left beside the
+restored file: stop the server, remove both, and start again. (Only for a restore. After a crash the
+log holds deliveries that were acknowledged, and must stay where it is.)
+
+**`hookinlet.db exists but is empty`.** The file has no content, which is what a copy or restore
+that did not finish leaves; it is refused and not started as a new database. Copy the backup
+again. On a new installation with nothing to lose, delete the file.
 
 **`database schema version N is newer than this build supports`.** The data was
 written by a newer hookinlet. Run the newer version, or restore a backup taken by an

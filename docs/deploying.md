@@ -226,6 +226,24 @@ docker exec hookinlet /hookinlet backup --out /data/backup.db
 docker cp hookinlet:/data/backup.db ./backup.db     # or: curl .../v1/admin/backup -o backup.db
 ```
 
+The copy stays in the volume, where it is as sensitive as the database and where a second
+`backup --out /data/backup.db` is refused without `--force`. The image has no shell, so remove
+it with another image: `docker run --rm -v hookinlet-data:/data alpine:3 rm /data/backup.db`.
+
+To restore a backup into the volume, stop the container, replace the database (and remove the
+old `-wal` and `-shm` files, see [Restoring](admin.md#backups)) with another image that has a
+shell, check it, and start again with the **same master key**:
+
+```bash
+docker stop hookinlet
+docker run --rm -v hookinlet-data:/data -v "$PWD":/backup:ro alpine:3 sh -c '
+  rm -f /data/hookinlet.db /data/hookinlet.db-wal /data/hookinlet.db-shm /data/backup.db &&
+  cp /backup/backup.db /data/hookinlet.db &&
+  chown 65532:65532 /data/hookinlet.db && chmod 600 /data/hookinlet.db'
+docker run --rm -v hookinlet-data:/data ghcr.io/hookinlet/hookinlet:latest check
+docker start hookinlet
+```
+
 Commands that need the server stopped (`migrate`, `rekey`, `renew-epochs`) run in a
 throwaway container on the same volume, with the secrets they need in its environment:
 

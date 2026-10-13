@@ -447,6 +447,35 @@ like: `sqlite3 backup.db 'PRAGMA integrity_check'` should print `ok`.
 the indexes with their tables), and can run beside a server. The server does not scan the database when it
 starts, which is why starting is fast: run it after a crash, a disk problem, or a restore.
 
+To try a restore without touching the live data, put the backup in a directory of its
+own and check that:
+
+<!-- exercise -->
+```sh
+hookinlet backup --out restore-test.db
+unset HOOKINLET_URL        # a server address and a data directory together are an error
+mkdir restored
+cp restore-test.db restored/hookinlet.db
+hookinlet check --data-dir restored
+hookinlet inbox list --data-dir restored
+```
+
+Three things catch people out when restoring:
+
+- **Leave no old `-wal` or `-shm` behind.** They belong to the database they were written
+  for, and SQLite applies a log it finds to whatever file is next to it. Next to a restored
+  copy that gives `database disk image is malformed` when the server (or `check`) opens it,
+  or worse, a database that opens and is wrong. That is why the step above says to remove them.
+- **A file that did not finish copying.** An empty `hookinlet.db` is refused ("exists but is
+  empty") and not started as a new, empty database; copy the backup again.
+- **A backup from an older release** needs that release's migrations before it can be
+  checked: `hookinlet check` refuses it and says to run `hookinlet migrate` (with the server
+  stopped), which keeps a copy of the file as it was. Starting the server does the same.
+
+A backup that you download with `curl -o` is created with your shell's `umask`, and a
+backup holds everything the data directory does: `(umask 077; curl -s ... -o backup.db)`
+keeps it private, as `hookinlet backup --out` does.
+
 **Epochs.** A restored server may hand out sequence numbers that differ from the
 ones the original handed out after the backup was taken, so cursors held from before
 must not be believed. Each snapshot from `GET /v1/admin/backup` or `hookinlet backup`
@@ -461,6 +490,14 @@ hookinlet renew-epochs --data-dir ./data
 ```
 
 which gives every inbox a new epoch in place.
+
+A reader that does not send `epoch=` gets no such signal. A cursor that is behind the
+restored `latest_seq` reads on as if nothing had happened, though the messages after
+it are no longer necessarily the ones it saw, and one that is ahead of it (the usual case, when the backup is older than the
+reader) gets an empty page, or a stream that waits, until new deliveries pass it: the
+messages in between are skipped. The page does carry the new `epoch`, and `latest_seq`
+below the reader's cursor is the tell. Agents that must not lose messages should send the
+`epoch` they were given, as the `next` links do.
 
 **A restore also undoes what changed after the snapshot.** A token revoked, an ingest key
 rotated, or an inbox disabled because something leaked is live again in a database restored from
