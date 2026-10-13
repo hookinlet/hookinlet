@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: AGPL-3.0-only
-# Copyright (C) 2026 Pat Ramsey
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Pat Ramsey
 #
 # Follow an inbox live over Server-Sent Events. Each message arrives as it is
 # stored; curl prints the raw event stream. A client that reconnects with the

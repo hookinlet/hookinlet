@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: AGPL-3.0-only
-# Copyright (C) 2026 Pat Ramsey
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Pat Ramsey
 """A stand-in for the service the relay forwards to: it appends one line per POST
 (the X-Hookinlet-Seq header, then the body) to a file and answers 200.
 

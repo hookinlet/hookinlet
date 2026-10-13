@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright (C) 2026 Pat Ramsey
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Pat Ramsey
 
 // Command go-agent reads a hookinlet inbox, by polling or over a live stream,
 // using only the standard library. It prints one JSON line per message; replace

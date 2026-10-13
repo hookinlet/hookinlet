@@ -74,6 +74,9 @@ source file starts with:
 // Copyright (C) 2026 Pat Ramsey
 ```
 
+The example clients in `examples/` (`curl`, `python`, `go-agent` apart from its test, and `relay`) are MIT licensed
+instead (see `examples/LICENSE`) and carry `// SPDX-License-Identifier: MIT` with `Copyright (c)`.
+
 Dependencies must have AGPL-compatible licenses.
 
 ## Development

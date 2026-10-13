@@ -39,6 +39,7 @@ archives:
       - SECURITY.md
       - CONTRIBUTING.md
       - examples/README.md
+      - examples/LICENSE
       - examples/**/*
 
 checksum:
