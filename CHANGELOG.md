@@ -16,6 +16,23 @@ applies.
   or `-shm`), what a reader that sends no `epoch` sees after a restore, and how to restore into a
   Docker volume.
 
+**Security**
+
+- A request could hold its connection open for good without a credential. One that promised a
+  body and never sent it waited forever anywhere but at a known ingest key (on `/healthz`, a
+  `404`, an unknown ingest key, or `/mcp` without a token), and one whose client never read
+  the answers to requests sent one after another on a connection waited forever to write
+  them. Every request's body now has `ReadBodyTimeout` to arrive, and every answer
+  `ResponseTimeout` to be taken. An operation that needs a credential still counts that from
+  when it starts building its answer, MCP answers are now bound by it too, and an ingest's
+  answer counts from when the delivery has been handled.
+
+**Go API**
+
+- `server.Options.ReadBodyTimeout` applies to the body of any request, not only an ingest's,
+  and `server.Options.ResponseTimeout` to answers given before a request reaches an operation,
+  to ingest answers, and to MCP answers.
+
 ## 0.1.0 - 2026-10-13
 
 The first release. hookinlet is a webhook inbox for AI agents: it receives webhooks,

@@ -22,6 +22,11 @@ func (a *ingestAPI) run(ctx context.Context) ingestResult {
 	r, _ := ctx.Value(requestKey).(*http.Request)
 	w, _ := ctx.Value(writerKey).(http.ResponseWriter)
 	res := a.s.ingest(ctx, w, r)
+	// The delivery may have taken a while to receive and store; the client gets the
+	// usual time to take the answer from now.
+	if rr, ok := ctx.Value(readKey).(*readRequest); ok && rr.deadline != nil {
+		rr.deadline()
+	}
 	a.s.metrics.delivery(deliveryResult(res))
 	return res
 }
