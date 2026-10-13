@@ -47,7 +47,14 @@ completely full (the log says `storage full`); deliveries answer `503`.
 
 **`database disk image is malformed`, or answers that are wrong or missing.** The file is damaged. Run
 `hookinlet check` (it can run beside the server); if it reports problems, stop the server, copy the data
-directory aside, and restore the latest [backup](admin.md#backups).
+directory aside, and restore the latest [backup](admin.md#backups). If it appears right after a
+restore, the likely cause is an old `hookinlet.db-wal` or `hookinlet.db-shm` left beside the
+restored file: stop the server, remove both, and start again. (Only for a restore. After a crash the
+log holds deliveries that were acknowledged, and must stay where it is.)
+
+**`hookinlet.db exists but is empty`.** The file has no content, which is what a copy or restore
+that did not finish leaves; it is refused and not started as a new database. Copy the backup
+again. On a new installation with nothing to lose, delete the file.
 
 **`database schema version N is newer than this build supports`.** The data was
 written by a newer hookinlet. Run the newer version, or restore a backup taken by an
@@ -108,8 +115,10 @@ default; pass `bodies: true`, or fetch one with `get_message`. **`epoch_changed`
 
 `hookinlet inbox ...` talks to a running server when `HOOKINLET_URL` is set (it needs
 `HOOKINLET_ADMIN_TOKEN`), and works in the data directory otherwise. Giving both a
-URL and a data directory is an error. The binary on macOS downloaded in a browser is
-quarantined: `xattr -d com.apple.quarantine hookinlet`.
+URL and a data directory is an error. A macOS binary downloaded in a browser is
+quarantined (it is not notarized), and then dies at once with `Killed: 9`, or macOS says it
+cannot check it for malware: `xattr -d com.apple.quarantine hookinlet` lets it run. One fetched
+with `curl` or `gh release download` is not quarantined.
 
 ## Lost something
 

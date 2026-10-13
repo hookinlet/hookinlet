@@ -119,17 +119,7 @@ notarized: one downloaded through a browser is quarantined, and
   the current format; they work meanwhile.) A secret sealed under a key you no longer
   have cannot be recovered: set it again with `hookinlet inbox set-secret`.
 - **Secrets from files.** `HOOKINLET_ADMIN_TOKEN`, `HOOKINLET_MASTER_KEY`, `HOOKINLET_OLD_MASTER_KEY` and `HOOKINLET_VERIFIER_SECRET` may each be given as `..._FILE`, the path of a file holding the value (one trailing newline is dropped), the way Docker, Kubernetes and systemd hand secrets over. Giving both forms is an error.
-- <a id="stopping"></a>**SIGTERM or SIGINT to stop it.** With `HOOKINLET_DRAIN_DELAY` set, it first reports itself not ready for that long while still serving. It stops accepting connections, ends streams
-  and waits, and lets deliveries that are being stored finish, for up to
-  `HOOKINLET_SHUTDOWN_TIMEOUT` (10 seconds by default); anything still running
-  then is cut off. It then stops the retention sweep and checkpoints the database,
-  which is quick. With `HOOKINLET_DRAIN_DELAY` set, the platform must wait for the delay *and* the timeout
-  (Docker's default grace period of 10 seconds equals the default timeout alone, so give
-  `docker stop --time` or the orchestrator's termination grace period their sum). A second
-  signal ends the process at once. A platform that waits less than the timeout before killing the
-  process risks cutting off a delivery; killing it at once never damages the data
-  (SQLite recovers from the log), but the delivery in flight is lost, and the
-  sender, who got no answer, will normally retry.
+- **SIGTERM or SIGINT to stop it.** See [Stopping](#stopping).
 - **Nothing else.** It makes no network calls of its own, at startup or later.
 
 ## Behind a proxy
@@ -150,9 +140,9 @@ a test delivery and a stream.
 
 ```caddyfile
 hooks.example.com {
-	# The admin API and metrics are for you, not the internet. Reach them on the
+	# The admin API, its console and metrics are for you, not the internet. Reach them on the
 	# admin address instead (HOOKINLET_ADMIN_LISTEN_ADDR=127.0.0.1:9090) and block them here.
-	@private path /v1/admin/* /metrics
+	@private path /v1/admin/* /admin /admin/* /metrics
 	respond @private 404
 
 	request_body {
@@ -174,7 +164,7 @@ server {
 
     client_max_body_size 11m;
 
-    location ~ ^/(v1/admin/|metrics) { return 404; }   # use the admin address instead
+    location ~ ^/(v1/admin/|admin(/|$)|metrics) { return 404; }   # API, console, metrics: use the admin address instead
 
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -236,6 +226,24 @@ docker exec hookinlet /hookinlet backup --out /data/backup.db
 docker cp hookinlet:/data/backup.db ./backup.db     # or: curl .../v1/admin/backup -o backup.db
 ```
 
+The copy stays in the volume, where it is as sensitive as the database and where a second
+`backup --out /data/backup.db` is refused without `--force`. The image has no shell, so remove
+it with another image: `docker run --rm -v hookinlet-data:/data alpine:3 rm /data/backup.db`.
+
+To restore a backup into the volume, stop the container, replace the database (and remove the
+old `-wal` and `-shm` files, see [Restoring](admin.md#backups)) with another image that has a
+shell, check it, and start again with the **same master key**:
+
+```bash
+docker stop hookinlet
+docker run --rm -v hookinlet-data:/data -v "$PWD":/backup:ro alpine:3 sh -c '
+  rm -f /data/hookinlet.db /data/hookinlet.db-wal /data/hookinlet.db-shm /data/backup.db &&
+  cp /backup/backup.db /data/hookinlet.db &&
+  chown 65532:65532 /data/hookinlet.db && chmod 600 /data/hookinlet.db'
+docker run --rm -v hookinlet-data:/data ghcr.io/hookinlet/hookinlet:latest check
+docker start hookinlet
+```
+
 Commands that need the server stopped (`migrate`, `rekey`, `renew-epochs`) run in a
 throwaway container on the same volume, with the secrets they need in its environment:
 
@@ -244,6 +252,10 @@ docker stop hookinlet
 docker run --rm -v hookinlet-data:/data -e HOOKINLET_MASTER_KEY -e HOOKINLET_OLD_MASTER_KEY \
   ghcr.io/hookinlet/hookinlet:latest rekey
 ```
+
+## Stopping
+
+Send `SIGTERM` or `SIGINT`. With `HOOKINLET_DRAIN_DELAY` set, it first reports itself not ready for that long while still serving. It stops accepting connections, ends streams and waits, and lets deliveries that are being stored finish, for up to `HOOKINLET_SHUTDOWN_TIMEOUT` (10 seconds by default); anything still running then is cut off. It then stops the retention sweep and checkpoints the database, which is quick. With `HOOKINLET_DRAIN_DELAY` set, the platform must wait for the delay *and* the timeout (Docker's default grace period of 10 seconds equals the default timeout alone, so give `docker stop --time` or the orchestrator's termination grace period their sum). A second signal ends the process at once. A platform that waits less than the timeout before killing the process risks cutting off a delivery; killing it at once never damages the data (SQLite recovers from the log), but the delivery in flight is lost, and the sender, who got no answer, will normally retry.
 
 ## Health checks
 
@@ -349,7 +361,11 @@ rate limit in front, or in a hook (see [extending](extending.md)). Disk is
 what grows: size the volume for the messages you keep, and set retention on
 inboxes that receive a lot. A backup needs free space in the data directory for a
 second copy of the database while it runs. Each stream or wait holds a file
-descriptor; the default of 1000 needs a limit comfortably above that.
+descriptor; the default of 1000 needs a limit comfortably above that. A connection
+cannot be held open by not sending or not reading: whatever a request is sent to, its
+headers must arrive within 10 seconds and its body within 60, and an answer the client does
+not take is given up after `ResponseTimeout` (an operation that needs a credential counts
+that from when it starts building its answer).
 
 ## Upgrading
 

@@ -45,6 +45,11 @@ func (a *mcpAPI) Mcp(ctx context.Context, req api.McpRequestObject) (api.McpResp
 
 	rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
 	a.s.mcpSDK.ServeHTTP(rec, r)
+	// The answer is in memory now, however long the tool took (a wait runs up to a
+	// minute): the client gets ResponseTimeout from here to take it.
+	if rr.deadline != nil {
+		rr.deadline()
+	}
 
 	switch rec.status {
 	case http.StatusOK:
