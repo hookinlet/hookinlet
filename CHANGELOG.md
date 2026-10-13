@@ -6,7 +6,15 @@ applies.
 
 ## Unreleased
 
-Nothing yet.
+- **An empty `hookinlet.db` is refused.** A restore or copy that did not finish leaves a
+  zero-byte file, which the server (and `hookinlet check`) used to take for a new database and
+  start on, with none of the data. `sqlite.Open` now returns an error for it.
+- **A backup that fails no longer leaves its journal in the data directory.** A snapshot that
+  ran out of room left `backup-N.tmp-journal` behind for good; it is removed with the snapshot,
+  and swept like it at the next start.
+- The backup and restore documentation says what a restore must not leave behind (an old `-wal`
+  or `-shm`), what a reader that sends no `epoch` sees after a restore, and how to restore into a
+  Docker volume.
 
 ## 0.1.0 - 2026-10-13
 
