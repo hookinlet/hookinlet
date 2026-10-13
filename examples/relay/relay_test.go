@@ -155,6 +155,16 @@ func relayFor(t *testing.T, h *hookinlet, d *destination, state string) *Relay {
 }
 
 // runUntil runs the relay until cond holds, then stops it and waits.
+// savedSeq is the position a relay has written to its state file ("SEQ EPOCH"), or "".
+// The relay saves it just after the delivery that moved it, so the destination can have a
+// body before the file has the position. A test that stops the relay and then reads the
+// file has to wait for the file first: once the relay is stopped nothing will write it.
+func savedSeq(state string) string {
+	b, _ := os.ReadFile(state) //nolint:gosec // a temp path
+	seq, _, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
+	return seq
+}
+
 func runUntil(t *testing.T, r *Relay, cond func() bool) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -300,7 +310,7 @@ func TestARestartCarriesOnWithoutRepeatingOrLosingAnything(t *testing.T) {
 	h.send(t, "one", "text/plain")
 	h.send(t, "two", "text/plain")
 	d := newDestination(t, nil)
-	runUntil(t, relayFor(t, h, d, state), func() bool { return len(d.bodies()) == 2 })
+	runUntil(t, relayFor(t, h, d, state), func() bool { return len(d.bodies()) == 2 && savedSeq(state) == "2" })
 
 	// The position is saved just after the delivery that moved it, so the file may
 	// be a moment behind the last body the destination saw.
@@ -434,7 +444,7 @@ func TestARecreatedInboxIsRelayedFromItsBeginning(t *testing.T) {
 	h.send(t, "old-2", "text/plain")
 	h.send(t, "old-3", "text/plain")
 	d := newDestination(t, nil)
-	runUntil(t, relayFor(t, h, d, state), func() bool { return len(d.bodies()) == 3 })
+	runUntil(t, relayFor(t, h, d, state), func() bool { return len(d.bodies()) == 3 && savedSeq(state) == "3" })
 	var saved []byte
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		saved, _ = os.ReadFile(state) //nolint:gosec // a temp path
