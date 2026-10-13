@@ -116,6 +116,9 @@ func (d *driver) classify(op string, status int, err error, body []byte, down0 b
 			return "ok"
 		}
 	}
+	if status >= 500 && (down0 || d.srv.down.Load() || d.srv.downEpoch.Load() != g0) {
+		return "down" // a request cut short by a restart may be answered with a 5xx on the way out
+	}
 	if status == 503 || status == 429 {
 		if !d.storm.Load() {
 			d.st.add(op, fmt.Sprintf("overload_outside_storm_%d", status), 0)
