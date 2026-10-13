@@ -42,27 +42,35 @@ func TestAClientThatDoesNotReadCannotHoldAConnection(t *testing.T) {
 			}
 			defer func() { _ = conn.Close() }()
 			// Send requests until the server stops reading them, which it does once it is
-			// stuck writing an answer the client does not take.
+			// stuck writing answers the client does not take (or, on a busy machine, is
+			// merely behind: then it gets stuck a little later).
 			batch := []byte(strings.Repeat(req, 100))
+			sent := 0
 			for stuck := time.Now().Add(30 * time.Second); ; {
 				if time.Now().After(stuck) {
 					t.Fatal("the server never stopped reading requests")
 				}
 				_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
-				if _, err := conn.Write(batch); err != nil {
+				n, err := conn.Write(batch)
+				sent += n
+				if err != nil {
 					break
 				}
 			}
+			whole := sent / len(req)
 			time.Sleep(time.Second) // longer than ResponseTimeout
 
 			// Read what is there. A server that gave up on the client has closed the
-			// connection, and this ends; one still waiting to write answers the rest and
-			// then waits for the rest of the request the last write cut short.
-			_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-			_, err = io.Copy(io.Discard, conn)
+			// connection, having answered only some of the requests. One that waited
+			// answers every whole request it was sent, then waits for more.
+			_ = conn.SetReadDeadline(time.Now().Add(20 * time.Second))
+			got, err := io.ReadAll(conn)
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
-				t.Fatal("the server was still waiting for the client to read its answers")
+				t.Fatal("the server was still waiting for the client after 20 seconds")
+			}
+			if answered := strings.Count(string(got), "HTTP/1.1 "); answered >= whole {
+				t.Fatalf("the server answered all %d requests: it waited for the client to read", answered)
 			}
 		})
 	}
