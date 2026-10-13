@@ -96,8 +96,8 @@ type Options struct {
 	// and backups are not bound by it (streams and backups manage their own deadlines).
 	// Defaults to 2 minutes.
 	ResponseTimeout time.Duration
-	// ReadBodyTimeout bounds how long a sender gets to deliver a request body
-	// to the ingest endpoint. Defaults to 60s.
+	// ReadBodyTimeout bounds how long a client gets to deliver a request body, to
+	// the ingest endpoint or anywhere else. Defaults to 60s.
 	ReadBodyTimeout time.Duration
 	// MaxHeaderBytes bounds the request line and headers of any request, which
 	// ingest stores verbatim and the read API later returns. Defaults to 64 KiB;
@@ -359,7 +359,29 @@ func (s *Server) build(surface surface) http.Handler {
 	// Outermost first. accessLog must see the same *http.Request the mux
 	// annotates with r.Pattern, so nothing between it and the mux may clone
 	// the request.
-	return requestID(accessLog(s.log, recoverer(s.log, s.counting(protective(mux)))))
+	return requestID(accessLog(s.log, recoverer(s.log, s.counting(protective(s.bodyDeadline(mux))))))
+}
+
+// bodyDeadline gives every request that comes with a body ReadBodyTimeout to deliver
+// it, whatever it is sent to. Without it, a request that promises a body and never
+// sends it holds its connection for good: net/http reads what a handler left unread
+// before it answers (so that the connection can be used again), and that read has no
+// deadline of its own. That would let anyone, without a credential, hold any number of
+// connections open with no traffic, by sending one to a path that does not exist, to
+// an ingest key that does not, or without a token.
+//
+// The deadline ends with the body: once the body has been read to its end, net/http
+// clears it to watch the connection for the client going away, so an operation that
+// runs long after that (an MCP wait, a stream) is not cut short. A request without a
+// body is given none, since that watch has already begun.
+func (s *Server) bodyDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength != 0 { // a length, or -1 for a chunked body
+			// Servers that cannot set a deadline (a test recorder) do without one.
+			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.opts.ReadBodyTimeout))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) newHTTP(h http.Handler) *http.Server {
