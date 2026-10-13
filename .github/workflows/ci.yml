@@ -255,4 +255,11 @@ jobs:
           cd dist
           sha256sum -c checksums.txt
           ls *.sbom.json | wc -l | grep -qx 4
-          for a in hookinlet_*_linux_amd64.tar.gz; do tar -tzf "$a" | grep -qx hookinlet; done
+          # the archive holds one directory, with the binary and the files its documents link to
+          for a in hookinlet_*_linux_amd64.tar.gz; do
+            dir=${a%.tar.gz}
+            tar -tzf "$a" | grep -qx "$dir/hookinlet"
+            for f in LICENSE LICENSING.md THIRD_PARTY_LICENSES README.md CODE_OF_CONDUCT.md docs/images/console-overview.png examples/LICENSE; do
+              tar -tzf "$a" | grep -qx "$dir/$f" || { echo "::error::$a has no $f"; exit 1; }
+            done
+          done
