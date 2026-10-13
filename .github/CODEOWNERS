@@ -1,0 +1,5 @@
+# Changes to what builds, tests and publishes the project need the maintainer's review.
+/.github/ @patramsey
+/.goreleaser.yaml @patramsey
+/Dockerfile @patramsey
+/scripts/ @patramsey

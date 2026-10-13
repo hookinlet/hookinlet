@@ -1,11 +1,11 @@
 name: CI
 
-# A pull request gets the fast checks: build, vet, the unit tests, lint, and the
-# static checks on the OpenAPI document and the generated code. Everything that
-# starts a server, builds an image, or builds a release runs when a change lands on
-# main and every night (a tag runs the release workflow, which does the release
-# checks itself), so it is never skipped, only moved off the critical path of a
-# review.
+# A pull request gets the fast checks: build, vet, the unit tests, lint, the static
+# checks on the OpenAPI document and the generated code, the console's build and unit
+# tests, and its end-to-end tests in a browser. The race detector, the documentation
+# examples, the image build and the release dry run run when a change lands on main
+# and every night (a tag runs the release workflow, which does the release checks
+# itself), so they are never skipped, only moved off the critical path of a review.
 on:
   push:
     branches: [main]
@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -66,6 +68,8 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.nvmrc
@@ -103,6 +107,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -124,9 +130,11 @@ jobs:
         if: failure()
         with:
           name: playwright-report
+          # not web/test-results/e2e-data: that is the test server's database
           path: |
             web/playwright-report
             web/test-results
+            !web/test-results/e2e-data
           retention-days: 7
 
   # pkg/server has several hundred tests that run one after another and takes as
@@ -136,6 +144,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -152,6 +162,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -160,8 +172,11 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -172,8 +187,11 @@ jobs:
   docker:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Build image
         run: docker build -t hookinlet:ci .
       - name: Smoke test the image
@@ -193,6 +211,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -201,15 +221,19 @@ jobs:
         if: github.event_name != 'pull_request'
         run: scripts/test-docs.sh
       - name: Lint the OpenAPI document
+        env:
+          npm_config_ignore_scripts: 'true' # a dependency's install script never runs here
         run: npx --yes @redocly/cli@2.62.1 lint docs/openapi.json
 
   # A release is only worth tagging if it would work, so check it on every change.
   release-config:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
