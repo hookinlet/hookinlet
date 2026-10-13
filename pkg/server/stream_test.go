@@ -491,29 +491,37 @@ func TestStreamSendsHeartbeats(t *testing.T) {
 }
 
 func TestMessagesDelayHeartbeats(t *testing.T) {
-	// The heartbeat is for idle streams: while messages flow, no ping is needed.
-	ae, base, _ := streamEnv(t, func(o *Options) { o.SSEHeartbeat = 400 * time.Millisecond })
+	// The heartbeat is for idle streams: while messages flow, no ping is needed. A message every
+	// 100ms against a 1s heartbeat leaves nine tenths of a second for a loaded machine to stall the
+	// poster before a ping would be legitimate; the run is long enough for an unreset timer to fire twice.
+	ae, base, _ := streamEnv(t, func(o *Options) { o.SSEHeartbeat = time.Second })
 	c := openStream(t, ae.streamURL(base, "agent-a", ""), ae.tokenA, nil)
 	c.next(time.Second)
-	stop := time.After(1500 * time.Millisecond)
-	tick := time.NewTicker(150 * time.Millisecond)
+	stop := time.After(2500 * time.Millisecond)
+	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
-	pings := 0
+	pings, messages := 0, 0
 loop:
 	for {
 		select {
 		case <-tick.C:
 			ae.post("/in/agent-a", "x")
 		case it := <-c.items:
-			if it.kind == "comment" {
+			switch it.kind {
+			case "comment":
 				pings++
+			case "event":
+				messages++
 			}
 		case <-stop:
 			break loop
 		}
 	}
+	if messages == 0 {
+		t.Fatal("no message reached the stream, so the test showed nothing")
+	}
 	if pings != 0 {
-		t.Errorf("%d pings while a message arrived every 150ms with a 400ms heartbeat", pings)
+		t.Errorf("%d pings while a message arrived every 100ms with a 1s heartbeat", pings)
 	}
 }
 
