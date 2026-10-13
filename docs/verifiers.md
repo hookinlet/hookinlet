@@ -191,11 +191,15 @@ reasons:
 ## Trying it out
 
 Create an inbox (the verifier secret is read from the environment, never from a
-flag, because flags show up in process listings):
+flag, because flags show up in process listings). This writes into the data directory,
+so run it in the shell where you started the server in the [README](../README.md#send-a-signed-event-read-it-back),
+which has its data directory and master key. The first line of the block keeps the key that is set
+and makes one only when none is (a different key would seal the secret so that the
+running server cannot open it):
 
 <!-- exercise -->
 ```sh
-export HOOKINLET_MASTER_KEY=$(openssl rand -base64 32)   # keep this; it encrypts stored secrets
+export HOOKINLET_MASTER_KEY=${HOOKINLET_MASTER_KEY:-$(openssl rand -base64 32)}   # keep this; it encrypts stored secrets
 HOOKINLET_VERIFIER_SECRET='my-shared-secret' \
   hookinlet inbox create --slug demo --ingest-key demo --verifier hmac \
   --verifier-config '{"header":"X-Signature","prefix":"sha256="}'
