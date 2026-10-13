@@ -62,26 +62,29 @@ repository settings (Code security) as well, or only the weekly pull requests ar
 A grouped Go-module pull request changes versions only; it passes CI unless it adds a dependency or
 changes a license, in which case run `make licenses` on its branch.
 
-## Before the repository goes public
+## The first release
 
-None of this is done by a workflow; each is a setting or a tag only a maintainer can make.
+Things the first release taught, kept here because each is a setting or a step only a maintainer can do.
 
-1. **Tag a final release** (`v0.1.0`). The release workflow works while the repository is private (a
-   release candidate is a good way to try it), but it makes the provenance attestation only once
-   the repository is public, so make it public first if you want the final release to have one. The README and `docs/deploying.md` start with
-   `ghcr.io/hookinlet/hookinlet:latest`, which does not exist until a final release does
-   (a pre-release such as `v0.1.0-rc.1` gets only its own version tag).
-2. **Make the GHCR package public** and link it to the repository, then check with an anonymous
-   `docker pull ghcr.io/hookinlet/hookinlet:0.1.0`.
-3. **Enable private vulnerability reporting** (Settings, Code security). `SECURITY.md` and the
-   issue chooser send reporters there, and it is off until it is enabled.
-4. **Read the README once from a clean clone**, in a new shell, as a stranger would.
+1. **Cut a release candidate first** (`v0.1.0-rc.1`). It exercises everything a final tag does (archives,
+   attestation, image push) and, being a pre-release, moves neither `latest` nor `MAJOR.MINOR`. Promote it
+   with a final tag on the same commit.
+2. **The repository settings** the release depends on: Actions limited to GitHub-owned actions plus
+   `docker/*`, `golangci/*`, `goreleaser/*` and `anchore/*`, with pinning by commit required; a ruleset on
+   `main` (pull request and CI checks required, no force-push); a ruleset on `v*` tags (administrators
+   only, no deletion); secret scanning with push protection; private vulnerability reporting, which
+   `SECURITY.md` and the issue chooser send reporters to.
+3. **The GHCR package** is created by the first image push, as private. The organization must allow public
+   packages (organization settings, Packages) before the package's visibility can be changed. Make it public,
+   check that it is linked to this repository, and check with an anonymous
+   `docker pull ghcr.io/hookinlet/hookinlet:<version>`. A package that already exists under the same name,
+   linked to another repository, refuses the push with `permission_denied: read_package`: delete it or give
+   this repository write access to it under "Manage Actions access".
+4. **The provenance attestation** is made only while the repository is public.
 
 ## After
 
-- A new GHCR package starts private. Make it public in the repository's package
-  settings before the quick start in `docs/deploying.md` can be followed by anyone
-  else, and check with an anonymous `docker pull`.
+- Check the image with an anonymous `docker pull` (a new package starts private; see above).
 - `docker buildx imagetools inspect ghcr.io/hookinlet/hookinlet:<version>` should
   list both platforms and the attestations.
 - Download one archive, run `sha256sum -c --ignore-missing checksums.txt`, and run

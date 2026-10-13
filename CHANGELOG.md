@@ -8,7 +8,7 @@ applies.
 
 Nothing yet.
 
-## 0.1.0
+## 0.1.0 - 2026-10-13
 
 The first release. hookinlet is a webhook inbox for AI agents: it receives webhooks,
 checks their signatures, stores them, and lets an agent read them back reliably over
