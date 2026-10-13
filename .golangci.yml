@@ -10,6 +10,12 @@ linters:
     - misspell
     - noctx
     - unconvert
+  exclusions:
+    rules:
+      # The MIT licensed example clients carry an MIT header instead (examples/LICENSE).
+      - path: ^examples/(go-agent/(agent|main)\.go|relay/[a-z_]+\.go)$
+        linters:
+          - goheader
   settings:
     errcheck:
       # Writes to stdout/stderr have nowhere useful to report a failure.
@@ -20,7 +26,8 @@ linters:
         # Close errors on result sets are reported through rows.Err.
         - (*database/sql.Rows).Close
     goheader:
-      # Every source file carries the AGPL-3.0 SPDX header.
+      # Every source file carries the AGPL-3.0 SPDX header, except the example clients that are
+      # MIT licensed (see examples/LICENSE), which carry an MIT one.
       template: |-
         SPDX-License-Identifier: AGPL-3.0-only
         Copyright (C) {{ YEAR }} Pat Ramsey

@@ -66,6 +66,8 @@ they are useful if you are only reading.
 
 ## License and file headers
 
+See [`LICENSING.md`](LICENSING.md) for what the license means for people using the project.
+
 hookinlet is licensed under the GNU Affero General Public License, version 3 only (`AGPL-3.0-only`). Every Go
 source file starts with:
 
@@ -73,6 +75,9 @@ source file starts with:
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Pat Ramsey
 ```
+
+The example clients in `examples/` (`curl`, `python`, `go-agent` apart from its test, and `relay`) are MIT licensed
+instead (see `examples/LICENSE`) and carry `// SPDX-License-Identifier: MIT` with `Copyright (c)`.
 
 Dependencies must have AGPL-compatible licenses.
 

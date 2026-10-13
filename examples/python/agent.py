@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: AGPL-3.0-only
-# Copyright (C) 2026 Pat Ramsey
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Pat Ramsey
 """An agent that reads a hookinlet inbox, using only the standard library.
 
 Two ways to follow an inbox:

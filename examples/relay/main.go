@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright (C) 2026 Pat Ramsey
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Pat Ramsey
 
 // Command relay forwards every message that arrives in a hookinlet inbox to
 // another URL, so an inbox can sit in front of a service that already takes

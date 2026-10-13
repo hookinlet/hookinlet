@@ -6,6 +6,10 @@ the standard library of their language. Every command on this page is run by
 are built from a checkout of the repository (`go run ./examples/go-agent` needs its
 `go.mod`); the Python and shell ones run from anywhere, including the release archive.
 
+The example clients (`curl`, `python`, `go-agent`, `relay`) are MIT licensed, so you can copy them into your own
+programs; see [`LICENSE`](LICENSE) here. `custom-hooks` imports the server's Go packages, so a program built from it
+is governed by the AGPL, and it is licensed that way like the rest of the repository.
+
 They share one setup: an inbox, its agent token, and a message in it. Start a
 server as in the [README](../README.md#send-a-signed-event-read-it-back), then:
 

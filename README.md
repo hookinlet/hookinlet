@@ -331,5 +331,8 @@ open a public issue.
 any language puts no condition on your code. Importing its packages (`pkg/server`, `pkg/inbox`, and the rest) into
 a program that you then make available over a network makes that program a work based on hookinlet, and the AGPL
 asks you to offer its source to the people who use it. If that does not suit your program, run hookinlet as a
-separate service and use its API. This is a summary, not legal advice. Third-party licenses for what is inside the binary are in
+separate service and use its API. The example clients in [`examples/`](examples) (curl, Python, Go, and the relay) are
+MIT licensed, so you can copy them into your own code; the one example that embeds the server's packages stays AGPL, because a program built from it is covered by the AGPL. [`LICENSING.md`](LICENSING.md) says in plain words what needs
+nothing from you and what does, and how to ask for a commercial license (**licensing@hookinlet.com**) if the AGPL
+does not fit. This is a summary, not legal advice. Third-party licenses for what is inside the binary are in
 [`THIRD_PARTY_LICENSES`](THIRD_PARTY_LICENSES).

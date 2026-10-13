@@ -31,6 +31,7 @@ archives:
     files:
       - LICENSE
       - NOTICE
+      - LICENSING.md
       - THIRD_PARTY_LICENSES
       - README.md
       - CHANGELOG.md
@@ -39,6 +40,7 @@ archives:
       - SECURITY.md
       - CONTRIBUTING.md
       - examples/README.md
+      - examples/LICENSE
       - examples/**/*
 
 checksum:

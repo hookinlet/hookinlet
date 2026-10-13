@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: AGPL-3.0-only
-# Copyright (C) 2026 Pat Ramsey
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Pat Ramsey
 #
 # Poll an inbox for new messages with curl and jq. This is the pattern every
 # agent follows: keep the seq of the last message you handled, and ask for what
