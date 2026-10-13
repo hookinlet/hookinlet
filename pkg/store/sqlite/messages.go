@@ -86,7 +86,6 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 		return nil, false, fmt.Errorf("sqlite: encode headers: %w", err)
 	}
 	body := cloneBytes(m.Body)
-	now := inbox.NormalizeTime(s.now())
 	dedupeKey := m.DedupeKey
 	if dedupeKey == "" {
 		dedupeKey = m.DeliveryID
@@ -122,8 +121,12 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 			return notFound(fmt.Errorf("sqlite: assign seq: %w", err), "inbox")
 		}
 
-		// ReceivedAt never decreases with seq, even if the clock stepped back.
-		receivedAt := now
+		// ReceivedAt never decreases with seq, even if the clock stepped back. The
+		// clock is read here, once this transaction holds the only write connection:
+		// read before waiting for it, a delivery that queued behind others for a
+		// second would carry a time that is a second old and be reported as a clock
+		// that stepped back.
+		receivedAt := inbox.NormalizeTime(s.now())
 		var prev string
 		switch err := tx.QueryRowContext(ctx,
 			`SELECT received_at FROM messages WHERE inbox_id = ? ORDER BY seq DESC LIMIT 1`, int64(inboxID)).Scan(&prev); {

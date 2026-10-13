@@ -24,6 +24,13 @@ applies.
 - The backup and restore documentation says what a restore must not leave behind (an old `-wal`
   or `-shm`), what a reader that sends no `epoch` sees after a restore, and how to restore into a
   Docker volume.
+- **A delivery that queued for the database writer was stamped with a time that had already
+  passed**, and the store then logged "the clock is behind a message already stored" for a clock that
+  had not moved. The time is now read once the delivery holds the writer.
+- **`GET /v1/admin/tokens` no longer fails with "not found" when an inbox is deleted while it
+  runs.** The vanished inbox is left out of the listing.
+- The administration guide says that the write-ahead log can grow well past its usual size while
+  a backup of a large database runs under heavy load.
 
 **Security**
 
