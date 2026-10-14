@@ -6,7 +6,12 @@ applies.
 
 ## Unreleased
 
-Nothing yet.
+- The documentation says what a long backup of a large database under heavy load does: reads and
+  admin calls are refused as busy while it runs (7 minutes for a 2.6 GB database with 250 open streams
+  and about 300 deliveries a second), and a revoked token's stream can stay open longer than the usual
+  30 seconds until a check can be made.
+- The soak driver waits for a follower that is still catching up, instead of judging it after three
+  minutes.
 
 ## 0.1.1 - 2026-10-13
 

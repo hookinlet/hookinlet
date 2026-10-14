@@ -160,7 +160,8 @@ To replace a token, issue the new one, give it to the agent, and then revoke the
 old one. Both work in between, so the agent never has a moment with none.
 Revoking is also the remedy for a leaked token: the revoked token is refused at
 once, and open SSE streams and MCP waits that used it end within about 30
-seconds. Deleting an inbox revokes the tokens that read only that inbox and
+seconds (longer if the server is too busy to check, as during a long backup of a large database under heavy load; the
+stream then ends at the first check that succeeds). Deleting an inbox revokes the tokens that read only that inbox and
 leaves the rest.
 
 <!-- exercise -->
@@ -439,9 +440,11 @@ sensitive with it, so protect it like the data directory.
 - Only one backup runs at a time (`409` otherwise).
 - While a backup runs, the write-ahead log cannot be reset, so it grows by what is written in the meantime
   and is cut back afterwards. A 2.4 GB database copied under about 300 deliveries a second and 250 open
-  streams took 2.5 minutes and let the log reach 1.2 GB, on top of the copy; on the same machine with few
-  streams, a 0.7 GB database took 3.5 seconds and the log stayed under 30 MB. Allow room for both, and
-  take backups when the server is not at its busiest.
+  streams took 2.5 minutes and let the log reach 1.2 GB, on top of the copy; a 2.6 GB database copied under the same
+  load took 7 minutes, and for that long reads and admin calls were answered `503` "busy" or waited, while
+  deliveries carried on. On the same machine with few streams, a 0.7 GB database took 3.5 seconds and the
+  log stayed under 30 MB. Allow room for both, take backups when the server is not at its busiest, and
+  keep the copy time in mind when a large database is under heavy read load.
 - A store that cannot produce one (some embedded backends) answers `501`.
 - The command writes beside the destination and renames, so an interrupted
   backup never leaves a file that looks complete. It refuses to overwrite

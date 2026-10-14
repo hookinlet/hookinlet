@@ -323,7 +323,10 @@ are a `400`.
 - The token the stream was opened with is revoked, or the inbox it
   belonged to is deleted. Open streams are re-checked every 30 seconds
   (`StreamRevalidateInterval`), so access ends within about that long. A
-  transient storage error during the re-check does not end the stream.
+  re-check that cannot be made, because the store is erroring or the server is too busy (a long
+  backup under heavy load is the usual cause), does not end the stream: it stays open until a check
+  succeeds, so on a loaded server a revoked token's stream can outlast 30 seconds, by minutes in the
+  worst case measured.
 - A write to a client that has stopped reading takes longer than 30 seconds.
 
 #### Limits
