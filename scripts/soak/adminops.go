@@ -581,9 +581,13 @@ func (d *driver) verifyAll(ctx context.Context) {
 		if !ib.audited {
 			continue
 		}
-		var latest uint64
-		deadline := time.Now().Add(3 * time.Minute)
-		for time.Now().Before(deadline) {
+		// A follower that is making progress is given as long as it needs: after a long
+		// backup the server refuses reads for minutes, and a verdict reached before the
+		// follower has had its turn blames the server for a reader that was merely behind.
+		// One that has not moved for three minutes is judged as it stands.
+		var latest, lastSeen uint64
+		progress := time.Now()
+		for time.Since(progress) < 3*time.Minute {
 			var m struct {
 				Latest uint64 `json:"latest_seq"`
 			}
@@ -592,9 +596,13 @@ func (d *driver) verifyAll(ctx context.Context) {
 			}
 			ib.mu.Lock()
 			caught := ib.lastSeq == latest && latest > 0
+			seen := uint64(ib.lastSeq)
 			ib.mu.Unlock()
 			if caught {
 				break
+			}
+			if seen != lastSeen {
+				lastSeen, progress = seen, time.Now()
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
