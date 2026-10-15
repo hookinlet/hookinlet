@@ -231,7 +231,8 @@ onBeforeUnmount(() => {
   <nav class="crumb" aria-label="Breadcrumb"><a :href="href('/inboxes')" @click="link($event, '/inboxes')">Inboxes</a> <span aria-hidden="true">/</span></nav>
   <header class="top">
     <h1>{{ info?.name || slug }}</h1>
-    <span v-if="info" class="pill acc">{{ info.verifier }}</span>
+    <span v-if="info && info.verifier === 'none'" class="pill warn">none (unverified)</span>
+    <span v-else-if="info" class="pill acc">{{ info.verifier }}</span>
     <span v-if="info?.disabled" class="pill warn">disabled</span>
     <span class="grow"></span>
     <button v-if="tab === 'messages'" type="button" class="btn" :class="{ live: wantLive }" :aria-pressed="wantLive" @click="toggleLive">
@@ -240,6 +241,7 @@ onBeforeUnmount(() => {
     </button>
   </header>
   <p v-if="infoError" class="err" role="alert">{{ infoError }}</p>
+  <p v-if="info && info.verifier === 'none' && tab === 'messages'" class="callout none-note" role="note"><strong>Verification is off.</strong> Anyone who has the ingest URL can post anything, and every message is stored as not verified. <a :href="href(`/inboxes/${slug}/settings`)" @click="link($event, `/inboxes/${slug}/settings`)">Choose a verifier</a> before real traffic.</p>
   <nav class="itabs" aria-label="Inbox">
     <a :href="href(`/inboxes/${slug}`)" :aria-current="tab === 'messages' ? 'page' : undefined" @click="link($event, `/inboxes/${slug}`)">Messages</a>
     <a :href="href(`/inboxes/${slug}/settings`)" :aria-current="tab === 'settings' ? 'page' : undefined" @click="link($event, `/inboxes/${slug}/settings`)">Settings</a>
@@ -293,6 +295,7 @@ onBeforeUnmount(() => {
 .itabs a[aria-current='page'] { color: var(--fg); border-bottom-color: var(--accent); }
 .crumb { font-size: 13px; color: var(--mute); margin-bottom: 4px; display: flex; gap: 6px; }
 .top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.none-note { margin-bottom: 16px; }
 h1 { font-size: 22px; }
 .grow { flex: 1; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mute); display: inline-block; }

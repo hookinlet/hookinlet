@@ -220,7 +220,7 @@ follow new ones as they arrive), and a page to issue and revoke agent tokens; it
 Its settings are in the console too: creating an inbox picks the sender and asks only for what that sender needs, an
 inbox's page has a Settings tab (name, retention, verification, replacing its secret, rotating its ingest URL, and
 deleting it after typing its name), and a Maintenance page runs retention and downloads a backup. `⌘K` (or `Ctrl K`)
-opens a command palette to go anywhere or do anything by name.
+opens a command palette to go anywhere or do anything by name. An inbox whose verifier is `none` is marked as unverified in the list and on its own page, and the forms warn while `none` is chosen.
 
 ![An inbox's Settings tab](images/console-settings.png)
 

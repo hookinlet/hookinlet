@@ -30,6 +30,7 @@ function set(key: string, v: string) {
         </label>
       </div>
       <p class="muted help">{{ preset?.summary }}</p>
+      <p v-if="verifier === 'none'" class="callout" role="note"><strong>Verification is off.</strong> Anyone who has the ingest URL can post anything, and every message is stored as not verified. That suits testing, or a sender that cannot sign; pick a verifier before real traffic.</p>
     </fieldset>
 
     <div v-if="withSecret && preset && preset.secret" class="field">

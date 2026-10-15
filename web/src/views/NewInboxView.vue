@@ -82,6 +82,7 @@ const curl = computed(() =>
     <h2>Give your agent this token</h2>
     <CopyField :value="created.agent_token" label="Agent token" />
     <p class="warn">It is shown once. Only its hash is stored, so it cannot be shown again.</p>
+    <p v-if="created.inbox.verifier === 'none'" class="callout" role="note"><strong>This inbox does not verify senders.</strong> Anyone who has the ingest URL can post anything, and every message is stored as not verified. Choose a verifier in the inbox settings before real traffic.</p>
     <ul v-if="created.warnings?.length" class="warnings"><li v-for="w in created.warnings" :key="w">{{ w }}</li></ul>
     <div><p class="label">Read it back</p><pre class="code">{{ curl }}</pre></div>
     <div class="actions">
