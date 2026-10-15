@@ -388,6 +388,21 @@ type Admitter interface {
 	Admit(ctx context.Context, p Principal, in *Inbox, kind AccessKind) (release func(), err error)
 }
 
+// UnverifiedLimiter is an optional capability of Hooks, found by type assertion:
+// a Hooks that also implements it says, per inbox, how many unverified messages
+// the inbox may keep, in place of the server's own limit (Options.MaxUnverified).
+// Hooks itself does not change. It is how an embedder gives inboxes different
+// caps by something the server does not know, such as the plan they belong to.
+// It has an effect only if the Store implements UnverifiedCounter.
+type UnverifiedLimiter interface {
+	// MaxUnverified returns the most unverified messages in may keep: a positive
+	// number is the cap, 0 means the server's limit applies, and a negative number
+	// means this inbox has no cap. It is asked only for a delivery that is
+	// unverified, before the server takes the lock that serializes such appends,
+	// so it may look the answer up, but must not block for long.
+	MaxUnverified(ctx context.Context, in *Inbox) int
+}
+
 // SecretBox seals secrets for storage at rest.
 type SecretBox interface {
 	// Seal encrypts plaintext and binds it to context: the same context must be

@@ -180,7 +180,8 @@ type Options struct {
 	// stored message is evicted for it. Retention (retention_days, or
 	// retention_max_count) frees room again. Zero means DefaultMaxUnverified and a
 	// negative value turns the cap off. It applies only if the Store implements
-	// inbox.UnverifiedCounter (the built-in SQLite store does).
+	// inbox.UnverifiedCounter (the built-in SQLite store does). Hooks that
+	// implement inbox.UnverifiedLimiter can set it per inbox instead.
 	MaxUnverified int
 	// Version is reported to MCP clients as the server's version. Defaults to "dev".
 	Version string
@@ -207,7 +208,8 @@ type Server struct {
 	draining     atomic.Bool // set when the server is told to stop: /readyz fails
 	ingestBudget byteBudget  // body bytes held by deliveries being received
 
-	unverified   inbox.UnverifiedCounter // nil when the cap is off or the Store cannot count
+	unverified   inbox.UnverifiedCounter // nil when the Store cannot count
+	limiter      inbox.UnverifiedLimiter // nil unless the Hooks set the cap per inbox
 	unverifiedMu sync.Mutex              // held from counting unverified messages to storing one
 
 	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
@@ -354,9 +356,10 @@ func New(opts Options) (*Server, error) {
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),
 	}
-	if uc, ok := opts.Store.(inbox.UnverifiedCounter); ok && opts.MaxUnverified > 0 {
+	s.limiter, _ = opts.Hooks.(inbox.UnverifiedLimiter)
+	if uc, ok := opts.Store.(inbox.UnverifiedCounter); ok {
 		s.unverified = uc
-	} else if opts.MaxUnverified > 0 {
+	} else if opts.MaxUnverified > 0 || s.limiter != nil {
 		opts.Logger.Warn("the Store cannot count unverified messages, so they are not capped; see inbox.UnverifiedCounter")
 	}
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now, Log: opts.Logger, GuardClock: realClock}

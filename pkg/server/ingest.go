@@ -226,9 +226,17 @@ func (s *Server) append(ctx context.Context, in *inbox.Inbox, m *inbox.NewMessag
 	if m.Verified || s.unverified == nil {
 		return s.opts.Store.Append(ctx, in.ID, m)
 	}
+	max := int64(s.opts.MaxUnverified)
+	if s.limiter != nil {
+		if v := s.limiter.MaxUnverified(ctx, in); v != 0 {
+			max = int64(v)
+		}
+	}
+	if max <= 0 {
+		return s.opts.Store.Append(ctx, in.ID, m)
+	}
 	s.unverifiedMu.Lock()
 	defer s.unverifiedMu.Unlock()
-	max := int64(s.opts.MaxUnverified)
 	if n, err := s.unverified.CountUnverified(ctx, in.ID, max); err != nil {
 		return nil, false, err
 	} else if n >= max {
