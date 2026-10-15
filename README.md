@@ -152,8 +152,8 @@ what it does and does not prove.
   differ. It never deletes anything. See [applying a file](docs/admin.md#applying-a-file).
 - **Backups while it runs.** `hookinlet backup --out file.db` takes a consistent snapshot.
 - **A console, no users or billing.** The admin API and the command line manage it, and a web console at `/admin` does the same with a browser (above). There is one admin token and no accounts.
-- **Not a delivery service for third parties.** It guarantees what it stored and its order. What an agent or relay
-  does next is yours.
+- **Not a delivery service for third parties.** It guarantees what it stored and the order, and nothing about what
+  happens after that.
 
 ## Documentation
 
