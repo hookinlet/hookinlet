@@ -6,10 +6,13 @@ applies.
 
 ## Unreleased
 
-- **Added `inbox.UnverifiedLimiter`**, an optional interface of `Hooks` (found by type assertion, so `Hooks` is
-  unchanged). A `Hooks` that implements it sets the cap on unverified messages per inbox, in place of
-  `Options.MaxUnverified` (positive: the cap; 0: the server's limit; negative: no cap for that inbox). The default
-  does nothing.
+Nothing yet.
+
+## 0.1.3 - 2026-10-15
+
+A release for the cap on unverified messages. **Upgrading runs one migration** (a partial index; it is quick, and a
+copy of the database is kept first like any migration), and **the default behaviour changes**: see the first
+bullet below.
 
 **An inbox now keeps at most 1000 unverified messages.** With `on_verify_fail=store`, or an inbox whose
 verifier is `none`, anyone who knows an ingest key could fill an inbox with unverified messages, and
@@ -21,9 +24,19 @@ back as retention deletes unverified messages, so give such an inbox a `retentio
 
 - **Behaviour change:** an inbox that already holds 1000 or more unverified messages refuses further
   unverified deliveries until retention or you delete some, or you raise the cap.
+
+**Go API**
+
 - **Added `inbox.UnverifiedCounter`**, an optional interface of `Store` (found by type assertion, so `Store`
   is unchanged), and `inboxtest.UnverifiedCounterSuite`. A Store without it is not capped, and the server logs a
   warning. `server.Options.MaxUnverified` and `server.DefaultMaxUnverified` are new.
+- **Added `inbox.UnverifiedLimiter`**, an optional interface of `Hooks` (found by type assertion, so `Hooks` is
+  unchanged). A `Hooks` that implements it sets the cap on unverified messages per inbox, in place of
+  `Options.MaxUnverified` (positive: the cap; 0: the server's limit; negative: no cap for that inbox). The default
+  does nothing.
+
+**Other**
+
 - The SQLite store gains a migration (a partial index on unverified messages, so counting them reads at most
   the cap however large the inbox is).
 - `docs/openapi.json`: the `429` on the ingest operations now also covers this refusal (no new code or response).
