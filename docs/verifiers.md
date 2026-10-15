@@ -182,11 +182,38 @@ reasons:
 - Agents reading the inbox can tell verified from unverified with the
   `verified` filter and should treat unverified content as untrusted input.
 
-> **`store` mode has a cost.** Anyone who knows the ingest key can fill an inbox
-> with unverified messages, and once count-based retention applies they push
-> genuine ones out. Keep the default `reject` unless you are debugging a sender,
-> and use a `BeforeIngest` hook to rate limit. A cap on unverified messages is
-> on the [roadmap](roadmap.md).
+> **`store` mode has a cost.** Anyone who knows the ingest key can store
+> unverified messages, so they are capped (below). Keep the default `reject`
+> unless you are debugging a sender, and use a `BeforeIngest` hook to rate limit.
+
+### Unverified messages are capped
+
+An inbox keeps at most `HOOKINLET_MAX_UNVERIFIED` unverified messages (those
+stored by `on_verify_fail=store`, and everything an inbox with the verifier
+`none` accepts). The default is 1000, `0` turns the cap off, and it is the same
+for every inbox. It protects the disk, and the genuine messages: without it, a
+leaked ingest key could fill an inbox and, under `retention_max_count`, push the
+verified messages out.
+
+- A delivery that would be stored unverified, and would take the inbox over the
+  cap, is answered **`429 rate_limited`**. It is not stored and not acknowledged,
+  so a sender that retries delivers it once there is room. Nothing already stored
+  is evicted to make room for it.
+- A **verified** delivery is never refused for the cap, however many unverified
+  messages the inbox holds, and an unverified message never removes a verified one.
+- Room comes back when retention deletes unverified messages, so give an inbox
+  that stores unverified messages a `retention_days` (or `retention_max_count`);
+  without retention a full inbox stays full until messages are deleted or the cap
+  is raised.
+- Under `retention_max_count` N, unverified messages still take slots among the
+  newest N, but never more than the cap, so at least N minus the cap of them are
+  verified (when the inbox is full). Keep N well above the cap.
+- The count and the append are made under one lock, so concurrent deliveries
+  cannot overshoot the cap in one server. With several servers on one shared
+  database it is approximate.
+- The built-in SQLite store supports the cap. A Store from elsewhere has to
+  implement the optional `inbox.UnverifiedCounter`; without it the server logs a
+  warning at start and does not cap ([extending](extending.md)).
 
 ## Trying it out
 

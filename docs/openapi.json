@@ -444,7 +444,7 @@
             "$ref": "#/components/responses/TooLarge"
           },
           "429": {
-            "description": "Refused by an embedder's hook (rate limit).",
+            "description": "Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason.",
             "content": {
               "application/json": {
                 "schema": {
@@ -669,7 +669,7 @@
             "$ref": "#/components/responses/TooLarge"
           },
           "429": {
-            "description": "Refused by an embedder's hook (rate limit).",
+            "description": "Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason.",
             "content": {
               "application/json": {
                 "schema": {
@@ -896,7 +896,7 @@
             "$ref": "#/components/responses/TooLarge"
           },
           "429": {
-            "description": "Refused by an embedder's hook (rate limit).",
+            "description": "Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1130,7 +1130,7 @@
             "$ref": "#/components/responses/TooLarge"
           },
           "429": {
-            "description": "Refused by an embedder's hook (rate limit).",
+            "description": "Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason.",
             "content": {
               "application/json": {
                 "schema": {

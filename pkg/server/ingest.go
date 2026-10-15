@@ -22,6 +22,11 @@ import (
 // maxEventTypeLen bounds an event type taken from a delivery.
 const maxEventTypeLen = 256
 
+// codeUnverifiedLimit marks, inside the server, the 429 for an inbox at its cap of
+// unverified messages. On the wire it is rate_limited, like any other refusal to
+// take a delivery for now; metrics tell the two apart.
+const codeUnverifiedLimit = "unverified_limit"
+
 // ingestResult is how a delivery ended. ingestAPI turns it into one of the
 // responses the document lists for the operation.
 type ingestResult struct {
@@ -154,6 +159,7 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	}
 
 	// 6. Store it. Only once this returns is the delivery safe to acknowledge.
+	//
 	var redact []string
 	if hr, ok := verifier.(verify.HeaderRedactor); ok {
 		redact = hr.SecretHeaders()
@@ -166,7 +172,7 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 			eventType = v
 		}
 	}
-	msg, created, err := s.opts.Store.Append(ctx, in.ID, &inbox.NewMessage{
+	msg, created, err := s.append(ctx, in, &inbox.NewMessage{
 		Method:      r.Method,
 		PathSuffix:  r.PathValue("rest"),
 		Query:       r.URL.RawQuery,
@@ -183,6 +189,10 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	switch {
 	case errors.Is(err, inbox.ErrNotFound): // deleted while we were verifying
 		return refuse(http.StatusNotFound, "not_found", "not found")
+	case errors.Is(err, errUnverifiedFull):
+		s.log.LogAttrs(ctx, slog.LevelWarn, "delivery refused: too many unverified messages",
+			slog.String("slug", in.Slug), slog.Int("max_unverified", s.opts.MaxUnverified))
+		return refuse(http.StatusTooManyRequests, codeUnverifiedLimit, "this inbox holds as many unverified messages as it may; verified deliveries are still accepted")
 	case errors.Is(err, inbox.ErrStorageFull):
 		// Not stored, so not acknowledged: the sender keeps it and tries again.
 		s.log.LogAttrs(ctx, slog.LevelError, "delivery refused: no room to store it", slog.String("slug", in.Slug), slog.String("err", err.Error()))
@@ -199,6 +209,32 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		slog.String("slug", in.Slug), slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
 		slog.Bool("verified", verified), slog.Bool("duplicate", !created))
 	return ingestResult{status: http.StatusOK, seq: msg.Seq, duplicate: !created}
+}
+
+// errUnverifiedFull is append's answer for an unverified message the inbox has no
+// room for under Options.MaxUnverified.
+var errUnverifiedFull = errors.New("too many unverified messages")
+
+// append stores m. An inbox holds only so many unverified messages, whoever sent
+// them: a leaked ingest key must not be able to fill it, or under count-based
+// retention push the genuine messages out. A message over the cap is refused with
+// errUnverifiedFull, so it is not acknowledged, and nothing already stored is
+// evicted to make room for it. Verified messages are never counted or refused. The
+// count and the append happen under one lock, so concurrent deliveries cannot
+// overshoot the cap (across several servers on one database it is approximate).
+func (s *Server) append(ctx context.Context, in *inbox.Inbox, m *inbox.NewMessage) (*inbox.Message, bool, error) {
+	if m.Verified || s.unverified == nil {
+		return s.opts.Store.Append(ctx, in.ID, m)
+	}
+	s.unverifiedMu.Lock()
+	defer s.unverifiedMu.Unlock()
+	max := int64(s.opts.MaxUnverified)
+	if n, err := s.unverified.CountUnverified(ctx, in.ID, max); err != nil {
+		return nil, false, err
+	} else if n >= max {
+		return nil, false, errUnverifiedFull
+	}
+	return s.opts.Store.Append(ctx, in.ID, m)
 }
 
 // dedupeKey is what a repeated delivery is recognised by. A delivery id that the

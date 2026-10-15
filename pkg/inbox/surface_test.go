@@ -58,22 +58,24 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 			"Subscribe(context.Context, inbox.ID) (<-chan struct {}, func())",
 		},
 		// The optional interfaces are part of the surface too.
-		"Admitter":        {"Admit(context.Context, inbox.Principal, *inbox.Inbox, inbox.AccessKind) (func(), error)"},
-		"Backupper":       {"Backup(context.Context) (io.ReadCloser, int64, error)"},
-		"ScopedPrincipal": {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "InboxIDs() []inbox.ID"},
-		"Verifier":        {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
+		"Admitter":          {"Admit(context.Context, inbox.Principal, *inbox.Inbox, inbox.AccessKind) (func(), error)"},
+		"Backupper":         {"Backup(context.Context) (io.ReadCloser, int64, error)"},
+		"UnverifiedCounter": {"CountUnverified(context.Context, inbox.ID, int64) (int64, error)"},
+		"ScopedPrincipal":   {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "InboxIDs() []inbox.ID"},
+		"Verifier":          {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
 	}
 	got := map[string]reflect.Type{
-		"Store":           reflect.TypeFor[inbox.Store](),
-		"Hooks":           reflect.TypeFor[inbox.Hooks](),
-		"SecretBox":       reflect.TypeFor[inbox.SecretBox](),
-		"Authenticator":   reflect.TypeFor[inbox.Authenticator](),
-		"Principal":       reflect.TypeFor[inbox.Principal](),
-		"Notifier":        reflect.TypeFor[inbox.Notifier](),
-		"Admitter":        reflect.TypeFor[inbox.Admitter](),
-		"Backupper":       reflect.TypeFor[inbox.Backupper](),
-		"ScopedPrincipal": reflect.TypeFor[inbox.ScopedPrincipal](),
-		"Verifier":        reflect.TypeFor[verify.Verifier](),
+		"Store":             reflect.TypeFor[inbox.Store](),
+		"Hooks":             reflect.TypeFor[inbox.Hooks](),
+		"SecretBox":         reflect.TypeFor[inbox.SecretBox](),
+		"Authenticator":     reflect.TypeFor[inbox.Authenticator](),
+		"Principal":         reflect.TypeFor[inbox.Principal](),
+		"Notifier":          reflect.TypeFor[inbox.Notifier](),
+		"Admitter":          reflect.TypeFor[inbox.Admitter](),
+		"Backupper":         reflect.TypeFor[inbox.Backupper](),
+		"UnverifiedCounter": reflect.TypeFor[inbox.UnverifiedCounter](),
+		"ScopedPrincipal":   reflect.TypeFor[inbox.ScopedPrincipal](),
+		"Verifier":          reflect.TypeFor[verify.Verifier](),
 	}
 	for name, typ := range got {
 		var methods []string

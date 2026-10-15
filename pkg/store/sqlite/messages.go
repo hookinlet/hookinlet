@@ -165,6 +165,29 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 	return stored, created, nil
 }
 
+// CountUnverified implements inbox.UnverifiedCounter. The partial index
+// messages_unverified holds only the unverified rows, so counting up to limit of
+// them reads at most limit index entries however large the inbox is.
+func (s *Store) CountUnverified(ctx context.Context, inboxID inbox.ID, limit int64) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	var n int64
+	err := s.readTx(ctx, func(tx *sql.Tx) error {
+		var live int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&live); err != nil {
+			return notFound(err, "inbox")
+		}
+		return tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM (SELECT 1 FROM messages WHERE inbox_id = ? AND verified = 0 LIMIT ?)`,
+			int64(inboxID), limit).Scan(&n)
+	})
+	if err != nil {
+		return 0, s.ctxErr(ctx, err)
+	}
+	return n, nil
+}
+
 // Get implements inbox.Store.
 func (s *Store) Get(ctx context.Context, inboxID inbox.ID, seq int64) (*inbox.Message, error) {
 	if err := ctx.Err(); err != nil {

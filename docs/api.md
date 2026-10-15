@@ -411,7 +411,7 @@ beyond the inbox's [verifier](verifiers.md).
 | `404` | `not_found` | No such inbox, or the inbox is disabled. The two are indistinguishable. |
 | `405` | `method_not_allowed` | Any method other than POST and PUT. The `Allow` header is `POST, PUT`. Checked before the inbox is looked up. |
 | `413` | `payload_too_large` | The body exceeds the inbox's `max_body_bytes` (default 1 MiB, at most 10 MiB). |
-| `429` | `rate_limited` | Refused by an embedder's hook. |
+| `429` | `rate_limited` | Not stored, and not acknowledged. Either an embedder's hook refused it, or the inbox already holds as many **unverified** messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default; see [Unverified messages](verifiers.md#unverified-messages-are-capped)) and this delivery is unverified. A verified delivery is never refused for that reason. |
 | `431` | | The request line and headers exceed 64 KiB (plus a few KiB of slack). Headers are stored with the message and returned to agents, so their size is bounded at the door. |
 | `500` | `internal` | A server-side problem, including a misconfigured verifier. Details are in the server log, never in the response. |
 | `503` | `overloaded` or `storage_full` | Not stored, and not acknowledged: retry after `Retry-After`. `overloaded`: too many deliveries are being received at once for the server's memory (`HOOKINLET_INGEST_MEMORY_BUDGET`, 256 MiB by default; counted as bodies arrive, and the delivery is refused as soon as its bytes would go over). `storage_full`: there is no room to store it. Webhook senders retry a 503, which is what is wanted. |

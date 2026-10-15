@@ -6,7 +6,23 @@ applies.
 
 ## Unreleased
 
-Nothing yet.
+**An inbox now keeps at most 1000 unverified messages.** With `on_verify_fail=store`, or an inbox whose
+verifier is `none`, anyone who knows an ingest key could fill an inbox with unverified messages, and
+under `retention_max_count` they pushed the genuine ones out. Now a delivery that would be stored unverified,
+over the cap, is answered `429 rate_limited` and not stored (so not acknowledged). A verified delivery is never refused
+for the cap, and nothing stored is evicted for it. `HOOKINLET_MAX_UNVERIFIED` sets it (`0` turns it off). Room comes
+back as retention deletes unverified messages, so give such an inbox a `retention_days`. See
+[verifiers](docs/verifiers.md#unverified-messages-are-capped).
+
+- **Behaviour change:** an inbox that already holds 1000 or more unverified messages refuses further
+  unverified deliveries until retention or you delete some, or you raise the cap.
+- **Added `inbox.UnverifiedCounter`**, an optional interface of `Store` (found by type assertion, so `Store`
+  is unchanged), and `inboxtest.UnverifiedCounterSuite`. A Store without it is not capped, and the server logs a
+  warning. `server.Options.MaxUnverified` and `server.DefaultMaxUnverified` are new.
+- The SQLite store gains a migration (a partial index on unverified messages, so counting them reads at most
+  the cap however large the inbox is).
+- `docs/openapi.json`: the `429` on the ingest operations now also covers this refusal (no new code or response).
+  `hookinlet_deliveries_total{result="unverified_limit"}` counts it.
 
 ## 0.1.2 - 2026-10-15
 

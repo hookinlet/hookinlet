@@ -215,6 +215,20 @@ type Backupper interface {
 	Backup(ctx context.Context) (snapshot io.ReadCloser, size int64, err error)
 }
 
+// UnverifiedCounter is an optional capability of a Store: how many unverified
+// messages an inbox holds. The server uses it to cap them (see
+// Options.MaxUnverified): with on_verify_fail=store, or a verifier of none, anyone
+// holding the ingest key can store messages, and without a cap they fill the inbox
+// and, under count-based retention, push out the genuine ones. A Store that does not
+// implement it is not capped, and the server says so when it starts.
+type UnverifiedCounter interface {
+	// CountUnverified returns how many messages with Verified false the inbox
+	// holds, or limit if there are more: the caller only asks whether a cap is
+	// reached, and the answer must cost no more than limit rows however many
+	// there are. It returns ErrNotFound if the inbox does not exist.
+	CountUnverified(ctx context.Context, inboxID ID, limit int64) (int64, error)
+}
+
 // Notifier tells interested parties that an inbox may have new messages. It
 // carries no payload: a subscriber wakes up and reads from the Store at its own
 // cursor. Replay, reconnects, and slow consumers therefore share one code
