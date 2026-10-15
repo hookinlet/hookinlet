@@ -170,6 +170,11 @@ overall, `HOOKINLET_MAX_STREAMS_PER_INBOX` for one inbox): a wait that finds no
 free slot is told "too many waits are in progress" and should retry shortly. A
 `timeout_seconds` of `0` checks once and takes no slot.
 
+A deployment that embeds hookinlet can also limit reads and waits itself (an
+[`Admitter`](extending.md#admitting-reads-streams-and-waits)). A tool call it refuses
+fails with a message saying so (such as "too many requests"), and the agent should
+retry shortly. The open-source build never refuses this way.
+
 ## Large bodies
 
 To protect an agent's context window, `query_messages` and `wait_for_messages`

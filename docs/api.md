@@ -374,9 +374,12 @@ but do not treat it as an identity.
 |---|---|---|
 | `400` | `invalid_parameter` | A query parameter is unknown, repeated, or malformed. The message names it. |
 | `401` | `unauthenticated` | Missing or invalid credentials. The response has `WWW-Authenticate: Bearer`. |
+| `402` | `quota_exceeded` | Refused by an embedder's [`Admitter`](extending.md#admitting-reads-streams-and-waits) (the open-source build never returns this). |
+| `403` | `forbidden` | Refused by an embedder's `Admitter` (the open-source build never returns this). |
 | `404` | `not_found` | No such inbox, message, or route, **or** the token may not read that inbox. |
 | `409` | `epoch_changed` | `epoch=` is not the inbox's current epoch (it was deleted and made again, or the server was restored from a backup). |
 | `405` | `method_not_allowed` | Not `GET` or `HEAD`. `Allow: GET, HEAD`. |
+| `429` | `rate_limited` | Refused by an embedder's `Admitter` (the open-source build never returns this). |
 | `500` | `internal` | A server-side problem. Details are in the server log. |
 | `503` | `overloaded` | Too many reads are in progress (16 by default) and none finished within 10 seconds, or (for a stream) too many streams are open. `Retry-After` is set. Authentication happens first, so unauthenticated traffic cannot cause this. |
 
