@@ -178,6 +178,7 @@ const errToolNotFound = toolError("not found")
 func (t *mcpTools) fail(ctx context.Context, what string, err error) error {
 	var te toolError
 	var pe *wire.ParamError
+	var ref *admitRefusal
 	switch {
 	case errors.As(err, &te):
 		return te
@@ -185,6 +186,8 @@ func (t *mcpTools) fail(ctx context.Context, what string, err error) error {
 		return toolError(pe.Error())
 	case errors.Is(err, errBusy):
 		return toolError("the server is busy; retry shortly")
+	case errors.As(err, &ref):
+		return toolError(ref.msg)
 	case errors.Is(err, inbox.ErrInvalid):
 		return toolError(err.Error())
 	case errors.Is(err, inbox.ErrNotFound):
@@ -266,7 +269,7 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 	ctx, done := t.bind(ctx)
 	defer done()
 	out := listInboxesOutput{Inboxes: []inboxSummary{}}
-	release, err := t.s.holdSlot(ctx)
+	release, err := t.s.holdSlot(ctx, t.caller.principal, nil)
 	if err != nil {
 		return nil, nil, t.fail(ctx, "list inboxes", err)
 	}
@@ -453,11 +456,16 @@ func (t *mcpTools) queryMessages(ctx context.Context, _ *mcp.CallToolRequest, ar
 	if err != nil {
 		return nil, nil, t.fail(ctx, "query", err)
 	}
-	page, release, err := t.fetch(ctx, in, req)
+	admitted, err := t.s.admit(ctx, t.caller.principal, in, inbox.AccessRead)
 	if err != nil {
 		return nil, nil, t.fail(ctx, "query", err)
 	}
-	defer t.s.adopt(ctx, release)()
+	page, release, err := t.fetch(ctx, in, req)
+	if err != nil {
+		admitted()
+		return nil, nil, t.fail(ctx, "query", err)
+	}
+	defer t.s.adopt(ctx, func() { release(); admitted() })()
 	return t.reply(req, page)
 }
 
@@ -518,7 +526,7 @@ func (t *mcpTools) getMessage(ctx context.Context, _ *mcp.CallToolRequest, args 
 	if err := wire.CheckEpoch(in, stringOf(args.Epoch)); err != nil {
 		return nil, nil, t.fail(ctx, "get", err)
 	}
-	release, err := t.s.holdSlot(ctx)
+	release, err := t.s.holdSlot(ctx, t.caller.principal, in)
 	if err != nil {
 		return nil, nil, t.fail(ctx, "get", err)
 	}
@@ -563,11 +571,21 @@ func (t *mcpTools) waitForMessages(ctx context.Context, _ *mcp.CallToolRequest, 
 	// A wait holds a connection, a subscription, and timers for up to a minute, so
 	// the same limits apply as to a stream: overall, and per inbox.
 	if wait > 0 {
-		releaseWait, refusal := s.takeStream(in.ID, holderOf(t.caller.req, t.caller.principal))
+		releaseWait, refusal, err := s.takeStream(ctx, t.caller.principal, in, inbox.AccessWait, holderOf(t.caller.req, t.caller.principal))
+		if err != nil {
+			return nil, nil, t.fail(ctx, "wait", err)
+		}
 		if refusal != "" {
 			return nil, nil, toolError("too many waits are in progress; retry shortly")
 		}
 		defer releaseWait()
+	} else {
+		// A wait of zero is a read.
+		releaseRead, err := s.admit(ctx, t.caller.principal, in, inbox.AccessRead)
+		if err != nil {
+			return nil, nil, t.fail(ctx, "wait", err)
+		}
+		defer releaseRead()
 	}
 	// Subscribe before the first read, so a message committed in between wakes
 	// the wait instead of being missed.

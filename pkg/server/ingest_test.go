@@ -83,6 +83,13 @@ type recHooks struct {
 	requests   []inbox.IngestRequest
 	afterSeen  []afterCall
 	afterBoom  bool
+	admitErr   error // what Admit returns, if set
+}
+
+func (h *recHooks) Admit(context.Context, inbox.Principal, *inbox.Inbox, inbox.AccessKind) (func(), error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return nil, h.admitErr
 }
 
 func (h *recHooks) BeforeIngest(_ context.Context, req *inbox.IngestRequest) error {

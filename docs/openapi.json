@@ -1255,8 +1255,17 @@
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1357,6 +1366,12 @@
               }
             }
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
             "headers": {
@@ -1368,6 +1383,9 @@
                 "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "description": "A fault on the server's side. Nothing about the cause is revealed.",
@@ -1493,11 +1511,20 @@
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
             "$ref": "#/components/responses/EpochChanged"
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1710,6 +1737,12 @@
               }
             }
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
             "headers": {
@@ -1733,6 +1766,9 @@
                 "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "description": "A fault on the server's side. Nothing about the cause is revealed.",
@@ -1970,11 +2006,20 @@
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
             "$ref": "#/components/responses/EpochChanged"
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2087,6 +2132,12 @@
               }
             }
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
             "headers": {
@@ -2110,6 +2161,9 @@
                 "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "description": "A fault on the server's side. Nothing about the cause is revealed.",
@@ -2279,11 +2333,20 @@
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
             "$ref": "#/components/responses/EpochChanged"
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2426,6 +2489,12 @@
               }
             }
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
             "headers": {
@@ -2449,6 +2518,9 @@
                 "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "description": "A fault on the server's side. Nothing about the cause is revealed.",
@@ -2607,6 +2679,12 @@
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
           },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -2615,6 +2693,9 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -5784,6 +5865,81 @@
               "error": {
                 "code": "epoch_changed",
                 "message": "the cursor is from an earlier epoch of this inbox; start again from the inbox's current epoch"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "AccessRateLimited": {
+        "description": "Refused by an embedder's hook (rate limit). The server itself never answers this; it is for a deployment that limits what a caller may read, stream or wait for.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorRateLimited"
+            },
+            "example": {
+              "error": {
+                "code": "rate_limited",
+                "message": "too many requests"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "AccessQuotaExceeded": {
+        "description": "Refused by an embedder's hook (quota). The server itself never answers this.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorQuotaExceeded"
+            },
+            "example": {
+              "error": {
+                "code": "quota_exceeded",
+                "message": "a limit on this access has been reached"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
+      },
+      "AccessForbidden": {
+        "description": "Refused by an embedder's hook. The server itself never answers this.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorForbidden"
+            },
+            "example": {
+              "error": {
+                "code": "forbidden",
+                "message": "this access is not allowed"
               }
             }
           }

@@ -10,8 +10,18 @@ Nothing yet.
 
 ## 0.1.2 - 2026-10-15
 
-A small release: a warning in the console and corrections to the documentation. The server is unchanged,
-so there is nothing to migrate; upgrade by starting the new version on the same data directory.
+A small release: an optional interface for limiting reads, streams and waits, a warning in the console,
+and corrections to the documentation. Nothing changes unless you use the new interface, so there is
+nothing to migrate; upgrade by starting the new version on the same data directory.
+
+**Go API**
+
+- **Added `inbox.Admitter`**, an optional interface of `Hooks` (found by type assertion, so `Hooks` is unchanged),
+  and `inbox.AccessKind` (`AccessRead`, `AccessStream`, `AccessWait`). A `Hooks` that implements it is asked, per
+  caller and inbox, before every read, stream and MCP wait, and can refuse with `ErrRateLimited`, `ErrQuotaExceeded`
+  or `ErrForbidden` or hold something until the access ends. The default does nothing. `inboxtest.AdmitterSuite`
+  checks an implementation. `docs/openapi.json` now lists `402`, `403` and `429` (never sent by the default
+  server) on the read and stream operations. `ScopedPrincipal`'s documentation now says a large finite set is allowed.
 
 **Console**
 
