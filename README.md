@@ -62,10 +62,12 @@ curl -sf localhost:8080/readyz      # {"status":"ready"}; if this fails, somethi
 ```
 
 Create an inbox that accepts only GitHub's signature, for a secret you choose. (This one is made up; a real one
-belongs in a file or a password manager, never in a command line.) The response carries the **agent token** that
-reads this inbox. It is shown once (more tokens, for several inboxes or all, are issued with `hookinlet token create`, and a token is replaced by issuing the new one and revoking the old). The response also carries the **ingest path**, the URL senders post to. Its last part is a
-random key, not the slug: whoever has it can post to the inbox, so it is not a name anyone can guess ([why](docs/admin.md#why-the-ingest-url-is-not-the-slug)). (The admin API shows it
-again whenever you ask.)
+belongs in a file or a password manager, never in a command line.)
+
+The response carries the **agent token** that reads this inbox, shown once ([more tokens](docs/admin.md#tokens)),
+and the **ingest path** that senders post to. The path ends in a random key, not the slug: whoever has it can post
+to the inbox ([why](docs/admin.md#why-the-ingest-url-is-not-the-slug)). The admin API shows it again whenever you
+ask.
 
 <!-- exercise -->
 ```sh
@@ -131,9 +133,10 @@ the agent token.
 ### With a real sender
 
 For GitHub, Slack, Stripe, or your own service, give the sender the inbox's `ingest_url` (the admin API shows it;
-`HOOKINLET_PUBLIC_BASE_URL` sets the host part) and the same secret. The server must be reachable from the internet
-for that: put it behind TLS, or use a tunnel to try it from a laptop. [Verifiers](docs/verifiers.md#trying-it-with-stripe)
-shows the loop against Stripe's CLI, and [Deploying](docs/deploying.md) covers what a server needs.
+`HOOKINLET_PUBLIC_BASE_URL` sets the host part) and the same secret.
+
+The server must be reachable from the internet for that: put it behind TLS, or use a tunnel to try it from a
+laptop. [Verifiers](docs/verifiers.md#trying-it-with-stripe) shows the loop against Stripe's CLI, and [Deploying](docs/deploying.md) covers what a server needs.
 
 ## Read from an agent
 
@@ -161,7 +164,10 @@ An agent needs the server's address, an inbox's agent token, and a cursor. Choos
 | `get_message` | `inbox`, `epoch`, `seq` | one message with its full body |
 | `wait_for_messages` | `inbox`, `epoch`, `after`, `types`, `timeout_seconds`, `limit`, `bodies` | messages after `after`; waits up to 60 s for one |
 
-The tools are read-only. A token sees only the inboxes it was issued for. Messages come without bodies unless you ask (`bodies: true`), and a body over 16 KiB is then left out and flagged (`body_truncated`), so neither fills the agent's context; `get_message` returns the whole thing. What the sender wrote is under each message's `untrusted` key. A raw call:
+The tools are read-only. A token sees only the inboxes it was issued for. Messages come without bodies unless you
+ask (`bodies: true`), and a body over 16 KiB is then left out and flagged (`body_truncated`), so neither fills the
+agent's context; `get_message` returns the whole thing. What the sender wrote is under each message's `untrusted`
+key. A raw call:
 
 <!-- exercise -->
 ```sh
@@ -198,9 +204,9 @@ REST, SSE, and MCP use the same cursor.
 > [!WARNING]
 > Everything in a message was written by whoever sent the webhook, including `verified` ones. `verified` means
 > the message passed its inbox's verifier: for a signing scheme, that the sender held the secret, which does not
-> make what it wrote true or safe. (An inbox whose verifier is `none`, which has to be asked for by name, stores
-> everything as **not** verified. Use a real verifier for anything that matters.) An agent should treat message
-> content as data to analyze and never as instructions to follow.
+> make what it wrote true or safe. An agent should treat message content as data to analyze and never as
+> instructions to follow. [More](docs/api.md#treat-message-content-as-data-never-as-instructions), including the
+> [`none`](docs/verifiers.md#none) verifier, which stores everything as **not** verified.
 
 ### Write a client
 
@@ -220,21 +226,22 @@ python3 examples/python/agent.py github-demo --count 1
 go run ./examples/go-agent -inbox github-demo -n 1
 ```
 
-`examples/relay` passes webhooks on to an existing service: the original bytes and headers, so the receiver can
-still check the sender's signature, at least once and in order. It retries while the destination is down or
-misconfigured and skips a message only when the destination refuses that message for good (400, 410, 413, 415,
-422). Schemes that sign a timestamp are checked by the receiver against a five minute window, so a message
-delivered after a long outage may be refused. Headers that say where a request came from are not passed on; the
-rest are the sender's, so a receiver must not take them on trust. hookinlet keeps no delivery queue of its own, and
-the relay shows how little one takes.
+`examples/relay` passes webhooks on to an existing service, at least once and in order. hookinlet keeps no delivery
+queue of its own, and the relay shows how little one takes. [The examples README](examples/README.md#passing-webhooks-on-relay)
+says when it retries and when it skips a message.
+
+It sends the original bytes and headers, so the receiver can still check the sender's signature. Headers that say
+where a request came from are not passed on; the rest are the sender's, so a receiver must not take them on trust.
 
 ## The console
 
 Open `/admin` on a running server and sign in with the admin token. It does what the command line does, and
 shows what is arriving: the inboxes and their activity, every message (body, headers, exact bytes) with a live
-mode, new inboxes with a form for each kind of sender, secrets, retention, tokens, and backups. It is built into
-the binary, follows your system's light or dark theme, and works on a phone. `HOOKINLET_ADMIN_UI=false` turns it
-off. The token stays in the page's memory, and everything a sender wrote is shown as text, never as HTML.
+mode, new inboxes with a form for each kind of sender, secrets, retention, tokens, and backups.
+
+It is built into the binary, follows your system's light or dark theme, and works on a phone.
+`HOOKINLET_ADMIN_UI=false` turns it off. The token stays in the page's memory, and everything a sender wrote is
+shown as text, never as HTML. [Administration](docs/admin.md#the-console) has the rest.
 
 ![The overview: inboxes, their verifiers and a line of recent activity](docs/images/console-overview.png)
 
@@ -327,12 +334,10 @@ open a public issue.
 
 [AGPL-3.0](LICENSE). If you run a modified hookinlet as a network service, you share your changes.
 
-**Using it in your own program.** Running hookinlet unmodified, alongside your software, and calling its API from
-any language puts no condition on your code. Importing its packages (`pkg/server`, `pkg/inbox`, and the rest) into
-a program that you then make available over a network makes that program a work based on hookinlet, and the AGPL
-asks you to offer its source to the people who use it. If that does not suit your program, run hookinlet as a
-separate service and use its API. The example clients in [`examples/`](examples) (curl, Python, Go, and the relay) are
-MIT licensed, so you can copy them into your own code; the one example that embeds the server's packages stays AGPL, because a program built from it is covered by the AGPL. [`LICENSING.md`](LICENSING.md) says in plain words what needs
-nothing from you and what does, and how to ask for a commercial license (**licensing@hookinlet.com**) if the AGPL
-does not fit. This is a summary, not legal advice. Third-party licenses for what is inside the binary are in
-[`THIRD_PARTY_LICENSES`](THIRD_PARTY_LICENSES).
+**Using it in your own program.** Running hookinlet unmodified and calling its API from any language puts no
+condition on your code; importing its packages (`pkg/server`, `pkg/inbox`, and the rest) into a program you make
+available over a network makes that program a work based on hookinlet, and the AGPL asks you to offer its source to
+the people who use it.
+
+[`LICENSING.md`](LICENSING.md) covers the rest in plain words, including the MIT-licensed example clients and a
+commercial license; it is a summary, not legal advice.
