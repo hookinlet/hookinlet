@@ -6,17 +6,35 @@ applies.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.1.2 - 2026-10-15
+
+A small release: a warning in the console and corrections to the documentation. The server is unchanged,
+so there is nothing to migrate; upgrade by starting the new version on the same data directory.
+
+**Console**
+
 - **The console warns when an inbox's verifier is `none`.** Such an inbox accepts anything and stores
   it as not verified, and it is what the quickstart starts with, so it is easy to leave on a real inbox.
   The inbox list and the inbox page now show an amber `none (unverified)` marker in place of the
   verifier's name, the inbox page carries a note that links to its settings, and the new-inbox and
   settings forms show a callout while `none` is chosen. Nothing in the API or the server changed.
-- The documentation says what a long backup of a large database under heavy load does: reads and
-  admin calls are refused as busy while it runs (7 minutes for a 2.6 GB database with 250 open streams
-  and about 300 deliveries a second), and a revoked token's stream can stay open longer than the usual
-  30 seconds until a check can be made.
-- The soak driver waits for a follower that is still catching up, instead of judging it after three
-  minutes.
+
+**Documentation**
+
+- What a long backup of a large database does under heavy load: reads and admin calls are refused as busy
+  while it runs (7 minutes for a 2.6 GB database with 250 open streams and about 300 deliveries a second).
+- A revoked token's stream can stay open longer than the usual 30 seconds when the server is too busy to
+  make the check that ends it.
+
+**Tooling**
+
+- `scripts/soak` is a load driver for the built binary (`go run -tags soak ./scripts/soak`), used to
+  soak-test releases: mixed ingest, reads, streams that drop and resume, admin changes, backups, restarts
+  and a kill, checking that no acknowledged message is lost, duplicated or reordered. It is behind a build
+  tag, so `go build` and `go test` do not see it. It waits for a follower that is still catching up before
+  judging it.
 
 ## 0.1.1 - 2026-10-13
 
