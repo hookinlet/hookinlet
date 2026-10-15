@@ -25,7 +25,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 files=("$@")
-[ ${#files[@]} -gt 0 ] || files=(README.md examples/README.md docs/verifiers.md docs/mcp.md docs/admin.md)
+[ ${#files[@]} -gt 0 ] || files=(README.md docs/quickstart.md examples/README.md docs/verifiers.md docs/mcp.md docs/admin.md)
 
 # The examples write a few files into the directory they are run from, which is the
 # checkout (they run `go run ./examples/...`). Refuse to start if any of them is
@@ -119,16 +119,21 @@ for file in "${files[@]}"; do
 
   # What each document must visibly have done, beyond exiting successfully. These
   # are the claims the document makes about its own commands, checked in the
-  # output, and (for the README) in the state the server is left in.
+  # output, and (for the README and the quickstart) in the state the server is left in.
   needles=()
   checks=
+  github_demo_checks='
+n=$(curl -s localhost:8080/v1/inboxes/github-demo -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN" | sed -n '"'"'s/.*"message_count":\([0-9]*\).*/\1/p'"'"')
+[ "$n" = 1 ] || { echo "CHECK: the walk should leave exactly one message (a tampered request must be refused), found: $n" >&2; exit 1; }
+[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST localhost:8080$INGEST -H "X-Hub-Signature-256: sha256=00" -d x)" = 401 ] || { echo "CHECK: a wrong signature was not refused" >&2; exit 1; }'
   case "$file" in
   README.md)
-    needles=('{"seq":1}' 'verification_failed' '"verified":true' '"event_type":"pull_request"' 'structuredContent')
-    checks='
-n=$(curl -s localhost:8080/v1/inboxes/github-demo -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN" | sed -n '"'"'s/.*"message_count":\([0-9]*\).*/\1/p'"'"')
-[ "$n" = 1 ] || { echo "CHECK: the walk should leave exactly one message (the tampered request must be refused), found: $n" >&2; exit 1; }
-[ "$(curl -s -o /dev/null -w "%{http_code}" -X POST localhost:8080$INGEST -H "X-Hub-Signature-256: sha256=00" -d x)" = 401 ] || { echo "CHECK: a wrong signature was not refused" >&2; exit 1; }'
+    needles=('{"seq":1}' '"verified":true' '"event_type":"pull_request"' 'event: message')
+    checks=$github_demo_checks
+    ;;
+  docs/quickstart.md)
+    needles=('{"seq":1}' 'verification_failed' '"verified":true' '"event_type":"pull_request"')
+    checks=$github_demo_checks
     ;;
   examples/README.md)
     needles=('seq=1 {"hello": "examples"}')

@@ -221,7 +221,7 @@ verified messages out.
 
 Create an inbox (the verifier secret is read from the environment, never from a
 flag, because flags show up in process listings). This writes into the data directory,
-so run it in the shell where you started the server in the [README](../README.md#send-a-signed-event-read-it-back),
+so run it in the shell where you started the server in the [quickstart](quickstart.md#send-a-signed-event-read-it-back),
 which has its data directory and master key. The first line of the block keeps the key that is set
 and makes one only when none is (a different key would seal the secret so that the
 running server cannot open it):

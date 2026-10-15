@@ -9,17 +9,29 @@
 [![docker](https://img.shields.io/badge/docker-ghcr.io%2Fhookinlet%2Fhookinlet-0E1112?labelColor=3A4245&style=flat-square)](https://github.com/hookinlet/hookinlet/pkgs/container/hookinlet)
 [![mcp](https://img.shields.io/badge/mcp-%2Fmcp-0E1112?labelColor=3A4245&style=flat-square)](docs/mcp.md)
 
+[How it works](#how-it-works) · [Quickstart](#quickstart) · [Read from an agent](#read-from-an-agent) ·
+[The console](#the-console) · [Configuration](#configuration) ·
+[What it does and does not do](#what-it-does-and-does-not-do) · [Documentation](#documentation) ·
+[hookinlet Cloud](#hookinlet-cloud) · [Status](#status) · [License](#license)
+
 Your agent needs to know when Stripe, GitHub, or Slack says something, but it cannot hold a public URL and it must
 not trust what arrives. hookinlet is that URL: a single Go binary that receives webhooks into named inboxes,
 verifies their signatures, and keeps a queryable history. Agents read it three ways, REST, an SSE stream, or an
 MCP endpoint, using a per-inbox sequence number as the cursor. SQLite by default; runs anywhere.
 
-[Docs](#documentation) · [Quickstart](#quickstart) · [MCP tools](#read-from-an-agent) · [hookinlet Cloud (waitlist)](https://hookinlet.com/#cloud)
+## How it works
+
+```text
+sender (Stripe, GitHub, Slack, your own service)
+  │  POST /in/<ingest key>
+  ▼
+inbox   its verifier checks the signature on the exact bytes (by default, a bad one gets 401 and is not stored)
+  │     each message is stored under the inbox's next sequence number: 1, 2, 3, …
+  ▼
+agent   reads what came after the last seq it handled: REST, an SSE stream, or MCP at /mcp
+```
 
 ## Quickstart
-
-Run it, send it a signed event, read it back. You need `curl` and `openssl`; the examples further down also use
-`jq`, `python3`, and Go. The server needs nothing.
 
 Two secrets configure a server, and you must keep both. The admin token manages it. The master key encrypts the
 signing secrets it stores, so a server started later with a different key cannot read them.
@@ -33,41 +45,8 @@ docker run -d --name hookinlet -p 127.0.0.1:8080:8080 -v hookinlet-data:/data \
   ghcr.io/hookinlet/hookinlet
 ```
 
-Prefer a binary? Download one from the [releases page](https://github.com/hookinlet/hookinlet/releases) (Linux and
-macOS, amd64 and arm64, static), or build it from a clone:
-
-```sh
-go build -o hookinlet ./cmd/hookinlet     # then put ./hookinlet on your PATH
-```
-
-### Send a signed event, read it back
-
-This walk plays the part of GitHub with `openssl`, so there is nothing to sign up for. Run it from a clone, with
-`hookinlet` on your `PATH`. Every command is run by the project's tests, in this order, in one shell.
-
-Start a server. If you started the Docker container above, skip this block and keep the shell where you exported
-the two secrets: the walk talks to whichever server answers on port 8080. This one uses a throwaway data directory
-and listens on this machine only:
-
-<!-- exercise -->
-```sh
-export HOOKINLET_ADMIN_TOKEN=$(openssl rand -base64 32)
-export HOOKINLET_MASTER_KEY=$(openssl rand -base64 32)
-export HOOKINLET_DATA_DIR=$(mktemp -d)
-export HOOKINLET_LISTEN_ADDR=127.0.0.1:8080
-export HOOKINLET_LOG_LEVEL=warn
-hookinlet serve &
-for i in $(seq 50); do curl -sf localhost:8080/readyz >/dev/null && break; sleep 0.2; done
-curl -sf localhost:8080/readyz      # {"status":"ready"}; if this fails, something else may be using port 8080 (on IPv6 too: try 127.0.0.1:8080)
-```
-
-Create an inbox that accepts only GitHub's signature, for a secret you choose. (This one is made up; a real one
-belongs in a file or a password manager, never in a command line.)
-
-The response carries the **agent token** that reads this inbox, shown once ([more tokens](docs/admin.md#tokens)),
-and the **ingest path** that senders post to. The path ends in a random key, not the slug: whoever has it can post
-to the inbox ([why](docs/admin.md#why-the-ingest-url-is-not-the-slug)). The admin API shows it again whenever you
-ask.
+Then, with `curl` and `openssl`: create an inbox that accepts only GitHub's signature (the secret is made up; a real
+one belongs in a file or a password manager), send it a signed event, and read it back with the inbox's agent token:
 
 <!-- exercise -->
 ```sh
@@ -75,106 +54,36 @@ curl -s -X POST localhost:8080/v1/admin/inboxes \
   -H "Authorization: Bearer $HOOKINLET_ADMIN_TOKEN" -H 'Content-Type: application/json' -d @- > created.json <<'EOF'
 {"slug": "github-demo", "verifier": "github", "verifier_secret": "my-webhook-secret"}
 EOF
-
 export HOOKINLET_AGENT_TOKEN=$(sed -n 's/.*"agent_token":"\([^"]*\)".*/\1/p' created.json)
 export INGEST=$(sed -n 's/.*"ingest_path":"\([^"]*\)".*/\1/p' created.json)    # /in/<random key>
-```
 
-Send an event signed the way GitHub signs them, HMAC-SHA256 of the body in `X-Hub-Signature-256`:
-
-<!-- exercise -->
-```sh
 body='{"action":"opened","number":42,"pull_request":{"title":"Add retries"}}'
 sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac 'my-webhook-secret' -hex | sed 's/^.* //')
+curl -s -X POST localhost:8080$INGEST -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: pull_request' \
+  -H 'X-GitHub-Delivery: demo-1' -H 'Content-Type: application/json' -d "$body"      # {"seq":1}
 
-curl -s -X POST localhost:8080$INGEST \
-  -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: pull_request' \
-  -H 'X-GitHub-Delivery: demo-1' -H 'Content-Type: application/json' -d "$body"
-```
-
-```json
-{"seq":1}
-```
-
-Change one character of the body and send the same signature. It is refused, and nothing is stored:
-
-<!-- exercise -->
-```sh
-curl -s -X POST localhost:8080$INGEST \
-  -H "X-Hub-Signature-256: sha256=$sig" -H 'X-GitHub-Event: pull_request' \
-  -H 'Content-Type: application/json' -d '{"action":"opened","number":43}'
-```
-
-```json
-{"error":{"code":"verification_failed","message":"webhook verification failed"}}
-```
-
-Read the inbox from the start, with the agent token:
-
-<!-- exercise -->
-```sh
 curl -s 'localhost:8080/v1/inboxes/github-demo/messages?after=0' -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN"
 ```
 
-```json
-{"messages":[{"seq":1,"inbox":"github-demo","received_at":"2026-01-15T09:30:00.000000Z","method":"POST",
-  "headers":{"X-Github-Event":["pull_request"], "…":"…"},"content_type":"application/json","size":70,
-  "verified":true,"verifier":"github","delivery_id":"demo-1","event_type":"pull_request","source_ip":"127.0.0.1",
-  "body":{"action":"opened","number":42,"pull_request":{"title":"Add retries"}}, "…":"…"}],
- "next":"/v1/inboxes/github-demo/messages?after=1&epoch=…&limit=50","latest_seq":1}
-```
-
-Shortened; the [API reference](docs/api.md#messages) lists every field. `body` is your JSON, as JSON. `next` is the
-cursor to keep. For the exact bytes that were sent, read `/v1/inboxes/github-demo/messages/1/raw`.
-
-When you are done: `kill %1` stops the server this walk started, and `rm created.json` removes the file holding
-the agent token.
-
-### With a real sender
-
-For GitHub, Slack, Stripe, or your own service, give the sender the inbox's `ingest_url` (the admin API shows it;
-`HOOKINLET_PUBLIC_BASE_URL` sets the host part) and the same secret.
-
-The server must be reachable from the internet for that: put it behind TLS, or use a tunnel to try it from a
-laptop. [Verifiers](docs/verifiers.md#trying-it-with-stripe) shows the loop against Stripe's CLI, and [Deploying](docs/deploying.md) covers what a server needs.
+[The quickstart](docs/quickstart.md) does this step by step with a release binary instead of Docker, shows a forged
+event being refused, explains the response, and connects a real sender.
 
 ## Read from an agent
 
 An agent needs the server's address, an inbox's agent token, and a cursor. Choose how it reads.
 
-**MCP.** Point any MCP client at `/mcp`. This is Claude Code's `.mcp.json`; other clients use other field names
-([MCP](docs/mcp.md) has them):
+**MCP.** Point any MCP client at `/mcp` with the agent token. In Claude Code:
 
-```json
-{
-  "mcpServers": {
-    "hookinlet": {
-      "type": "http",
-      "url": "http://localhost:8080/mcp",
-      "headers": { "Authorization": "Bearer ${HOOKINLET_AGENT_TOKEN}" }
-    }
-  }
-}
-```
-
-| Tool | Arguments | Returns |
-|---|---|---|
-| `list_inboxes` | none | slug, name, verifier, `latest_seq`, `epoch` |
-| `query_messages` | `inbox`, `epoch`, `after` or `before`, `limit`, `types`, `since`, `until`, `verified`, `bodies` | messages (without bodies unless `bodies`), and `next_after` to keep as the cursor |
-| `get_message` | `inbox`, `epoch`, `seq` | one message with its full body |
-| `wait_for_messages` | `inbox`, `epoch`, `after`, `types`, `timeout_seconds`, `limit`, `bodies` | messages after `after`; waits up to 60 s for one |
-
-The tools are read-only. A token sees only the inboxes it was issued for. Messages come without bodies unless you
-ask (`bodies: true`), and a body over 16 KiB is then left out and flagged (`body_truncated`), so neither fills the
-agent's context; `get_message` returns the whole thing. What the sender wrote is under each message's `untrusted`
-key. A raw call:
-
-<!-- exercise -->
 ```sh
-curl -s localhost:8080/mcp -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN" \
-  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_messages","arguments":{"inbox":"github-demo","after":0}}}'
+claude mcp add --transport http hookinlet http://localhost:8080/mcp \
+  --header "Authorization: Bearer $HOOKINLET_AGENT_TOKEN"
 ```
+
+[MCP](docs/mcp.md#connecting-a-client) has the `.mcp.json` form, other clients, and a raw call. The four tools,
+`list_inboxes`, `query_messages`, `get_message`, and `wait_for_messages`, are read-only, and a token sees only the
+inboxes it was issued for. Messages come without bodies unless the agent asks, so they do not fill its context.
+What the sender wrote is under each message's `untrusted` key. [MCP](docs/mcp.md#tools) has the arguments and
+limits.
 
 **REST.** Ask for what came after the last seq you handled. It works from anywhere, including a cron job:
 
@@ -184,19 +93,11 @@ examples/curl/poll.sh github-demo       # Ctrl-C to stop
 ```
 
 **SSE.** Hold a connection open and be told as messages arrive. A client that reconnects with the `Last-Event-ID`
-of the last event it saw gets every later message exactly once:
+of the last event it saw gets every later message exactly once ([the format](docs/api.md#following-an-inbox-live-sse)):
 
 <!-- exercise -->
 ```sh
 curl -sN -m 2 -H "Authorization: Bearer $HOOKINLET_AGENT_TOKEN" 'localhost:8080/v1/inboxes/github-demo/stream?after=0' || [ $? -eq 28 ]   # 28: curl's timeout, which ends this demo
-```
-
-```
-retry: 3000
-
-id: 1
-event: message
-data: {"seq":1,"inbox":"github-demo", …}
 ```
 
 REST, SSE, and MCP use the same cursor.
@@ -211,38 +112,18 @@ REST, SSE, and MCP use the same cursor.
 
 ### Write a client
 
-[`examples/`](examples) has the loop in a few languages, each about a page, standard library only:
-
-| Example | |
-|---|---|
-| [`examples/curl`](examples/curl) | `poll.sh` and `stream.sh`, with `curl` and `jq` |
-| [`examples/python`](examples/python) | `agent.py`, polling or streaming |
-| [`examples/go-agent`](examples/go-agent) | the same in Go |
-| [`examples/relay`](examples/relay) | forwards every message to another URL, with retries, in order |
-| [`examples/custom-hooks`](examples/custom-hooks) | the server embedded in your own program, with a rate limit added |
-
-<!-- exercise -->
-```sh
-python3 examples/python/agent.py github-demo --count 1
-go run ./examples/go-agent -inbox github-demo -n 1
-```
-
-`examples/relay` passes webhooks on to an existing service, at least once and in order. hookinlet keeps no delivery
-queue of its own, and the relay shows how little one takes. [The examples README](examples/README.md#passing-webhooks-on-relay)
-says when it retries and when it skips a message.
-
-It sends the original bytes and headers, so the receiver can still check the sender's signature. Headers that say
-where a request came from are not passed on; the rest are the sender's, so a receiver must not take them on trust.
+[`examples/`](examples/README.md) has the loop in a few languages, each about a page, standard library only:
+clients in `curl` and `jq`, Python, and Go that poll or stream; `relay`, which forwards every message to another URL,
+with retries, in order (hookinlet keeps no delivery queue of its own); and `custom-hooks`, the server embedded in
+your own program with a rate limit added.
 
 ## The console
 
 Open `/admin` on a running server and sign in with the admin token. It does what the command line does, and
 shows what is arriving: the inboxes and their activity, every message (body, headers, exact bytes) with a live
-mode, new inboxes with a form for each kind of sender, secrets, retention, tokens, and backups.
-
-It is built into the binary, follows your system's light or dark theme, and works on a phone.
-`HOOKINLET_ADMIN_UI=false` turns it off. The token stays in the page's memory, and everything a sender wrote is
-shown as text, never as HTML. [Administration](docs/admin.md#the-console) has the rest.
+mode, new inboxes with a form for each kind of sender, secrets, retention, tokens, and backups. It is built into
+the binary, follows your system's light or dark theme, works on a phone, and shows everything a sender wrote as
+text, never as HTML. `HOOKINLET_ADMIN_UI=false` turns it off. [Administration](docs/admin.md#the-console) has the rest.
 
 ![The overview: inboxes, their verifiers and a line of recent activity](docs/images/console-overview.png)
 
@@ -250,43 +131,16 @@ shown as text, never as HTML. [Administration](docs/admin.md#the-console) has th
 
 ## Configuration
 
-Every setting is a flag and a `HOOKINLET_*` environment variable. The flag wins.
+Every setting is a flag and a `HOOKINLET_*` environment variable. The flag wins. Only `HOOKINLET_ADMIN_TOKEN` and
+`HOOKINLET_MASTER_KEY` are required, and a secret may be a file instead (`HOOKINLET_MASTER_KEY_FILE`).
+[Deploying](docs/deploying.md#settings) lists every setting, the health checks, and what a host must provide.
 
-```sh
-HOOKINLET_ADMIN_TOKEN=…             # required, at least 32 characters
-HOOKINLET_MASTER_KEY=…              # required, 32 bytes, base64
-HOOKINLET_LISTEN_ADDR=:8080
-HOOKINLET_DATA_DIR=./data           # one SQLite file; one instance per directory
-HOOKINLET_RETENTION_INTERVAL=1h     # how often retention runs; "off" for never
-HOOKINLET_TRUSTED_PROXIES=10.0.0.0/8   # whose X-Forwarded-For is believed
-HOOKINLET_MASTER_KEY_FILE=/run/secrets/master_key   # a secret may be a file instead (also ADMIN_TOKEN, OLD_MASTER_KEY, VERIFIER_SECRET)
-```
-
-Inboxes live in the database. Create them with the command line or the [admin API](docs/admin.md); retention is
-per inbox, by age, by count, or both:
-
-```sh
-# the verifier secret comes from HOOKINLET_VERIFIER_SECRET, never from a flag
-hookinlet inbox create --slug stripe --verifier stripe --retention-days 30
-hookinlet inbox create --slug github --verifier github --retention-max-count 50000
-```
-
-[Deploying](docs/deploying.md) lists every setting, the health checks, and what a host must provide.
-
-### Signature presets
-
-| `verifier` | Checks |
-|---|---|
-| `stripe` | `Stripe-Signature` (HMAC-SHA256 over the timestamp and body, five minute tolerance) |
-| `github` | `X-Hub-Signature-256` |
-| `slack` | `X-Slack-Signature` and `X-Slack-Request-Timestamp`; the `url_verification` handshake is answered for you |
-| `standardwebhooks` | `webhook-id`, `webhook-timestamp`, `webhook-signature` (Svix and others) |
-| `hmac` | any header you name; sha1, sha256, sha384, or sha512; hex or base64 |
-| `token` | a shared token in a header you name |
-| `none` | nothing: it accepts everything and stores it as **not** verified |
-
-Checks run on the exact bytes that were sent, with constant-time comparisons, before anything is parsed. Details,
-and what each scheme does and does not prove, are in [verifiers](docs/verifiers.md).
+Inboxes live in the database: create them with the command line, the [admin API](docs/admin.md), or
+[a file](docs/admin.md#applying-a-file), each with its own [retention](docs/admin.md#retention) by age, by count,
+or both. Each has a verifier: a preset for Stripe, GitHub, Slack, or Standard Webhooks (Svix and others), an HMAC
+in any header you name, a shared token, or `none`. Checks run on the exact bytes that were sent, with constant-time
+comparisons, before anything is parsed. [Verifiers](docs/verifiers.md#the-presets) says what each one checks and
+what it does and does not prove.
 
 ## What it does and does not do
 
@@ -297,7 +151,7 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
 - **Inboxes as a file.** `hookinlet apply -f inboxes.yaml` creates the inboxes a file declares and changes the ones that
   differ. It never deletes anything. See [applying a file](docs/admin.md#applying-a-file).
 - **Backups while it runs.** `hookinlet backup --out file.db` takes a consistent snapshot.
-- **A console, no users or billing.** The admin API and the command line manage it, and a web console at `/admin` does the same with a browser (below). There is one admin token and no accounts.
+- **A console, no users or billing.** The admin API and the command line manage it, and a web console at `/admin` does the same with a browser (above). There is one admin token and no accounts.
 - **Not a delivery service for third parties.** It guarantees what it stored and its order. What an agent or relay
   does next is yours.
 
@@ -305,6 +159,7 @@ and what each scheme does and does not prove, are in [verifiers](docs/verifiers.
 
 | | |
 |---|---|
+| [**Quickstart**](docs/quickstart.md) | The quickstart step by step, without Docker, and with a real sender |
 | [**Deploying**](docs/deploying.md) | What it needs, every setting, health checks, upgrades, resource use |
 | [**Administration**](docs/admin.md) | Inboxes, tokens, secrets, retention, backups, the command line, and [inboxes declared in a file](docs/admin.md#applying-a-file) |
 | [**API**](docs/api.md) | Ingest, reading, paging, the live stream |
