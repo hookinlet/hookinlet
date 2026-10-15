@@ -53,6 +53,8 @@ delivers at least once and in order, retries a destination that is down with a g
 destination refuses for good (a 400, 410, 413, 415 or 422; other errors, including 401, 403 and 404, are retried) so one bad message cannot hold up the rest, and
 keeps its place in a state file. It does not follow redirects. Messages that were not verified (they failed
 verification, or arrived at an inbox whose verifier is `none`) are not forwarded unless you ask (`-unverified`).
+Schemes that sign a timestamp are checked by the receiver against a five minute window, so a message delivered
+after a long outage may be refused.
 
 <!-- exercise -->
 ```sh
