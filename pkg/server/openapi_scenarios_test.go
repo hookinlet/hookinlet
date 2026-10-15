@@ -280,6 +280,31 @@ func hooksRefuse(t *testing.T, c *contract) {
 		cl.call("ingestPut", "PUT", "/in/agent-a", "x", "")
 		cl.call("ingestWithPath", "POST", "/in/agent-a/p", "x", "")
 		cl.call("ingestPutWithPath", "PUT", "/in/agent-a/p", "x", "")
+
+		// The same refusals, from an Admitter, on reads and streams.
+		a.hooks.mu.Lock()
+		a.hooks.admitErr = fmt.Errorf("%w: test", refusal)
+		a.hooks.mu.Unlock()
+		for _, m := range []string{"GET", "HEAD"} {
+			pre := ""
+			if m == "HEAD" {
+				pre = "head"
+			}
+			id := func(op string) string {
+				if pre == "" {
+					return op
+				}
+				return pre + strings.ToUpper(op[:1]) + op[1:]
+			}
+			cl.call(id("getInbox"), m, "/v1/inboxes/agent-a", nil, a.tokenA)
+			cl.call(id("listMessages"), m, "/v1/inboxes/agent-a/messages", nil, a.tokenA)
+			cl.call(id("getMessage"), m, "/v1/inboxes/agent-a/messages/1", nil, a.tokenA)
+			cl.call(id("getMessageRaw"), m, "/v1/inboxes/agent-a/messages/1/raw", nil, a.tokenA)
+		}
+		cl.call("streamMessages", "GET", "/v1/inboxes/agent-a/stream", nil, a.tokenA)
+		a.hooks.mu.Lock()
+		a.hooks.admitErr = nil
+		a.hooks.mu.Unlock()
 	}
 }
 

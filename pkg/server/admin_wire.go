@@ -27,6 +27,11 @@ func (s *Server) strictServer(impl api.StrictServerInterface) api.ServerInterfac
 			if errors.Is(err, context.Canceled) {
 				return
 			}
+			var ref *admitRefusal
+			if errors.As(err, &ref) {
+				writeError(w, ref.status, ref.code, ref.msg)
+				return
+			}
 			s.log.LogAttrs(r.Context(), slog.LevelError, "response failed", slog.String("err", err.Error()))
 			// If the status is already sent (a download that broke part way), the body
 			// is not whole and the client must be able to tell. A length that was

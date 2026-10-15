@@ -203,7 +203,8 @@ type Server struct {
 	retained   retentionRun   // the last retention run that finished
 	retention  sync.WaitGroup // the scheduled sweep, so Serve can wait for it
 
-	streams      chan struct{} // a slot per open SSE stream
+	streams      chan struct{}  // a slot per open SSE stream
+	admitter     inbox.Admitter // Hooks, if it also admits reads, streams and waits; else nil
 	streamMu     sync.Mutex
 	streamCounts map[inbox.ID]int // open streams per inbox
 	streamShares shares           // streams and waits held per credential (under streamMu)
@@ -327,6 +328,7 @@ func New(opts Options) (*Server, error) {
 		streams:      make(chan struct{}, opts.MaxStreams),
 		ingestBudget: byteBudget{limit: opts.IngestMemoryBudget},
 		streamCounts: make(map[inbox.ID]int),
+		admitter:     admitterOf(opts.Hooks),
 		closeCtx:     closeCtx,
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),

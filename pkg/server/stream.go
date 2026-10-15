@@ -49,21 +49,33 @@ func (e *clientGoneError) Unwrap() error { return e.err }
 // for refusing, or a release function. Anything that holds a connection open for a
 // long time on an inbox's behalf, such as an MCP wait, takes a slot this way, so
 // that one token cannot open an unbounded number of them.
-func (s *Server) takeStream(id inbox.ID, h holder) (release func(), refusal string) {
+//
+// The embedder's Admitter, if any, is asked first (kind says whether this is a stream
+// or a wait). Its refusal comes back as err, an *admitRefusal, and is not the same
+// thing as the server's own limits, which are the refusal string.
+func (s *Server) takeStream(ctx context.Context, p inbox.Principal, in *inbox.Inbox, kind inbox.AccessKind, h holder) (release func(), refusal string, err error) {
+	admitted, err := s.admit(ctx, p, in, kind)
+	if err != nil {
+		return nil, "", err
+	}
+	id := in.ID
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
 	if s.streamCounts[id] >= s.opts.MaxStreamsPerInbox {
-		return nil, "too many streams are open on this inbox; retry shortly"
+		admitted()
+		return nil, "too many streams are open on this inbox; retry shortly", nil
 	}
 	giveBack, err := s.streamShares.acquire(context.Background(), h, s.opts.MaxStreamsPerCredential, 0)
 	if err != nil {
-		return nil, "too many streams are open for this credential; retry shortly"
+		admitted()
+		return nil, "too many streams are open for this credential; retry shortly", nil
 	}
 	select {
 	case s.streams <- struct{}{}:
 	default:
 		giveBack()
-		return nil, "too many streams are open; retry shortly"
+		admitted()
+		return nil, "too many streams are open; retry shortly", nil
 	}
 	s.streamCounts[id]++
 	return func() {
@@ -74,7 +86,8 @@ func (s *Server) takeStream(id inbox.ID, h holder) (release func(), refusal stri
 			delete(s.streamCounts, id)
 		}
 		<-s.streams
-	}, ""
+		admitted()
+	}, "", nil
 }
 
 // stillAllowed returns a check, run periodically, that a stream's credential is
