@@ -410,6 +410,13 @@ both, a message goes if either rule says so. `0` means no limit. Sequence
 numbers are never reused, so an agent's cursor stays valid after messages are
 pruned; it simply finds nothing older.
 
+From the command line (the verifier secret comes from `HOOKINLET_VERIFIER_SECRET`, never from a flag):
+
+```sh
+hookinlet inbox create --slug stripe --verifier stripe --retention-days 30
+hookinlet inbox create --slug github --verifier github --retention-max-count 50000
+```
+
 The server applies every inbox's policy once when it starts (after it is
 listening, so startup is not delayed) and then every
 `HOOKINLET_RETENTION_INTERVAL` (default `1h`, at least `1s`, or `off` to run

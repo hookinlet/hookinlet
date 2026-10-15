@@ -220,6 +220,20 @@ claude mcp add --transport http hookinlet https://hooks.example.com/mcp \
   --header "Authorization: Bearer $HOOKINLET_AGENT_TOKEN"
 ```
 
+or, in a project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "hookinlet": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp",
+      "headers": { "Authorization": "Bearer ${HOOKINLET_AGENT_TOKEN}" }
+    }
+  }
+}
+```
+
 **Clients configured with JSON** (Cursor and others; the exact keys vary, check
 your client's documentation):
 
