@@ -1471,7 +1471,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["TooLarge"];
-            /** @description Refused by an embedder's hook (rate limit). */
+            /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
@@ -1615,7 +1615,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["TooLarge"];
-            /** @description Refused by an embedder's hook (rate limit). */
+            /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
@@ -1760,7 +1760,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["TooLarge"];
-            /** @description Refused by an embedder's hook (rate limit). */
+            /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
@@ -1905,7 +1905,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["TooLarge"];
-            /** @description Refused by an embedder's hook (rate limit). */
+            /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */

@@ -38,7 +38,7 @@ func TestLoadDefaults(t *testing.T) {
 	if c.ListenAddr != ":8080" || c.DataDir != "./data" || c.LogFormat != "json" ||
 		c.LogLevel != slog.LevelInfo || c.SSEHeartbeat != 15*time.Second ||
 		c.SSERecheckInterval != 0 || !c.MCPEnabled || !c.AdminUI || c.MCPInlineBodyBytes != 16384 ||
-		c.RetentionInterval != time.Hour || c.ShutdownTimeout != 10*time.Second {
+		c.RetentionInterval != time.Hour || c.MaxUnverified != 1000 || c.ShutdownTimeout != 10*time.Second {
 		t.Fatalf("unexpected defaults: %+v", c)
 	}
 	if got := c.MasterKey.Reveal(); got != string(bytes.Repeat([]byte{7}, 32)) {
@@ -53,6 +53,17 @@ func TestRetentionIntervalCanBeTurnedOffOrSet(t *testing.T) {
 		c, err := Load(nil, env(e), io.Discard)
 		if err != nil || c.RetentionInterval != want {
 			t.Errorf("%q: interval %v, err %v; want %v", in, c.RetentionInterval, err, want)
+		}
+	}
+}
+
+func TestMaxUnverifiedCanBeSetOrTurnedOff(t *testing.T) {
+	for in, want := range map[string]int{"0": 0, "5": 5, "1000": 1000} {
+		e := validEnv()
+		e["HOOKINLET_MAX_UNVERIFIED"] = in
+		c, err := Load(nil, env(e), io.Discard)
+		if err != nil || c.MaxUnverified != want {
+			t.Errorf("%q: cap %d, err %v; want %d", in, c.MaxUnverified, err, want)
 		}
 	}
 }
@@ -113,6 +124,8 @@ func TestInvalidValues(t *testing.T) {
 		{"bad log level", map[string]string{"HOOKINLET_LOG_LEVEL": "loud"}, "--log-level"},
 		{"retention interval too short", map[string]string{"HOOKINLET_RETENTION_INTERVAL": "1ns"}, "at least 1s"},
 		{"retention interval zero", map[string]string{"HOOKINLET_RETENTION_INTERVAL": "0"}, "retention-interval"},
+		{"negative unverified cap", map[string]string{"HOOKINLET_MAX_UNVERIFIED": "-1"}, "--max-unverified"},
+		{"unverified cap not a number", map[string]string{"HOOKINLET_MAX_UNVERIFIED": "many"}, "--max-unverified"},
 		{"bad bool", map[string]string{"HOOKINLET_MCP_ENABLED": "maybe"}, "--mcp-enabled"},
 		{"bad body bytes", map[string]string{"HOOKINLET_MCP_INLINE_BODY_BYTES": "0"}, "--mcp-inline-body-bytes"},
 		{"body bytes above the REST inline size", map[string]string{"HOOKINLET_MCP_INLINE_BODY_BYTES": "65537"}, "--mcp-inline-body-bytes"},

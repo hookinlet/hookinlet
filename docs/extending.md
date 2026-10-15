@@ -20,6 +20,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
 | `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
+| `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
@@ -170,7 +171,10 @@ func TestMyStore(t *testing.T) {
 
 The suite closes each Store itself. If your Store can take backups, add
 `inboxtest.BackupperSuite(t, newStore, restore)`, where `restore` opens a Store
-from a snapshot's bytes.
+from a snapshot's bytes. If it can count unverified messages cheaply (reading no
+more rows than the limit), implement `inbox.UnverifiedCounter` and add
+`inboxtest.UnverifiedCounterSuite(t, newStore)`; the server then caps the unverified
+messages an inbox keeps (see [verifiers](verifiers.md#unverified-messages-are-capped)).
 
 ## Writing a Notifier
 

@@ -209,6 +209,7 @@ lists them all.
 | `HOOKINLET_ADMIN_UI` | `true` | Serve the admin console at `/admin`, on the same listener as the admin API. It needs the admin API on (`HOOKINLET_ADMIN_ENABLED`). |
 | `HOOKINLET_MCP_INLINE_BODY_BYTES` | `16384` | Largest body MCP tools return inline (at most 65536). |
 | `HOOKINLET_INGEST_MEMORY_BUDGET` | `268435456` | Most bytes of request bodies held in memory at once by deliveries being received; more get 503. `0` turns the bound off. |
+| `HOOKINLET_MAX_UNVERIFIED` | `1000` | Most unverified messages one inbox keeps (`on_verify_fail=store`, or the verifier `none`). A delivery over it gets `429` and is not stored; verified deliveries are never refused for it. `0` turns the cap off. See [verifiers](verifiers.md#unverified-messages-are-capped). |
 | `HOOKINLET_DRAIN_DELAY` | `0` | After being told to stop, keep serving for this long with `/readyz` at 503, so a load balancer takes the instance out of rotation first. |
 | `HOOKINLET_RETENTION_INTERVAL` | `1h` | How often retention runs; `off` for never. |
 | `HOOKINLET_SHUTDOWN_TIMEOUT` | `10s` | How long shutdown waits. |

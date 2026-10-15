@@ -82,7 +82,8 @@ above); `the server is shutting down` (it was told to stop and is draining).
 | `413` | The body is over the inbox's `max_body_bytes` (1 MiB default, 10 MiB most). | Raise it with `hookinlet inbox update SLUG --max-body-bytes N`. |
 | `503 overloaded` | Too many deliveries are being received at once. | The sender should retry (most do). Raise `HOOKINLET_INGEST_MEMORY_BUDGET` if it is routine. |
 | `503 storage_full` | No room to store it; not acknowledged. | Free disk, or set retention (run it with `hookinlet retention run`; if the volume is at 0 bytes free even that fails, so free some space outside hookinlet first). The sender should retry. |
-| `429`, `402`, `403` | A hook an embedder installed refused it. | Ask whoever runs the server. |
+| `429 rate_limited` on an inbox that stores unverified messages | The inbox holds as many unverified messages as `HOOKINLET_MAX_UNVERIFIED` allows (1000 by default), and this delivery did not verify. Verified deliveries still get in. | Fix the signature or secret so deliveries verify; set `retention_days` on the inbox so old unverified messages age out; or raise the cap. |
+| `429`, `402`, `403` | Otherwise, a hook an embedder installed refused it. | Ask whoever runs the server. |
 
 A delivery to an inbox whose verifier is `none` is stored, but never marked `verified`.
 

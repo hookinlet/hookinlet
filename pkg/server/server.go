@@ -173,9 +173,24 @@ type Options struct {
 	// Defaults to one hour; a negative value turns the schedule off (the admin
 	// API can still run a sweep).
 	RetentionInterval time.Duration
+	// MaxUnverified is the most unverified messages (those stored with
+	// on_verify_fail=store, or accepted by a verifier of "none") one inbox keeps. A
+	// delivery that would be unverified and would take the inbox over this is refused
+	// with 429 and not stored; verified deliveries are never refused for it, and no
+	// stored message is evicted for it. Retention (retention_days, or
+	// retention_max_count) frees room again. Zero means DefaultMaxUnverified and a
+	// negative value turns the cap off. It applies only if the Store implements
+	// inbox.UnverifiedCounter (the built-in SQLite store does).
+	MaxUnverified int
 	// Version is reported to MCP clients as the server's version. Defaults to "dev".
 	Version string
 }
+
+// DefaultMaxUnverified is the default for Options.MaxUnverified. It leaves room
+// to debug a sender whose signatures fail, and is small beside the retention
+// counts that matter, so that a flood of unverified messages cannot crowd out the
+// verified ones.
+const DefaultMaxUnverified = 1000
 
 // Server is the hookinlet HTTP server.
 type Server struct {
@@ -191,6 +206,9 @@ type Server struct {
 	metrics      metrics
 	draining     atomic.Bool // set when the server is told to stop: /readyz fails
 	ingestBudget byteBudget  // body bytes held by deliveries being received
+
+	unverified   inbox.UnverifiedCounter // nil when the cap is off or the Store cannot count
+	unverifiedMu sync.Mutex              // held from counting unverified messages to storing one
 
 	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
 	mux        *http.ServeMux
@@ -305,6 +323,9 @@ func New(opts Options) (*Server, error) {
 	if opts.RetentionInterval == 0 {
 		opts.RetentionInterval = time.Hour
 	}
+	if opts.MaxUnverified == 0 {
+		opts.MaxUnverified = DefaultMaxUnverified
+	}
 	if opts.Version == "" {
 		opts.Version = "dev"
 	}
@@ -332,6 +353,11 @@ func New(opts Options) (*Server, error) {
 		closeCtx:     closeCtx,
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),
+	}
+	if uc, ok := opts.Store.(inbox.UnverifiedCounter); ok && opts.MaxUnverified > 0 {
+		s.unverified = uc
+	} else if opts.MaxUnverified > 0 {
+		opts.Logger.Warn("the Store cannot count unverified messages, so they are not capped; see inbox.UnverifiedCounter")
 	}
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now, Log: opts.Logger, GuardClock: realClock}
 	if err := s.checkMCPTools(); err != nil {

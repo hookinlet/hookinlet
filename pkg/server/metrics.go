@@ -60,6 +60,8 @@ func deliveryResult(res ingestResult) string {
 		return "stored"
 	case res.status == 401:
 		return "verification_failed"
+	case res.status == 429 && res.code == codeUnverifiedLimit:
+		return "unverified_limit"
 	case res.status == 402 || res.status == 403 || res.status == 429:
 		return "refused_by_hook"
 	case res.status == 404:

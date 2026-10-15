@@ -64,3 +64,13 @@ func TestNoArgsAndUnknownCommand(t *testing.T) {
 		t.Errorf("unknown: code %d, stderr %q", code, stderr)
 	}
 }
+
+// The setting says 0 for "no cap", and the server option says negative: a cap of 0
+// passed through unchanged would be the server's default, not no cap.
+func TestUnverifiedCapMapsZeroToOff(t *testing.T) {
+	for in, want := range map[int]int{0: -1, 1: 1, 1000: 1000} {
+		if got := unverifiedCap(in); got != want {
+			t.Errorf("unverifiedCap(%d) = %d, want %d", in, got, want)
+		}
+	}
+}

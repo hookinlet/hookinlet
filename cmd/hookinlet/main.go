@@ -263,6 +263,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		RetentionInterval:       cfg.RetentionInterval,
 		MCPInlineBodyBytes:      cfg.MCPInlineBodyBytes,
 		IngestMemoryBudget:      ingestBudget(cfg.IngestMemoryBudget),
+		MaxUnverified:           unverifiedCap(cfg.MaxUnverified),
 		DrainDelay:              cfg.DrainDelay,
 		TrustedProxies:          cfg.TrustedProxies,
 	})
@@ -279,6 +280,15 @@ func newLogger(w io.Writer, cfg *config.Config) *slog.Logger {
 		return slog.New(slog.NewTextHandler(w, opts))
 	}
 	return slog.New(slog.NewJSONHandler(w, opts))
+}
+
+// unverifiedCap maps the setting, where 0 turns the cap off, to the server option,
+// where 0 means the default and a negative number turns it off.
+func unverifiedCap(n int) int {
+	if n == 0 {
+		return -1
+	}
+	return n
 }
 
 // ingestBudget maps the setting, where 0 means no bound, to the server option,
