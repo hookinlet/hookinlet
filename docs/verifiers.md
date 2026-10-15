@@ -211,6 +211,8 @@ verified messages out.
 - The count and the append are made under one lock, so concurrent deliveries
   cannot overshoot the cap in one server. With several servers on one shared
   database it is approximate.
+- An embedder can set the cap per inbox (for instance by plan) with Hooks that
+  implement the optional `inbox.UnverifiedLimiter` ([extending](extending.md)).
 - The built-in SQLite store supports the cap. A Store from elsewhere has to
   implement the optional `inbox.UnverifiedCounter`; without it the server logs a
   warning at start and does not cap ([extending](extending.md)).

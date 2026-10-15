@@ -6,6 +6,11 @@ applies.
 
 ## Unreleased
 
+- **Added `inbox.UnverifiedLimiter`**, an optional interface of `Hooks` (found by type assertion, so `Hooks` is
+  unchanged). A `Hooks` that implements it sets the cap on unverified messages per inbox, in place of
+  `Options.MaxUnverified` (positive: the cap; 0: the server's limit; negative: no cap for that inbox). The default
+  does nothing.
+
 **An inbox now keeps at most 1000 unverified messages.** With `on_verify_fail=store`, or an inbox whose
 verifier is `none`, anyone who knows an ingest key could fill an inbox with unverified messages, and
 under `retention_max_count` they pushed the genuine ones out. Now a delivery that would be stored unverified,

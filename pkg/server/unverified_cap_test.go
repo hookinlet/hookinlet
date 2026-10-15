@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -164,4 +165,86 @@ func TestTheCapRefusalHasItsOwnMetricLabel(t *testing.T) {
 	if got := deliveryResult(refuse(http.StatusTooManyRequests, "rate_limited", "x")); got != "refused_by_hook" {
 		t.Errorf("label %q", got)
 	}
+}
+
+// planHooks is a Hooks that also decides, per inbox, how many unverified messages
+// it may keep: what an embedder with plans does.
+type planHooks struct {
+	*recHooks
+	limits map[string]int // by slug; absent means 0
+	asked  []string
+}
+
+func (p *planHooks) MaxUnverified(_ context.Context, in *inbox.Inbox) int {
+	p.asked = append(p.asked, in.Slug)
+	return p.limits[in.Slug]
+}
+
+func TestAnEmbedderSetsTheUnverifiedCapPerInbox(t *testing.T) {
+	hooks := func(o *Options, limits map[string]int) *planHooks {
+		p := &planHooks{recHooks: &recHooks{}, limits: limits}
+		o.Hooks = p
+		return p
+	}
+	fill := func(e *env, slug string, n int) (ok int) {
+		for range n {
+			if e.post("/in/"+slug, `{}`).Code == http.StatusOK {
+				ok++
+			}
+		}
+		return ok
+	}
+
+	t.Run("each inbox gets its own limit, and 0 means the server's", func(t *testing.T) {
+		var p *planHooks
+		e := newEnv(t, func(o *Options) {
+			o.MaxUnverified = 4
+			p = hooks(o, map[string]int{"small": 1, "large": 6})
+		})
+		e.newInbox("small", "none", "")
+		e.newInbox("large", "none", "")
+		e.newInbox("plain", "none", "")
+		if got := fill(e, "small", 10); got != 1 {
+			t.Errorf("small kept %d, want 1", got)
+		}
+		if got := fill(e, "large", 10); got != 6 {
+			t.Errorf("large kept %d, want 6 (more than the server's 4)", got)
+		}
+		if got := fill(e, "plain", 10); got != 4 {
+			t.Errorf("plain kept %d, want the server's 4", got)
+		}
+		if len(p.asked) == 0 {
+			t.Error("the limiter was never asked")
+		}
+	})
+
+	t.Run("a negative limit leaves that inbox uncapped", func(t *testing.T) {
+		e := newEnv(t, func(o *Options) { o.MaxUnverified = 2; hooks(o, map[string]int{"free": -1}) })
+		e.newInbox("free", "none", "")
+		if got := fill(e, "free", 6); got != 6 {
+			t.Errorf("kept %d, want 6", got)
+		}
+	})
+
+	t.Run("it can cap an inbox when the server's cap is off", func(t *testing.T) {
+		e := newEnv(t, func(o *Options) { o.MaxUnverified = -1; hooks(o, map[string]int{"paid": 3}) })
+		e.newInbox("paid", "none", "")
+		e.newInbox("other", "none", "")
+		if got := fill(e, "paid", 6); got != 3 {
+			t.Errorf("paid kept %d, want 3", got)
+		}
+		if got := fill(e, "other", 6); got != 6 {
+			t.Errorf("other kept %d, want 6", got)
+		}
+	})
+
+	t.Run("it is not asked about verified deliveries", func(t *testing.T) {
+		var p *planHooks
+		e := newEnv(t, func(o *Options) { p = hooks(o, map[string]int{"verified-only": 1}) })
+		e.newInbox("verified-only", "trusted", "")
+		fill(e, "verified-only", 3)
+		if len(p.asked) != 0 {
+			t.Errorf("asked %d times for verified deliveries", len(p.asked))
+		}
+	})
 }
