@@ -14,10 +14,10 @@
 [What it does and does not do](#what-it-does-and-does-not-do) · [Documentation](#documentation) ·
 [hookinlet Cloud](#hookinlet-cloud) · [Status](#status) · [License](#license)
 
-Your agent needs to know when Stripe, GitHub, or Slack says something, but it cannot hold a public URL and it must
-not trust what arrives. hookinlet is that URL: a single Go binary that receives webhooks into named inboxes,
-verifies their signatures, and keeps a queryable history. Agents read it three ways, REST, an SSE stream, or an
-MCP endpoint, using a per-inbox sequence number as the cursor. SQLite by default; runs anywhere.
+hookinlet gives your agent a public URL for webhooks. It is a single Go binary that takes deliveries from Stripe,
+GitHub or Slack into named inboxes, checks their signatures, and keeps a queryable history. Agents read it three
+ways, REST, an SSE stream, or an MCP endpoint, using a per-inbox sequence number as the cursor. SQLite by default;
+runs anywhere.
 
 ## How it works
 
