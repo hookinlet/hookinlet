@@ -6,7 +6,11 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"net/http"
 	"time"
+
+	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
 // errBusy means no read slot came free within ReadWaitTimeout.
@@ -15,12 +19,17 @@ var errBusy = errors.New("server: too many reads in progress")
 // holdSlot is readSlot for a handler whose answer is built in memory: the slot is kept
 // until the answer has been written to the client (or ResponseTimeout has passed), not
 // until the handler returns, so that the slots bound the answers in memory.
-func (s *Server) holdSlot(ctx context.Context) (release func(), err error) {
-	release, err = s.readSlot(ctx)
+func (s *Server) holdSlot(ctx context.Context, p inbox.Principal, in *inbox.Inbox) (release func(), err error) {
+	admitted, err := s.admit(ctx, p, in, inbox.AccessRead)
 	if err != nil {
 		return nil, err
 	}
-	return s.adopt(ctx, release), nil
+	slot, err := s.readSlot(ctx)
+	if err != nil {
+		admitted()
+		return nil, err
+	}
+	return s.adopt(ctx, func() { slot(); admitted() }), nil
 }
 
 // adopt hands a slot that is already held to the request, to be kept until its answer
@@ -80,4 +89,52 @@ func (s *Server) globalReadSlot(ctx context.Context, wait time.Duration) (releas
 	case <-timer.C:
 		return nil, errBusy
 	}
+}
+
+// admitterOf is the hooks' Admitter, or nil if they do not admit anything.
+func admitterOf(h inbox.Hooks) inbox.Admitter {
+	a, _ := h.(inbox.Admitter)
+	return a
+}
+
+// admitRefusal is an access the embedder's Admitter refused. It carries what the
+// caller is told: an HTTP response, or an MCP tool error.
+type admitRefusal struct {
+	status    int
+	code, msg string
+}
+
+func (e *admitRefusal) Error() string { return e.code + ": " + e.msg }
+
+// admit asks the Admitter, if there is one, whether the caller may make an access of
+// this kind, before it takes a slot. It returns what to call when the access ends,
+// never nil. A refusal is an *admitRefusal; any other error is the Admitter's own
+// failure, already logged. in is nil for an access that is not to one inbox.
+func (s *Server) admit(ctx context.Context, p inbox.Principal, in *inbox.Inbox, kind inbox.AccessKind) (release func(), err error) {
+	if s.admitter == nil {
+		return func() {}, nil
+	}
+	release, err = s.admitter.Admit(ctx, p, in, kind)
+	if err != nil {
+		var ref *admitRefusal
+		switch {
+		case errors.Is(err, inbox.ErrRateLimited):
+			ref = &admitRefusal{http.StatusTooManyRequests, "rate_limited", "too many requests"}
+		case errors.Is(err, inbox.ErrQuotaExceeded):
+			ref = &admitRefusal{http.StatusPaymentRequired, "quota_exceeded", "a limit on this access has been reached"}
+		case errors.Is(err, inbox.ErrForbidden):
+			ref = &admitRefusal{http.StatusForbidden, "forbidden", "this access is not allowed"}
+		default:
+			s.log.LogAttrs(ctx, slog.LevelError, "admit hook failed",
+				slog.String("kind", string(kind)), slog.String("err", err.Error()))
+			return nil, err
+		}
+		s.log.LogAttrs(ctx, slog.LevelInfo, "access refused by hook",
+			slog.String("kind", string(kind)), slog.String("reason", err.Error()))
+		return nil, ref
+	}
+	if release == nil {
+		release = func() {}
+	}
+	return release, nil
 }

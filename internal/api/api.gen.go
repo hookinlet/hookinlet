@@ -979,6 +979,15 @@ type Slug = string
 // TokenId defines model for TokenId.
 type TokenId = int
 
+// AccessForbidden defines model for AccessForbidden.
+type AccessForbidden = ErrorForbidden
+
+// AccessQuotaExceeded defines model for AccessQuotaExceeded.
+type AccessQuotaExceeded = ErrorQuotaExceeded
+
+// AccessRateLimited defines model for AccessRateLimited.
+type AccessRateLimited = ErrorRateLimited
+
 // BadRequest defines model for BadRequest.
 type BadRequest = ErrorBadRequest
 
@@ -2641,6 +2650,33 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/inboxes/{slug}/stream", wrapper.StreamMessages)
 
 	return m
+}
+
+type AccessForbiddenResponseHeaders struct {
+	XRequestId string
+}
+type AccessForbiddenJSONResponse struct {
+	Body ErrorForbidden
+
+	Headers AccessForbiddenResponseHeaders
+}
+
+type AccessQuotaExceededResponseHeaders struct {
+	XRequestId string
+}
+type AccessQuotaExceededJSONResponse struct {
+	Body ErrorQuotaExceeded
+
+	Headers AccessQuotaExceededResponseHeaders
+}
+
+type AccessRateLimitedResponseHeaders struct {
+	XRequestId string
+}
+type AccessRateLimitedJSONResponse struct {
+	Body ErrorRateLimited
+
+	Headers AccessRateLimitedResponseHeaders
 }
 
 type BadRequestResponseHeaders struct {
@@ -7123,6 +7159,40 @@ func (response GetInbox401JSONResponse) VisitGetInboxResponse(w http.ResponseWri
 	return err
 }
 
+type GetInbox402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response GetInbox402JSONResponse) VisitGetInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInbox403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response GetInbox403JSONResponse) VisitGetInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetInbox404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response GetInbox404JSONResponse) VisitGetInboxResponse(w http.ResponseWriter) error {
@@ -7152,6 +7222,22 @@ func (response GetInbox405JSONResponse) VisitGetInboxResponse(w http.ResponseWri
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInbox429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response GetInbox429JSONResponse) VisitGetInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7285,6 +7371,40 @@ func (response HeadGetInbox401Response) VisitHeadGetInboxResponse(w http.Respons
 	return nil
 }
 
+type HeadGetInbox402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response HeadGetInbox402JSONResponse) VisitHeadGetInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadGetInbox403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response HeadGetInbox403JSONResponse) VisitHeadGetInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type HeadGetInbox404ResponseHeaders struct {
 	XRequestId string
 }
@@ -7313,6 +7433,22 @@ func (response HeadGetInbox405Response) VisitHeadGetInboxResponse(w http.Respons
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(405)
 	return nil
+}
+
+type HeadGetInbox429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response HeadGetInbox429JSONResponse) VisitHeadGetInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type HeadGetInbox500ResponseHeaders struct {
@@ -7454,6 +7590,40 @@ func (response ListMessages401JSONResponse) VisitListMessagesResponse(w http.Res
 	return err
 }
 
+type ListMessages402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response ListMessages402JSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMessages403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response ListMessages403JSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMessages404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response ListMessages404JSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
@@ -7499,6 +7669,22 @@ func (response ListMessages409JSONResponse) VisitListMessagesResponse(w http.Res
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMessages429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response ListMessages429JSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7633,6 +7819,40 @@ func (response HeadListMessages401Response) VisitHeadListMessagesResponse(w http
 	return nil
 }
 
+type HeadListMessages402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response HeadListMessages402JSONResponse) VisitHeadListMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadListMessages403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response HeadListMessages403JSONResponse) VisitHeadListMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type HeadListMessages404ResponseHeaders struct {
 	XRequestId string
 }
@@ -7675,6 +7895,22 @@ func (response HeadListMessages409Response) VisitHeadListMessagesResponse(w http
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(409)
 	return nil
+}
+
+type HeadListMessages429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response HeadListMessages429JSONResponse) VisitHeadListMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type HeadListMessages500ResponseHeaders struct {
@@ -7817,6 +8053,40 @@ func (response GetMessage401JSONResponse) VisitGetMessageResponse(w http.Respons
 	return err
 }
 
+type GetMessage402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response GetMessage402JSONResponse) VisitGetMessageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMessage403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response GetMessage403JSONResponse) VisitGetMessageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetMessage404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response GetMessage404JSONResponse) VisitGetMessageResponse(w http.ResponseWriter) error {
@@ -7862,6 +8132,22 @@ func (response GetMessage409JSONResponse) VisitGetMessageResponse(w http.Respons
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMessage429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response GetMessage429JSONResponse) VisitGetMessageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7997,6 +8283,40 @@ func (response HeadGetMessage401Response) VisitHeadGetMessageResponse(w http.Res
 	return nil
 }
 
+type HeadGetMessage402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response HeadGetMessage402JSONResponse) VisitHeadGetMessageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadGetMessage403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response HeadGetMessage403JSONResponse) VisitHeadGetMessageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type HeadGetMessage404ResponseHeaders struct {
 	XRequestId string
 }
@@ -8039,6 +8359,22 @@ func (response HeadGetMessage409Response) VisitHeadGetMessageResponse(w http.Res
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(409)
 	return nil
+}
+
+type HeadGetMessage429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response HeadGetMessage429JSONResponse) VisitHeadGetMessageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type HeadGetMessage500ResponseHeaders struct {
@@ -8195,6 +8531,40 @@ func (response GetMessageRaw401JSONResponse) VisitGetMessageRawResponse(w http.R
 	return err
 }
 
+type GetMessageRaw402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response GetMessageRaw402JSONResponse) VisitGetMessageRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMessageRaw403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response GetMessageRaw403JSONResponse) VisitGetMessageRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetMessageRaw404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response GetMessageRaw404JSONResponse) VisitGetMessageRawResponse(w http.ResponseWriter) error {
@@ -8240,6 +8610,22 @@ func (response GetMessageRaw409JSONResponse) VisitGetMessageRawResponse(w http.R
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMessageRaw429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response GetMessageRaw429JSONResponse) VisitGetMessageRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8385,6 +8771,40 @@ func (response HeadGetMessageRaw401Response) VisitHeadGetMessageRawResponse(w ht
 	return nil
 }
 
+type HeadGetMessageRaw402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response HeadGetMessageRaw402JSONResponse) VisitHeadGetMessageRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HeadGetMessageRaw403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response HeadGetMessageRaw403JSONResponse) VisitHeadGetMessageRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type HeadGetMessageRaw404ResponseHeaders struct {
 	XRequestId string
 }
@@ -8427,6 +8847,22 @@ func (response HeadGetMessageRaw409Response) VisitHeadGetMessageRawResponse(w ht
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	w.WriteHeader(409)
 	return nil
+}
+
+type HeadGetMessageRaw429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response HeadGetMessageRaw429JSONResponse) VisitHeadGetMessageRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type HeadGetMessageRaw500ResponseHeaders struct {
@@ -8594,6 +9030,40 @@ func (response StreamMessages401JSONResponse) VisitStreamMessagesResponse(w http
 	return err
 }
 
+type StreamMessages402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response StreamMessages402JSONResponse) VisitStreamMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StreamMessages403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response StreamMessages403JSONResponse) VisitStreamMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StreamMessages404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response StreamMessages404JSONResponse) VisitStreamMessagesResponse(w http.ResponseWriter) error {
@@ -8639,6 +9109,22 @@ func (response StreamMessages409JSONResponse) VisitStreamMessagesResponse(w http
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StreamMessages429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response StreamMessages429JSONResponse) VisitStreamMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }

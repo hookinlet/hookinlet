@@ -18,12 +18,13 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Authenticator`, `Principal` | Says who a request is and what it may read or administer. | `pkg/auth/token` | `AuthenticatorSuite` |
 | `SecretBox` | Seals and opens verifier secrets, bound to a context: seal a verifier secret with `inbox.VerifierSecretContext(slug)`, or the server cannot open it. | `pkg/secretbox` | `SecretBoxSuite` |
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
+| `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they
-are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`.
+are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, and `Hooks` without `Admitter` admits every read, stream and wait. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
 
 ## Putting them together
 
@@ -99,6 +100,34 @@ and its context may be cancelled as soon as the response is sent, so work that
 outlives the call needs `context.WithoutCancel`. A panic in it is logged and
 swallowed: the delivery is already stored, and the sender must not be told it
 failed.
+
+
+### Admitting reads, streams and waits
+
+`Hooks` covers ingest. To limit what a caller may read, also implement `inbox.Admitter`
+on the same value; the server finds it with a type assertion, so `Hooks` itself does
+not change.
+
+```go
+func (l *limiter) Admit(ctx context.Context, p inbox.Principal, in *inbox.Inbox, kind inbox.AccessKind) (func(), error) {
+	if !l.take(p, kind) {
+		return nil, fmt.Errorf("%w: too many %ss", inbox.ErrQuotaExceeded, kind) // 402
+	}
+	return func() { l.give(p, kind) }, nil
+}
+```
+
+`Admit` runs once per access, after the caller is authenticated and may read the inbox,
+and before the access takes a slot of the server's own, so a refusal costs nothing.
+`kind` is `AccessRead` (a read that answers at once, including the MCP query, get and
+list tools and a wait with a timeout of zero; `in` is nil for the list tool),
+`AccessStream` (an SSE stream) or `AccessWait` (an MCP wait). Refuse with an error
+wrapping `ErrRateLimited` (429), `ErrQuotaExceeded` (402) or `ErrForbidden` (403); over
+MCP the agent is told the same in words. Any other error is a 500. The release
+function, which may be nil, is called once when the access ends: for a read, when the
+answer has been written (or, for a read that is not held that long, when the handler
+returns); for a stream or wait, when it ends. The server's own limits apply after
+`Admit` whatever it answers. `inboxtest.AdmitterSuite` checks an implementation.
 
 ## Writing a Store
 

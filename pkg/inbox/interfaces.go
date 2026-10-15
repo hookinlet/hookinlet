@@ -289,7 +289,10 @@ type Principal interface {
 //
 // InboxIDs must be exactly the IDs of the inboxes CanReadInbox accepts. A
 // Principal that can read an unbounded set, or that can use the admin API, must not
-// implement it.
+// implement it. A set that is finite but large, such as every inbox of a group of
+// callers, is not unbounded: a Principal may implement it with that set, resolved
+// when the request is authenticated, provided it is exactly the set CanReadInbox
+// accepts. Keep it small enough to hold in memory for each request.
 type ScopedPrincipal interface {
 	Principal
 	// InboxIDs lists the inboxes the principal is limited to.
@@ -331,6 +334,44 @@ type Hooks interface {
 	// soon as the HTTP response is sent; work that outlives the call must use
 	// context.WithoutCancel.
 	AfterIngest(ctx context.Context, in *Inbox, m *Message, created bool)
+}
+
+// AccessKind says what kind of access to an inbox Admitter.Admit is asked about.
+type AccessKind string
+
+const (
+	// AccessRead is a read that answers at once and holds a read slot while it
+	// does: listing or fetching messages, inbox info, and the MCP query, get and
+	// list tools (and a wait with a timeout of zero). For the MCP list tool the
+	// inbox is nil, because the call is not about one inbox.
+	AccessRead AccessKind = "read"
+	// AccessStream is a stream (server-sent events) that stays open until the
+	// client leaves. It is released when the stream ends.
+	AccessStream AccessKind = "stream"
+	// AccessWait is an MCP wait, which holds a connection open for up to a minute
+	// to wait for messages. It is released when the wait ends.
+	AccessWait AccessKind = "wait"
+)
+
+// Admitter is an optional capability of Hooks, found by type assertion: a Hooks
+// that also implements it is asked before every read, stream and wait. Hooks
+// itself does not change, and a Hooks without it admits everything, which is the
+// open-source default.
+//
+// It is how an embedder limits what a caller may use at once (streams, waits,
+// reads in flight) by something the server does not know, such as who the caller
+// is part of. The server's own limits (MaxConcurrentReads, MaxStreams,
+// MaxStreamsPerInbox) apply as well, whatever Admit says.
+type Admitter interface {
+	// Admit runs after the caller has been authenticated and allowed to read the
+	// inbox, and before the access takes a slot of the server's own. It may refuse
+	// by returning an error wrapping ErrRateLimited (429), ErrQuotaExceeded (402)
+	// or ErrForbidden (403); any other error is an internal failure (500). It
+	// returns a release function, which may be nil, called once when the access
+	// ends (when the answer has been written, or the stream or wait has finished),
+	// including when the access fails later. in is nil only where AccessKind says
+	// so. Admit must not block for long: a read waits on it before any slot is held.
+	Admit(ctx context.Context, p Principal, in *Inbox, kind AccessKind) (release func(), err error)
 }
 
 // SecretBox seals secrets for storage at rest.

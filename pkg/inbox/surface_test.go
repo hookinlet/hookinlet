@@ -14,7 +14,7 @@ import (
 
 // These interfaces are implemented outside this module, so a method added to one
 // breaks every implementation. A new capability is a new interface that an
-// implementation may also satisfy, found with a type assertion (see Backupper and
+// implementation may also satisfy, found with a type assertion (see Admitter, Backupper and
 // ScopedPrincipal and docs/stability.md). This test fails when a method set changes,
 // so that the change is a decision and not an accident; before 1.0 a decision to
 // change one is allowed, and goes in CHANGELOG.md, and this list is updated with it.
@@ -58,6 +58,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 			"Subscribe(context.Context, inbox.ID) (<-chan struct {}, func())",
 		},
 		// The optional interfaces are part of the surface too.
+		"Admitter":        {"Admit(context.Context, inbox.Principal, *inbox.Inbox, inbox.AccessKind) (func(), error)"},
 		"Backupper":       {"Backup(context.Context) (io.ReadCloser, int64, error)"},
 		"ScopedPrincipal": {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "InboxIDs() []inbox.ID"},
 		"Verifier":        {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
@@ -69,6 +70,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"Authenticator":   reflect.TypeFor[inbox.Authenticator](),
 		"Principal":       reflect.TypeFor[inbox.Principal](),
 		"Notifier":        reflect.TypeFor[inbox.Notifier](),
+		"Admitter":        reflect.TypeFor[inbox.Admitter](),
 		"Backupper":       reflect.TypeFor[inbox.Backupper](),
 		"ScopedPrincipal": reflect.TypeFor[inbox.ScopedPrincipal](),
 		"Verifier":        reflect.TypeFor[verify.Verifier](),

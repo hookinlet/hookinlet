@@ -1116,6 +1116,63 @@ export interface components {
                 "application/json": components["schemas"]["ErrorEpochChanged"];
             };
         };
+        /** @description Refused by an embedder's hook (rate limit). The server itself never answers this; it is for a deployment that limits what a caller may read, stream or wait for. */
+        AccessRateLimited: {
+            headers: {
+                /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                "X-Request-Id": string;
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "rate_limited",
+                 *         "message": "too many requests"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorRateLimited"];
+            };
+        };
+        /** @description Refused by an embedder's hook (quota). The server itself never answers this. */
+        AccessQuotaExceeded: {
+            headers: {
+                /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                "X-Request-Id": string;
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "quota_exceeded",
+                 *         "message": "a limit on this access has been reached"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorQuotaExceeded"];
+            };
+        };
+        /** @description Refused by an embedder's hook. The server itself never answers this. */
+        AccessForbidden: {
+            headers: {
+                /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                "X-Request-Id": string;
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "forbidden",
+                 *         "message": "this access is not allowed"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorForbidden"];
+            };
+        };
     };
     parameters: {
         /** @description The inbox's slug. */
@@ -1908,8 +1965,11 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["AccessRateLimited"];
             500: components["responses"]["Internal"];
             503: components["responses"]["Overloaded"];
             /** @description Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text. */
@@ -1966,6 +2026,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             /** @description No such resource, or one the credential may not see. The two are indistinguishable. */
             404: {
                 headers: {
@@ -1986,6 +2048,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["AccessRateLimited"];
             /** @description A fault on the server's side. Nothing about the cause is revealed. */
             500: {
                 headers: {
@@ -2066,9 +2129,12 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             409: components["responses"]["EpochChanged"];
+            429: components["responses"]["AccessRateLimited"];
             500: components["responses"]["Internal"];
             503: components["responses"]["Overloaded"];
             /** @description Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text. */
@@ -2146,6 +2212,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             /** @description No such resource, or one the credential may not see. The two are indistinguishable. */
             404: {
                 headers: {
@@ -2175,6 +2243,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["AccessRateLimited"];
             /** @description A fault on the server's side. Nothing about the cause is revealed. */
             500: {
                 headers: {
@@ -2239,9 +2308,12 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             409: components["responses"]["EpochChanged"];
+            429: components["responses"]["AccessRateLimited"];
             500: components["responses"]["Internal"];
             503: components["responses"]["Overloaded"];
             /** @description Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text. */
@@ -2303,6 +2375,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             /** @description No such resource, or one the credential may not see. The two are indistinguishable. */
             404: {
                 headers: {
@@ -2332,6 +2406,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["AccessRateLimited"];
             /** @description A fault on the server's side. Nothing about the cause is revealed. */
             500: {
                 headers: {
@@ -2401,9 +2476,12 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             409: components["responses"]["EpochChanged"];
+            429: components["responses"]["AccessRateLimited"];
             500: components["responses"]["Internal"];
             503: components["responses"]["Overloaded"];
             /** @description Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text. */
@@ -2470,6 +2548,8 @@ export interface operations {
                 };
                 content?: never;
             };
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             /** @description No such resource, or one the credential may not see. The two are indistinguishable. */
             404: {
                 headers: {
@@ -2499,6 +2579,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            429: components["responses"]["AccessRateLimited"];
             /** @description A fault on the server's side. Nothing about the cause is revealed. */
             500: {
                 headers: {
@@ -2577,9 +2658,12 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             409: components["responses"]["EpochChanged"];
+            429: components["responses"]["AccessRateLimited"];
             500: components["responses"]["Internal"];
             503: components["responses"]["Overloaded"];
             /** @description Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text. */

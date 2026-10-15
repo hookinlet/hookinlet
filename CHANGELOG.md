@@ -17,6 +17,12 @@ applies.
   30 seconds until a check can be made.
 - The soak driver waits for a follower that is still catching up, instead of judging it after three
   minutes.
+- **Added `inbox.Admitter`**, an optional interface of `Hooks` (found by type assertion, so `Hooks` is unchanged),
+  and `inbox.AccessKind` (`AccessRead`, `AccessStream`, `AccessWait`). A `Hooks` that implements it is asked, per
+  caller and inbox, before every read, stream and MCP wait, and can refuse with `ErrRateLimited`, `ErrQuotaExceeded`
+  or `ErrForbidden` or hold something until the access ends. The default does nothing. `inboxtest.AdmitterSuite`
+  checks an implementation. `docs/openapi.json` now lists `402`, `403` and `429` (never sent by the default
+  server) on the read and stream operations. `ScopedPrincipal`'s documentation now says a large finite set is allowed.
 
 ## 0.1.1 - 2026-10-13
 
