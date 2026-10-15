@@ -20,7 +20,8 @@ defineProps<{ inboxes: Inbox[]; loadingLines?: boolean }>()
         <small class="mono muted">{{ i.ingest_path }}</small>
       </span>
       <span role="cell" class="pills">
-        <span class="pill acc">{{ i.verifier }}</span>
+        <span v-if="i.verifier === 'none'" class="pill warn" title="Anyone with the ingest URL can post anything; every message is stored as not verified">none (unverified)</span>
+        <span v-else class="pill acc">{{ i.verifier }}</span>
         <span v-if="!i.has_verifier_secret && i.verifier !== 'none'" class="pill warn" title="Deliveries fail until a secret is set">no secret</span>
       </span>
       <span role="cell" class="right num">{{ compact(i.last_seq) }}</span>

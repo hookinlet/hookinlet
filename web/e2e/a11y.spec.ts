@@ -24,6 +24,7 @@ async function goTo(page: Page, path: string, ready: Locator) {
 
 test('every screen passes axe in the dark and light themes, and on a phone', async ({ page, request }) => {
   const { ingestUrl } = await makeInbox(request, 'a11y-demo')
+  await makeInbox(request, 'a11y-open', { verifier: 'none', verifier_secret: undefined }) // checks nothing: the warning states
   await deliver(request, ingestUrl, { a: 1, note: 'hello' }, 'ping')
   await signIn(page, '/admin/')
 
@@ -36,6 +37,8 @@ test('every screen passes axe in the dark and light themes, and on a phone', asy
     ['/admin/inboxes/a11y-demo', page.getByRole('button', { name: /#1 ping/ })],
     ['/admin/inboxes/a11y-demo/messages/1', page.getByText('Everything below was written by the sender')],
     ['/admin/inboxes/a11y-demo/settings', page.getByRole('heading', { name: 'General' })],
+    ['/admin/inboxes/a11y-open', page.getByRole('note').filter({ hasText: 'Verification is off' })],
+    ['/admin/inboxes/a11y-open/settings', page.getByRole('note').filter({ hasText: 'Verification is off' })],
     ['/admin/nothing-here', page.getByRole('heading', { name: 'Not found' })],
   ]
 

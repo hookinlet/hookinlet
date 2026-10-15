@@ -163,3 +163,35 @@ test('direction-changing characters in a body, a path and headers are shown as c
   const html = await page.getByRole('main').innerHTML()
   expect(html).not.toContain('‮') // none of the raw characters reached the page
 })
+
+test('an inbox that checks nothing says so in the list, on its page, in its settings and when it is made', async ({ page, request }) => {
+  await makeInbox(request, 'checked-gh')
+
+  // Made in the console: the form warns while None is chosen, and the created panel says it again.
+  await signIn(page, '/admin/new')
+  await page.getByLabel('Slug').fill('open-none')
+  await expect(page.getByRole('note').filter({ hasText: 'Verification is off' })).toHaveCount(0)
+  await page.getByText('None', { exact: true }).click()
+  await expect(page.getByRole('note').filter({ hasText: 'Verification is off' })).toBeVisible()
+  await page.getByRole('button', { name: 'Create inbox' }).click()
+  await expect(page.getByText('Created: open-none')).toBeVisible()
+  await expect(page.getByRole('note').filter({ hasText: 'does not verify senders' })).toBeVisible()
+
+  // Its page: a warning pill and a note that links to the settings, where the form warns too.
+  await page.getByRole('link', { name: 'Open the inbox' }).click()
+  await expect(page.getByText('none (unverified)')).toBeVisible()
+  await expect(page.getByRole('note').filter({ hasText: 'Verification is off' })).toBeVisible()
+  await page.getByRole('link', { name: 'Choose a verifier' }).click()
+  await expect(page.getByRole('heading', { name: 'General' })).toBeVisible()
+  await expect(page.getByRole('note').filter({ hasText: 'Verification is off' })).toBeVisible()
+
+  // The list marks that inbox and not the verified one.
+  await signIn(page, '/admin/inboxes')
+  await expect(page.getByRole('row', { name: /open-none/ })).toContainText('none (unverified)')
+  await expect(page.getByRole('row', { name: /checked-gh/ })).not.toContainText('unverified')
+
+  // A verified inbox has no warning on its page.
+  await signIn(page, '/admin/inboxes/checked-gh')
+  await expect(page.getByRole('heading', { name: 'checked-gh' })).toBeVisible()
+  await expect(page.getByRole('note').filter({ hasText: 'Verification is off' })).toHaveCount(0)
+})
