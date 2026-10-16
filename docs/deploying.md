@@ -107,7 +107,7 @@ notarized: one downloaded through a browser is quarantined, and
   the database. **Lose the master key and every stored verifier secret is
   unreadable**; keep it with your backups, and never in the data directory.
   Prefer environment variables: flags show up in process listings. Each secret is
-  sealed with a short id of the key and with its inbox's slug, so the server can tell a
+  sealed with a short id of the key and bound to its inbox, so the server can tell a
   wrong key from damage: **it refuses to start** when a stored secret does not open
   with the key it was given (and says which inboxes, and what to do), and `/readyz`
   fails if that becomes true later. To change the key on purpose, stop the server and
@@ -263,8 +263,8 @@ Send `SIGTERM` or `SIGINT`. With `HOOKINLET_DRAIN_DELAY` set, it first reports i
 - `GET /healthz` answers `200` while the process is up.
 - `GET /readyz` answers `200` when the server can do its work, and `503` when it
   cannot: the database is unreachable, the volume it is on has under 32 MiB free
-  (or the last write failed for lack of room), none of the stored verifier secrets opens
-  with the master key (one inbox whose secret does not open is logged and fails
+  (or the last write failed for lack of room), none of the verifier secrets it tries opens
+  with the master key (it tries up to 25, so the check costs the same however many inboxes there are; one inbox whose secret does not open is logged and fails
   its own deliveries, but does not take the server out of rotation), or the server has been told to stop and is
   [draining](#stopping). Use it for readiness, and `/healthz` for liveness.
 

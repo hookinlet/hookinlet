@@ -54,8 +54,8 @@ func (a *healthAPI) HeadReadyz(ctx context.Context, _ api.HeadReadyzRequestObjec
 }
 
 // notReady says why the server is not ready, or returns "". The Store has to
-// answer, and the stored verifier secrets have to open with the master key: a
-// server whose key is not the one its data was sealed under accepts every
+// answer, and a sample of the stored verifier secrets has to open with the master
+// key: a server whose key is not the one its data was sealed under accepts every
 // delivery and fails every one that needs a secret.
 func (s *Server) notReady(ctx context.Context) string {
 	if s.draining.Load() {
@@ -84,6 +84,14 @@ func (s *Server) notReady(ctx context.Context) string {
 // verifier secret does not open with the server's master key.
 var ErrUnreadableSecrets = admin.ErrUnreadableSecrets
 
+// What readiness opens: it needs to tell a master key that opens nothing from one
+// that is right, which any few secrets show, not to check every inbox's. The scan
+// bound is for a store in which few inboxes have a secret.
+const (
+	readySecretSample = 25
+	readySecretScan   = 5000
+)
+
 const (
 	secretsGood    = 30 * time.Second // how long a clean check is believed
 	secretsBad     = 5 * time.Second  // and one that found a wrong key: it may have been fixed
@@ -96,6 +104,9 @@ const (
 // unreadable, and only an answer about the secrets is remembered, never a failure
 // to ask.
 func (s *Server) secretsOK(ctx context.Context) error {
+	if s.opts.SkipReadinessSecretCheck {
+		return nil
+	}
 	s.secretsMu.Lock()
 	defer s.secretsMu.Unlock()
 	now := time.Now()
@@ -110,7 +121,7 @@ func (s *Server) secretsOK(ctx context.Context) error {
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), secretsTimeout)
 	defer cancel()
-	r, err := s.adm.CheckSecrets(cctx)
+	r, err := s.adm.SampleSecrets(cctx, readySecretSample, readySecretScan)
 	if err != nil {
 		return err // could not look: say so, and look again next time
 	}
