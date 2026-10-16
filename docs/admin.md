@@ -104,7 +104,7 @@ curl -s -X POST "$BASE/v1/admin/inboxes" \
 `slug` (3 to 64 characters from `a-z`, `0-9`, and `-`; it never changes) and
 `verifier` are required. There is no default verifier: say how deliveries are
 checked, or `none` to accept anything unchecked (stored as **not** verified). The
-other fields are `ingest_key`, `name`, `verifier_config`, `verifier_secret`, `on_verify_fail` (`reject` or `store`),
+other fields are `ingest_key`, `name`, `verifier_config`, `verifier_secret`, `on_verify_fail` (`reject`, the default, or `store`; see [what a failed delivery gets](verifiers.md#when-verification-fails)),
 `max_body_bytes` (default 1 MiB, at most 10 MiB), `retention_days`,
 `retention_max_count`, and `event_type_pointer`. The verifier and its
 configuration are checked when you save them, so a typo is an error now and not

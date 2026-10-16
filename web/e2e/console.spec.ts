@@ -195,3 +195,29 @@ test('an inbox that checks nothing says so in the list, on its page, in its sett
   await expect(page.getByRole('heading', { name: 'checked-gh' })).toBeVisible()
   await expect(page.getByRole('note').filter({ hasText: 'Verification is off' })).toHaveCount(0)
 })
+
+test('the choice for a failed verification names the default and what each option does, and goes away for none', async ({ page, request }) => {
+  await makeInbox(request, 'fail-choice')
+
+  // New inbox: refuse is selected and called the default; keeping says the sender gets a 200 and the cap applies.
+  await signIn(page, '/admin/new')
+  const group = page.getByRole('group', { name: 'When verification fails' })
+  const refuse = group.getByRole('radio', { name: /Refuse it: the sender gets a 401 and nothing is stored/ })
+  const keep = group.getByRole('radio', { name: /Keep it, marked not verified: the sender gets a 200/ })
+  await expect(refuse).toBeChecked()
+  await expect(group).toContainText('(default)')
+  await expect(page.getByText('limited number of unverified messages')).toHaveCount(0)
+  await keep.check()
+  await expect(page.getByText('limited number of unverified messages')).toBeVisible()
+  await refuse.check()
+
+  // With the verifier none nothing is checked, so the choice is replaced by a line that says so.
+  await page.getByText('None', { exact: true }).click()
+  await expect(group).toHaveCount(0)
+  await expect(page.getByText('checks nothing, so no delivery fails')).toBeVisible()
+
+  // Settings: the same wording, with the stored choice selected.
+  await signIn(page, '/admin/inboxes/fail-choice/settings')
+  const settings = page.getByRole('group', { name: 'When verification fails' })
+  await expect(settings.getByRole('radio', { name: /Refuse it: the sender gets a 401/ })).toBeChecked()
+})

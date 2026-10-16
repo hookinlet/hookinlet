@@ -6,7 +6,16 @@ applies.
 
 ## Unreleased
 
-Nothing yet.
+- **The console no longer says that keeping a failed delivery refuses it.** The choice "When a signature fails"
+  offered "Refuse it, but keep a copy marked as failed", but with `on_verify_fail=store` the sender is not refused:
+  it gets a `200`, so it stops retrying, and the message is stored marked not verified. The choice is now
+  "When verification fails" with two options that say what each does ("Refuse it: the sender gets a 401 and
+  nothing is stored (default)" and "Keep it, marked not verified: the sender gets a 200 and stops retrying"),
+  a note that an inbox keeps a limited number of unverified messages, and, for an inbox whose verifier is
+  `none`, a line saying that nothing is checked in place of the choice.
+- **The default is stated where it was missing.** `on_verify_fail` defaults to `reject`; the administration
+  guide, the verifiers guide, the `hookinlet inbox create` and `inbox update` help, and the OpenAPI document
+  (which now describes the field, and marks the default on creating an inbox) say so.
 
 ## 0.1.3 - 2026-10-15
 

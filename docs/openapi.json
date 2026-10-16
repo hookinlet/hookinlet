@@ -4912,7 +4912,8 @@
             "enum": [
               "reject",
               "store"
-            ]
+            ],
+            "description": "What happens to a delivery that fails verification: `reject` answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. It has no effect with the verifier `none`, which accepts everything and stores it as not verified."
           },
           "max_body_bytes": {
             "type": "integer"
@@ -4998,7 +4999,9 @@
             "enum": [
               "reject",
               "store"
-            ]
+            ],
+            "default": "reject",
+            "description": "What happens to a delivery that fails verification. `reject` (the default) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. An inbox keeps at most `HOOKINLET_MAX_UNVERIFIED` unverified messages (1000 by default), and a delivery over that is answered 429. It has no effect with the verifier `none`, which accepts everything and stores it as not verified."
           },
           "max_body_bytes": {
             "type": "integer",
@@ -5052,7 +5055,8 @@
             "enum": [
               "reject",
               "store"
-            ]
+            ],
+            "description": "What happens to a delivery that fails verification: `reject` (the default for a new inbox) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. Omitted, it is left alone."
           },
           "max_body_bytes": {
             "type": "integer",
