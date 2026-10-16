@@ -401,8 +401,10 @@ type Admin struct {
 	MaxBodyBytes int     `json:"max_body_bytes"`
 
 	// MessageCount Present only in `GET /v1/admin/inboxes/{slug}`, not in lists or in the answers to changes.
-	MessageCount      *int                   `json:"message_count,omitempty"`
-	Name              string                 `json:"name"`
+	MessageCount *int   `json:"message_count,omitempty"`
+	Name         string `json:"name"`
+
+	// OnVerifyFail What happens to a delivery that fails verification: `reject` answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. It has no effect with the verifier `none`, which accepts everything and stores it as not verified.
 	OnVerifyFail      AdminOnVerifyFail      `json:"on_verify_fail"`
 	RetentionDays     int                    `json:"retention_days"`
 	RetentionMaxCount int                    `json:"retention_max_count"`
@@ -418,7 +420,7 @@ type Admin struct {
 	Warnings *[]string `json:"warnings,omitempty"`
 }
 
-// AdminOnVerifyFail defines model for Admin.OnVerifyFail.
+// AdminOnVerifyFail What happens to a delivery that fails verification: `reject` answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. It has no effect with the verifier `none`, which accepts everything and stores it as not verified.
 type AdminOnVerifyFail string
 
 // AdminList defines model for AdminList.
@@ -460,8 +462,10 @@ type CreateInbox struct {
 	IngestKey *string `json:"ingest_key,omitempty"`
 
 	// MaxBodyBytes `0` means the default, 1 MiB.
-	MaxBodyBytes      *int                     `json:"max_body_bytes,omitempty"`
-	Name              *string                  `json:"name,omitempty"`
+	MaxBodyBytes *int    `json:"max_body_bytes,omitempty"`
+	Name         *string `json:"name,omitempty"`
+
+	// OnVerifyFail What happens to a delivery that fails verification. `reject` (the default) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. An inbox keeps at most `HOOKINLET_MAX_UNVERIFIED` unverified messages (1000 by default), and a delivery over that is answered 429. It has no effect with the verifier `none`, which accepts everything and stores it as not verified.
 	OnVerifyFail      *CreateInboxOnVerifyFail `json:"on_verify_fail,omitempty"`
 	RetentionDays     *int                     `json:"retention_days,omitempty"`
 	RetentionMaxCount *int                     `json:"retention_max_count,omitempty"`
@@ -479,7 +483,7 @@ type CreateInbox struct {
 	VerifierSecret *string `json:"verifier_secret,omitempty"`
 }
 
-// CreateInboxOnVerifyFail defines model for CreateInbox.OnVerifyFail.
+// CreateInboxOnVerifyFail What happens to a delivery that fails verification. `reject` (the default) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. An inbox keeps at most `HOOKINLET_MAX_UNVERIFIED` unverified messages (1000 by default), and a delivery over that is answered 429. It has no effect with the verifier `none`, which accepts everything and stores it as not verified.
 type CreateInboxOnVerifyFail string
 
 // CreateToken defines model for CreateToken.
@@ -906,8 +910,10 @@ type PatchInbox struct {
 	EventTypePointer *string `json:"event_type_pointer,omitempty"`
 
 	// MaxBodyBytes `0` means the default, 1 MiB.
-	MaxBodyBytes      *int                    `json:"max_body_bytes,omitempty"`
-	Name              *string                 `json:"name,omitempty"`
+	MaxBodyBytes *int    `json:"max_body_bytes,omitempty"`
+	Name         *string `json:"name,omitempty"`
+
+	// OnVerifyFail What happens to a delivery that fails verification: `reject` (the default for a new inbox) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. Omitted, it is left alone.
 	OnVerifyFail      *PatchInboxOnVerifyFail `json:"on_verify_fail,omitempty"`
 	RetentionDays     *int                    `json:"retention_days,omitempty"`
 	RetentionMaxCount *int                    `json:"retention_max_count,omitempty"`
@@ -919,7 +925,7 @@ type PatchInbox struct {
 	VerifierConfig *map[string]interface{} `json:"verifier_config,omitempty"`
 }
 
-// PatchInboxOnVerifyFail defines model for PatchInbox.OnVerifyFail.
+// PatchInboxOnVerifyFail What happens to a delivery that fails verification: `reject` (the default for a new inbox) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. Omitted, it is left alone.
 type PatchInboxOnVerifyFail string
 
 // SetSecret defines model for SetSecret.

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { ApiError, createInbox, type CreateInbox, type InboxCreated } from '../api/client'
 import CopyField from '../components/CopyField.vue'
+import OnVerifyFail from '../components/OnVerifyFail.vue'
 import RetentionFields from '../components/RetentionFields.vue'
 import VerifierFields from '../components/VerifierFields.vue'
 import { href, link, navigate } from '../router'
@@ -107,11 +108,7 @@ const curl = computed(() =>
 
     <RetentionFields v-model:days="days" v-model:count="count" id-prefix="new" />
 
-    <fieldset class="field">
-      <legend class="label">When a signature fails</legend>
-      <label class="radio"><input v-model="onFail" type="radio" value="reject" /> Refuse the delivery (the sender sees an error)</label>
-      <label class="radio"><input v-model="onFail" type="radio" value="store" /> Refuse it, but keep a copy marked as failed</label>
-    </fieldset>
+    <OnVerifyFail v-model="onFail" :verifier="verifier" id-prefix="new" />
 
     <details class="more">
       <summary>More settings</summary>

@@ -12,7 +12,7 @@ Each inbox has:
 | `verifier` | Which scheme to use (the table below). |
 | `verifier_config` | Non-secret parameters, as a JSON object. Unknown keys are an error, so a typo is caught instead of silently ignored. |
 | verifier secret | The shared secret. Stored encrypted with the master key; never returned by any API. |
-| `on_verify_fail` | What to do with a delivery that fails: `reject` (answer 401, store nothing) or `store` (keep it, marked unverified). |
+| `on_verify_fail` | What to do with a delivery that fails: `reject` (the default: answer 401, store nothing) or `store` (keep it, marked unverified, and answer 200). See [When verification fails](#when-verification-fails). |
 
 ## The presets
 

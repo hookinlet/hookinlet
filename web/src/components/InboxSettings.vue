@@ -5,6 +5,7 @@ import { guard } from '../session'
 import { inboxes } from '../store'
 import { mergeConfig, buildConfig, missing, presetOf, sameConfig, valuesOf } from '../verifiers'
 import CopyField from './CopyField.vue'
+import OnVerifyFail from './OnVerifyFail.vue'
 import RetentionFields from './RetentionFields.vue'
 import VerifierFields from './VerifierFields.vue'
 
@@ -177,11 +178,7 @@ async function remove() {
         <p class="muted help">0 means the default, 1 MiB.</p>
       </div>
       <RetentionFields v-model:days="days" v-model:count="count" id-prefix="s" />
-      <fieldset class="field">
-        <legend class="label">When a signature fails</legend>
-        <label class="radio"><input v-model="onFail" type="radio" value="reject" /> Refuse the delivery</label>
-        <label class="radio"><input v-model="onFail" type="radio" value="store" /> Refuse it, but keep a copy marked as failed</label>
-      </fieldset>
+      <OnVerifyFail v-model="onFail" :verifier="verifier" id-prefix="s" />
 
       <h2>Verification</h2>
       <VerifierFields v-if="known" v-model:verifier="verifier" v-model:values="values" :with-secret="false" id-prefix="s" />

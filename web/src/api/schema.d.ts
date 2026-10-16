@@ -674,7 +674,10 @@ export interface components {
             verifier: string;
             verifier_config: Record<string, never>;
             has_verifier_secret: boolean;
-            /** @enum {string} */
+            /**
+             * @description What happens to a delivery that fails verification: `reject` answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. It has no effect with the verifier `none`, which accepts everything and stores it as not verified.
+             * @enum {string}
+             */
             on_verify_fail: "reject" | "store";
             max_body_bytes: number;
             retention_days: number;
@@ -704,8 +707,12 @@ export interface components {
             verifier_config?: Record<string, never>;
             /** @description Sealed with the master key before it is stored; never returned. */
             verifier_secret?: string;
-            /** @enum {string} */
-            on_verify_fail?: "reject" | "store";
+            /**
+             * @description What happens to a delivery that fails verification. `reject` (the default) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. An inbox keeps at most `HOOKINLET_MAX_UNVERIFIED` unverified messages (1000 by default), and a delivery over that is answered 429. It has no effect with the verifier `none`, which accepts everything and stores it as not verified.
+             * @default reject
+             * @enum {string}
+             */
+            on_verify_fail: "reject" | "store";
             /** @description `0` means the default, 1 MiB. */
             max_body_bytes?: number;
             retention_days?: number;
@@ -722,7 +729,10 @@ export interface components {
             verifier?: string;
             /** @description Non-secret parameters; unknown keys are an error. See docs/verifiers.md. */
             verifier_config?: Record<string, never>;
-            /** @enum {string} */
+            /**
+             * @description What happens to a delivery that fails verification: `reject` (the default for a new inbox) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. Omitted, it is left alone.
+             * @enum {string}
+             */
             on_verify_fail?: "reject" | "store";
             /** @description `0` means the default, 1 MiB. */
             max_body_bytes?: number;
