@@ -188,6 +188,13 @@ func streamEnv(t *testing.T, mods ...func(*Options)) (*agentEnv, string, *local.
 // streamEnvOn is streamEnv served on a listener made with lc.
 func streamEnvOn(t *testing.T, lc net.ListenConfig, mods ...func(*Options)) (*agentEnv, string, *local.Notifier) {
 	t.Helper()
+	ae, n := streamEnvUnserved(t, mods...)
+	return ae, serveOnWith(t, ae.env, lc), n
+}
+
+// streamEnvUnserved is streamEnv before it is served, for a test that serves it itself.
+func streamEnvUnserved(t *testing.T, mods ...func(*Options)) (*agentEnv, *local.Notifier) {
+	t.Helper()
 	n := local.New()
 	all := append([]func(*Options){func(o *Options) { o.Notifier = n }}, mods...)
 	e := newAgentEnv2(t, all...)
@@ -197,7 +204,7 @@ func streamEnvOn(t *testing.T, lc net.ListenConfig, mods ...func(*Options)) (*ag
 	b := e.newInbox("agent-b", "trusted", "")
 	ae.b = b
 	ae.tokenB = e.tokenFor(b)
-	return ae, serveOnWith(t, ae.env, lc), n
+	return ae, n
 }
 
 // ---- format and basics ----
