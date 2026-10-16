@@ -77,14 +77,37 @@ func sample(slugs []string) string {
 // CheckSecrets opens every stored verifier secret, to find out before a delivery
 // does whether the master key is the one they were sealed under.
 func (s *Service) CheckSecrets(ctx context.Context) (SecretReport, error) {
+	return s.checkSecrets(ctx, 0, 0)
+}
+
+// SampleSecrets is CheckSecrets for a question asked often: it opens at most
+// maxSecrets secrets and looks at no more than maxInboxes inboxes (the oldest
+// first), so its cost does not grow with the size of the store. A master key that
+// opens nothing shows in any sample of secrets; one inbox whose secret is damaged
+// may not, and CheckSecrets is what finds it.
+func (s *Service) SampleSecrets(ctx context.Context, maxSecrets, maxInboxes int) (SecretReport, error) {
+	return s.checkSecrets(ctx, maxSecrets, maxInboxes)
+}
+
+// checkSecrets is CheckSecrets with bounds, where zero means no bound.
+func (s *Service) checkSecrets(ctx context.Context, maxSecrets, maxInboxes int) (SecretReport, error) {
 	var r SecretReport
 	var after inbox.ID
+	scanned := 0
 	for {
-		page, err := s.Store.ListInboxes(ctx, inbox.ListParams{AfterID: after, Limit: inbox.MaxListLimit})
+		limit := inbox.MaxListLimit // a page never takes more than the sample may look at
+		if maxInboxes > 0 && maxInboxes-scanned < limit {
+			limit = maxInboxes - scanned
+		}
+		page, err := s.Store.ListInboxes(ctx, inbox.ListParams{AfterID: after, Limit: limit})
 		if err != nil {
 			return r, err
 		}
 		for _, in := range page {
+			if maxSecrets > 0 && r.Checked >= maxSecrets {
+				return r, nil
+			}
+			scanned++
 			after = in.ID
 			if len(in.VerifierSecret) == 0 {
 				continue
@@ -107,7 +130,7 @@ func (s *Service) CheckSecrets(ctx context.Context) (SecretReport, error) {
 				r.Damaged = append(r.Damaged, in.Slug)
 			}
 		}
-		if len(page) < inbox.MaxListLimit {
+		if len(page) < limit || (maxSecrets > 0 && r.Checked >= maxSecrets) || (maxInboxes > 0 && scanned >= maxInboxes) {
 			return r, nil
 		}
 	}

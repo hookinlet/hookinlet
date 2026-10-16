@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -145,5 +146,79 @@ func TestReadyzStaysUpWhenOnlyOneInboxHasASecretThatDoesNotOpen(t *testing.T) {
 	}
 	if rec := e.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
 		t.Errorf("/readyz with one unreadable secret among readable ones: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// openCounter counts how many secrets are opened.
+type openCounter struct {
+	inbox.SecretBox
+	n int
+}
+
+func (c *openCounter) Open(ct, context []byte) ([]byte, error) {
+	c.n++
+	return c.SecretBox.Open(ct, context)
+}
+
+// Readiness answers whether the master key is right, which a few secrets show, so what
+// it costs does not grow with the number of inboxes.
+func TestReadyzOpensOnlyASampleOfTheSecrets(t *testing.T) {
+	e := newEnv(t)
+	for i := range 3 * readySecretSample {
+		e.newInbox(fmt.Sprintf("sealed-%03d", i), "github", "a-secret")
+	}
+	counter := &openCounter{SecretBox: e.box}
+	e.server.adm.Box = counter
+	if rec := e.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
+		t.Fatalf("/readyz: %d %s", rec.Code, rec.Body)
+	}
+	if counter.n != readySecretSample {
+		t.Errorf("readiness opened %d secrets of %d, want %d", counter.n, 3*readySecretSample, readySecretSample)
+	}
+	// Starting still checks them all.
+	counter.n = 0
+	if err := e.server.CheckSecrets(t.Context()); err != nil || counter.n != 3*readySecretSample {
+		t.Errorf("CheckSecrets opened %d secrets (%v), want all %d", counter.n, err, 3*readySecretSample)
+	}
+}
+
+// A wrong key shows in the sample, however many inboxes there are.
+func TestReadyzSeesAWrongKeyInTheSample(t *testing.T) {
+	e := newEnv(t)
+	for i := range 3 * readySecretSample {
+		e.newInbox(fmt.Sprintf("sealed-%03d", i), "github", "a-secret")
+	}
+	other := newEnv(t, func(o *Options) {
+		o.SecretBox, _ = secretbox.New(bytes.Repeat([]byte{77}, secretbox.KeySize))
+		o.Store = e.store
+	})
+	if rec := other.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/readyz with another key: %d", rec.Code)
+	}
+}
+
+// An embedder whose SecretBox goes to a key service has its own check of that, and can
+// keep readiness from opening anything.
+func TestReadyzCanSkipTheSecretsCheck(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.SkipReadinessSecretCheck = true })
+	e.newInbox("sealed", "github", "a-secret")
+	counter := &openCounter{SecretBox: e.box}
+	e.server.adm.Box = counter
+	for range 3 {
+		if rec := e.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
+			t.Fatalf("/readyz: %d %s", rec.Code, rec.Body)
+		}
+	}
+	if counter.n != 0 {
+		t.Errorf("readiness opened %d secrets with the check skipped", counter.n)
+	}
+	// Not even a wrong key is looked for, and the Store still has to answer.
+	wrong := newEnv(t, func(o *Options) {
+		o.SkipReadinessSecretCheck = true
+		o.SecretBox, _ = secretbox.New(bytes.Repeat([]byte{77}, secretbox.KeySize))
+		o.Store = e.store
+	})
+	if rec := wrong.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
+		t.Errorf("/readyz with the check skipped and another key: %d", rec.Code)
 	}
 }

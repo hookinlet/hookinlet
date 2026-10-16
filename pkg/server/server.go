@@ -183,6 +183,14 @@ type Options struct {
 	// inbox.UnverifiedCounter (the built-in SQLite store does). Hooks that
 	// implement inbox.UnverifiedLimiter can set it per inbox instead.
 	MaxUnverified int
+	// SkipReadinessSecretCheck stops /readyz from opening any stored verifier secret.
+	// By default readiness opens a bounded sample of them, to catch a master key that
+	// is not the one the data was sealed under, which costs a few Store reads and
+	// SecretBox opens every half minute. Set it when the SecretBox is not a local
+	// key (opening goes to a key service, and has its own health check), or the Store
+	// is large enough that even a sample is unwelcome. cmd/hookinlet's start-up check,
+	// Server.CheckSecrets, is separate and always opens everything.
+	SkipReadinessSecretCheck bool
 	// Version is reported to MCP clients as the server's version. Defaults to "dev".
 	Version string
 }

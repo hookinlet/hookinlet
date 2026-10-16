@@ -256,3 +256,21 @@ func TestRekeyDoesNotOverwriteAnEditMadeWhileItRan(t *testing.T) {
 		t.Errorf("the edit was overwritten: verifier %q, secret of %d bytes", in.Verifier, len(in.VerifierSecret))
 	}
 }
+
+func TestSampleSecretsStopsAtItsBounds(t *testing.T) {
+	svc, _ := secretService(t) // alpha, bravo, charlie have secrets, then plain has none
+	for _, c := range []struct {
+		secrets, inboxes int
+		want             int
+	}{{2, 0, 2}, {0, 1, 1}, {0, 2, 2}, {100, 100, 3}, {0, 0, 3}} {
+		r, err := svc.SampleSecrets(t.Context(), c.secrets, c.inboxes)
+		if err != nil || r.Checked != c.want || !r.OK() {
+			t.Errorf("SampleSecrets(%d, %d) checked %d (%v, %v), want %d", c.secrets, c.inboxes, r.Checked, r.OK(), err, c.want)
+		}
+	}
+	// A wrong key shows in a sample just as it does in the whole.
+	wrong := &admin.Service{Store: svc.Store, Box: boxOf(t, 2)}
+	if r, _ := wrong.SampleSecrets(t.Context(), 1, 0); !r.Systemic() {
+		t.Errorf("a sample under the wrong key: %+v", r)
+	}
+}
