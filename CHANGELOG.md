@@ -6,7 +6,27 @@ applies.
 
 ## Unreleased
 
-Nothing yet.
+This will be 0.2.0. It changes how a stored secret is bound to its inbox and changes some Go interfaces under
+`pkg/`, because nothing depends on either yet; see **Upgrading** for what an existing data directory needs.
+
+**Breaking**
+
+- **A verifier secret is sealed to the inbox's UID, not its slug.** Every inbox has a new `UID`: 128 random bits,
+  made when the inbox is created and never changed. `inbox.VerifierSecretContext` takes it, so a secret sealed for
+  one inbox does not open on another, including a later inbox that was given the same slug (which the slug could
+  not prevent) and, in a store that holds several organizations' inboxes, one with the same slug in another
+  organization. `Inbox.UID` is set by `CreateInbox` when the caller leaves it empty; a caller that must seal
+  something to the inbox before the row exists chooses it (`inbox.NewUID`). `UpdateInbox` ignores it, and a
+  restore from a backup keeps it, so that what was sealed still opens. The conformance suite (`pkg/inboxtest`)
+  checks all of this for any `Store`.
+
+**Upgrading**
+
+- The migration gives each existing inbox a UID. A verifier secret that is already stored was sealed to the slug,
+  and the migration cannot seal it again because it does not have the master key, so such a secret no longer
+  opens. The server names those inboxes and refuses to start; set each secret again with
+  `hookinlet inbox set-secret SLUG --secret-stdin`. There is no way back to 0.1.x on a migrated data directory
+  except the copy the migration keeps.
 
 ## 0.1.4 - 2026-10-16
 

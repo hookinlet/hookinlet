@@ -59,7 +59,9 @@ the stream, MCP and the CLI. The admin API also shows a numeric `id`, which is t
 order in which inboxes were created, is never reused within a database (a database restored from an older backup hands out
 the ids it had then again), and is what the admin list's `after` cursor counts. Do not build on it beyond that: it is an internal key, and an
 embedder's Store may hand out another kind. Tokens have a numeric `id` for the same
-reason (to revoke one, and to page through them). An **ingest key** is not an
+reason (to revoke one, and to page through them). The Go type `inbox.Inbox` also has a
+**UID**, which never changes and is never shared with another inbox: it is what a stored
+secret is sealed to, it is not secret, and no API shows it. An **ingest key** is not an
 identifier but a capability: treat it like a password for senders.
 
 ## The command line
