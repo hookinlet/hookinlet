@@ -62,7 +62,7 @@ func (r SecretReport) Err() error {
 		parts = append(parts, fmt.Sprintf("%d inbox(es) have a secret sealed under a different master key (%s)", len(r.WrongKey), sample(r.WrongKey)))
 	}
 	if len(r.Damaged) > 0 {
-		parts = append(parts, fmt.Sprintf("%d inbox(es) have a secret that does not open (%s): it is damaged, or was sealed by an older release under a different master key", len(r.Damaged), sample(r.Damaged)))
+		parts = append(parts, fmt.Sprintf("%d inbox(es) have a secret that does not open (%s): it is damaged, or was sealed by a release before 0.2.0, which bound secrets to the inbox's slug and not its UID (set it again)", len(r.Damaged), sample(r.Damaged)))
 	}
 	return fmt.Errorf("%w: %s", ErrUnreadableSecrets, strings.Join(parts, "; "))
 }
@@ -97,7 +97,7 @@ func (s *Service) CheckSecrets(ctx context.Context) (SecretReport, error) {
 			if secretbox.Legacy(in.VerifierSecret) {
 				r.Legacy++
 			}
-			pt, err := s.Box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.Slug))
+			pt, err := s.Box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
 			clear(pt)
 			switch {
 			case err == nil:
@@ -155,7 +155,7 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 			if len(in.VerifierSecret) == 0 {
 				continue
 			}
-			ctxb := inbox.VerifierSecretContext(in.Slug)
+			ctxb := inbox.VerifierSecretContext(in.UID)
 			if pt, err := s.Box.Open(in.VerifierSecret, ctxb); err == nil {
 				clear(pt)
 				if !secretbox.Legacy(in.VerifierSecret) {

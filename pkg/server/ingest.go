@@ -303,7 +303,7 @@ func (s *Server) verifierSecret(in *inbox.Inbox) ([]byte, error) {
 	if s.opts.SecretBox == nil {
 		return nil, errors.New("the inbox has a verifier secret but the server has no SecretBox")
 	}
-	secret, err := s.opts.SecretBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.Slug))
+	secret, err := s.opts.SecretBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
 	if err != nil {
 		return nil, fmt.Errorf("the stored verifier secret cannot be opened (was the master key changed?): %w", err)
 	}

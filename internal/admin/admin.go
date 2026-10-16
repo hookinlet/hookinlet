@@ -207,12 +207,17 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 			return nil, err
 		}
 	}
-	sealed, err := s.seal(p.Slug, p.VerifierSecret)
+	// The secret is sealed to the inbox's UID, which has to exist before the row does.
+	uid, err := inbox.NewUID()
+	if err != nil {
+		return nil, fmt.Errorf("admin: generate uid: %w", err)
+	}
+	sealed, err := s.seal(uid, p.VerifierSecret)
 	if err != nil {
 		return nil, err
 	}
 	in := &inbox.Inbox{
-		Slug: p.Slug, IngestKey: p.IngestKey, Name: p.Name, Verifier: p.Verifier, VerifierConfig: p.VerifierConfig,
+		Slug: p.Slug, UID: uid, IngestKey: p.IngestKey, Name: p.Name, Verifier: p.Verifier, VerifierConfig: p.VerifierConfig,
 		VerifierSecret: sealed, OnVerifyFail: p.OnVerifyFail,
 		MaxBodyBytes: p.MaxBodyBytes, RetentionDays: p.RetentionDays, RetentionMaxCount: p.RetentionMaxCount,
 		EventTypePointer: p.EventTypePointer,
@@ -402,10 +407,6 @@ func (s *Service) SetSecret(ctx context.Context, slug, secret string) (View, err
 	if secret == "" {
 		return View{}, inbox.Invalidf("secret must not be empty")
 	}
-	sealed, err := s.seal(slug, secret)
-	if err != nil {
-		return View{}, err
-	}
 	s.editMu.Lock()
 	defer s.editMu.Unlock()
 	for attempt := 0; ; attempt++ {
@@ -414,6 +415,10 @@ func (s *Service) SetSecret(ctx context.Context, slug, secret string) (View, err
 			return View{}, err
 		}
 		if err := s.checkSecret(in.Verifier, in.VerifierConfig, secret); err != nil {
+			return View{}, err
+		}
+		sealed, err := s.seal(in.UID, secret) // bound to this inbox's UID, so after the read
+		if err != nil {
 			return View{}, err
 		}
 		in.VerifierSecret = sealed
@@ -525,10 +530,10 @@ func (s *Service) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 	return b.Backup(ctx)
 }
 
-// seal seals a verifier secret for the inbox with this slug, which is the context
-// it is bound to: the slug never changes, and a sealed value copied onto another
-// inbox's row does not open there.
-func (s *Service) seal(slug, secret string) ([]byte, error) {
+// seal seals a verifier secret for the inbox with this UID, which is the context
+// it is bound to: the UID never changes and no other inbox has it, so a sealed
+// value copied onto another inbox's row does not open there.
+func (s *Service) seal(uid, secret string) ([]byte, error) {
 	if secret == "" {
 		return nil, nil
 	}
@@ -538,7 +543,7 @@ func (s *Service) seal(slug, secret string) ([]byte, error) {
 	if s.Box == nil {
 		return nil, ErrNoSecretBox
 	}
-	return s.Box.Seal([]byte(secret), inbox.VerifierSecretContext(slug))
+	return s.Box.Seal([]byte(secret), inbox.VerifierSecretContext(uid))
 }
 
 // checkVerifier makes sure the verifier exists and accepts its configuration,

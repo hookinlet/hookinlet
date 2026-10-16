@@ -128,11 +128,15 @@ func TestReadyzStaysUpWhenOnlyOneInboxHasASecretThatDoesNotOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealed, err := foreign.Seal([]byte("another-secret"), inbox.VerifierSecretContext("foreign"))
+	uid, err := inbox.NewUID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.store.CreateInbox(t.Context(), &inbox.Inbox{Slug: "foreign", IngestKey: "foreign-key", Name: "f", Verifier: "github", VerifierSecret: sealed}); err != nil {
+	sealed, err := foreign.Seal([]byte("another-secret"), inbox.VerifierSecretContext(uid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.CreateInbox(t.Context(), &inbox.Inbox{Slug: "foreign", UID: uid, IngestKey: "foreign-key", Name: "f", Verifier: "github", VerifierSecret: sealed}); err != nil {
 		t.Fatal(err)
 	}
 

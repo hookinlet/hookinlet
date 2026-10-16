@@ -112,14 +112,15 @@ type Store interface {
 	// CreateInbox applies defaults, validates in (including that it has an
 	// IngestKey, which a Store does not make up), assigns ID, CreatedAt,
 	// UpdatedAt, and Version 1, sets LastSeq to 0, and stores it, updating
-	// *in. It returns ErrConflict if the slug or the ingest key is already used
-	// by another inbox. A new inbox has no tokens.
+	// *in. It keeps in.UID if the caller gave one and makes one (NewUID) if not.
+	// It returns ErrConflict if the slug, the ingest key, or the UID is already
+	// used by another inbox. A new inbox has no tokens.
 	CreateInbox(ctx context.Context, in *Inbox) error
 
 	// UpdateInbox replaces the mutable fields of an existing inbox: Name,
 	// Verifier, VerifierConfig, VerifierSecret, OnVerifyFail, IngestKey,
 	// MaxBodyBytes, RetentionDays, RetentionMaxCount, EventTypePointer, and
-	// Disabled. ID, Slug, LastSeq, and CreatedAt are never changed, and an
+	// Disabled. ID, Slug, UID, LastSeq, and CreatedAt are never changed, and an
 	// update never disturbs sequence assignment for concurrent Appends.
 	//
 	// It is a compare-and-swap on Version: if in.Version is not the stored
@@ -407,8 +408,8 @@ type UnverifiedLimiter interface {
 type SecretBox interface {
 	// Seal encrypts plaintext and binds it to context: the same context must be
 	// given to Open. The caller chooses what the value belongs to (for a verifier
-	// secret, VerifierSecretContext(slug)), so that a sealed value copied onto another row does not
-	// open there. Sealing the same plaintext twice yields different ciphertexts.
+	// secret, VerifierSecretContext(uid), the inbox's UID), so that a sealed value
+	// copied onto another row does not open there. Sealing the same plaintext twice yields different ciphertexts.
 	Seal(plaintext, context []byte) ([]byte, error)
 	// Open decrypts ciphertext produced by Seal, given the context it was sealed
 	// with. It returns an error if the ciphertext was tampered with, truncated,

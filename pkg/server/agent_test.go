@@ -510,9 +510,10 @@ func TestHeadReturnsHeadersWithoutABody(t *testing.T) {
 func TestNoResponseContainsASecret(t *testing.T) {
 	e := newAgentEnv(t)
 	box, _ := secretbox.New(bytes.Repeat([]byte{5}, secretbox.KeySize))
-	sealed, _ := box.Seal([]byte("the-verifier-secret-value"), inbox.VerifierSecretContext("has-secrets"))
+	uid, _ := inbox.NewUID()
+	sealed, _ := box.Seal([]byte("the-verifier-secret-value"), inbox.VerifierSecretContext(uid))
 	tok, hash, _ := token.Generate()
-	in := &inbox.Inbox{Slug: "has-secrets", IngestKey: "has-secrets", Name: "n", Verifier: "token", VerifierSecret: sealed}
+	in := &inbox.Inbox{Slug: "has-secrets", UID: uid, IngestKey: "has-secrets", Name: "n", Verifier: "token", VerifierSecret: sealed}
 	if err := e.store.CreateInbox(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}

@@ -619,7 +619,7 @@ func TestSecretsFromFilesReachTheCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	box, _ := secretbox.New(bytes.Repeat([]byte{9}, 32))
-	if pt, err := box.Open(in.VerifierSecret, inbox.VerifierSecretContext("from-files")); err != nil || string(pt) != "file-given-secret" {
+	if pt, err := box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID)); err != nil || string(pt) != "file-given-secret" {
 		t.Errorf("the stored secret: %q, %v", pt, err)
 	}
 	bad := map[string]string{"HOOKINLET_MASTER_KEY": masterKey(), "HOOKINLET_MASTER_KEY_FILE": env["HOOKINLET_MASTER_KEY_FILE"]}

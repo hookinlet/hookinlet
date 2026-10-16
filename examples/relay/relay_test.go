@@ -29,6 +29,7 @@ type hookinlet struct {
 	url   string
 	token string
 	store *sqlite.Store
+	box   *secretbox.Box
 	in    *inbox.Inbox
 }
 
@@ -60,18 +61,22 @@ func newHookinlet(t *testing.T) *hookinlet {
 		t.Fatal(err)
 	}
 	// A relay forwards only what a verifier checked, so the inbox checks a shared token.
-	sealed, err := box.Seal([]byte(relaySecret), inbox.VerifierSecretContext("relayed"))
+	uid, err := inbox.NewUID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := &inbox.Inbox{Slug: "relayed", IngestKey: "relayed", Name: "relayed", Verifier: "token", VerifierSecret: sealed}
+	sealed, err := box.Seal([]byte(relaySecret), inbox.VerifierSecretContext(uid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &inbox.Inbox{Slug: "relayed", UID: uid, IngestKey: "relayed", Name: "relayed", Verifier: "token", VerifierSecret: sealed}
 	if err := store.CreateInbox(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CreateToken(t.Context(), &inbox.Token{Name: "test", Hash: hash, InboxIDs: []inbox.ID{in.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	return &hookinlet{url: ts.URL, token: tok, store: store, in: in}
+	return &hookinlet{url: ts.URL, token: tok, store: store, box: box, in: in}
 }
 
 func (h *hookinlet) send(t *testing.T, body, contentType string, headers ...string) {
@@ -456,12 +461,20 @@ func TestARecreatedInboxIsRelayedFromItsBeginning(t *testing.T) {
 		t.Fatalf("the state file does not record the epoch with the position: %q", saved)
 	}
 
-	// The same slug, a new life.
-	sealed := h.in.VerifierSecret
+	// The same slug, a new life. The secret is sealed again, to the new inbox: the old
+	// ciphertext is bound to the old inbox and does not open on this one.
 	if err := h.store.DeleteInbox(t.Context(), h.in.ID); err != nil {
 		t.Fatal(err)
 	}
-	in := &inbox.Inbox{Slug: "relayed", IngestKey: "relayed", Name: "relayed", Verifier: "token", VerifierSecret: sealed}
+	uid, err := inbox.NewUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := h.box.Seal([]byte(relaySecret), inbox.VerifierSecretContext(uid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &inbox.Inbox{Slug: "relayed", UID: uid, IngestKey: "relayed", Name: "relayed", Verifier: "token", VerifierSecret: sealed}
 	if err := h.store.CreateInbox(t.Context(), in); err != nil {
 		t.Fatal(err)
 	}

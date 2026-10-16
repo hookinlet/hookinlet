@@ -83,6 +83,45 @@ func TestASecretCopiedToAnotherInboxDoesNotOpen(t *testing.T) {
 	}
 }
 
+// The slug can be used again by a later inbox; the secret sealed for the first must
+// not open on the second.
+func TestASecretDoesNotOpenOnALaterInboxWithTheSameSlug(t *testing.T) {
+	svc, st := secretService(t)
+	old, _ := st.GetInboxBySlug(t.Context(), "alpha")
+	if err := st.DeleteInbox(t.Context(), old.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Create(t.Context(), admin.CreateParams{Slug: "alpha", Verifier: "token"}); err != nil {
+		t.Fatal(err)
+	}
+	now, _ := st.GetInboxBySlug(t.Context(), "alpha")
+	if now.UID == old.UID {
+		t.Fatalf("the new inbox has the old one's uid %q", now.UID)
+	}
+	now.VerifierSecret = old.VerifierSecret
+	if err := st.UpdateInbox(t.Context(), now); err != nil {
+		t.Fatal(err)
+	}
+	r, err := svc.CheckSecrets(t.Context())
+	if err != nil || len(r.Damaged) != 1 || r.Damaged[0] != "alpha" {
+		t.Errorf("a secret carried over to a later inbox with the same slug: %+v, %v", r, err)
+	}
+}
+
+func TestSetSecretSealsToTheInboxUID(t *testing.T) {
+	svc, st := secretService(t)
+	if _, err := svc.SetSecret(t.Context(), "plain", "now-with-a-secret"); err != nil {
+		t.Fatal(err)
+	}
+	in, _ := st.GetInboxBySlug(t.Context(), "plain")
+	if pt, err := svc.Box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID)); err != nil || string(pt) != "now-with-a-secret" {
+		t.Errorf("the secret does not open with the inbox's uid: %q, %v", pt, err)
+	}
+	if _, err := svc.Box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.Slug)); err == nil {
+		t.Error("the secret still opens with the slug")
+	}
+}
+
 func TestRekeyMovesEverySecretToTheNewKey(t *testing.T) {
 	_, st := secretService(t)
 	oldBox, newBox := boxOf(t, 1), boxOf(t, 2)
@@ -97,10 +136,10 @@ func TestRekeyMovesEverySecretToTheNewKey(t *testing.T) {
 	}
 	for _, slug := range []string{"alpha", "bravo", "charlie"} {
 		in, _ := st.GetInboxBySlug(t.Context(), slug)
-		if pt, err := newBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(slug)); err != nil || string(pt) != "secret-of-"+slug {
+		if pt, err := newBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID)); err != nil || string(pt) != "secret-of-"+slug {
 			t.Errorf("%s: %q, %v", slug, pt, err)
 		}
-		if _, err := oldBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(slug)); err == nil {
+		if _, err := oldBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID)); err == nil {
 			t.Errorf("%s still opens with the old key", slug)
 		}
 	}
@@ -125,7 +164,7 @@ func TestRekeyWithTheWrongOldKeyChangesNothing(t *testing.T) {
 	// And an inbox sealed under neither key stops it before any other is touched.
 	bravo := mustSecret(t, st, "bravo")
 	other, _ := st.GetInboxBySlug(t.Context(), "alpha")
-	sealed, _ := boxOf(t, 4).Seal([]byte("x"), inbox.VerifierSecretContext("alpha"))
+	sealed, _ := boxOf(t, 4).Seal([]byte("x"), inbox.VerifierSecretContext(other.UID))
 	other.VerifierSecret = sealed
 	if err := st.UpdateInbox(t.Context(), other); err != nil {
 		t.Fatal(err)
@@ -175,7 +214,7 @@ func TestRekeyUpgradesAFirstReleaseSecret(t *testing.T) {
 	if secretbox.Legacy(mustSecret(t, st, "alpha")) {
 		t.Error("the secret is still in the first layout")
 	}
-	if _, err := svc.Box.Open(mustSecret(t, st, "alpha"), inbox.VerifierSecretContext("alpha")); err != nil {
+	if _, err := svc.Box.Open(mustSecret(t, st, "alpha"), inbox.VerifierSecretContext(in.UID)); err != nil {
 		t.Errorf("after the upgrade: %v", err)
 	}
 }

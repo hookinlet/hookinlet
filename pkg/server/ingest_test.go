@@ -180,9 +180,13 @@ func newEnv(t *testing.T, mods ...func(*Options)) *env {
 // newInbox creates an inbox. secret, if non-empty, is sealed with the env's box.
 func (e *env) newInbox(slug, verifier, secret string, mods ...func(*inbox.Inbox)) *inbox.Inbox {
 	e.t.Helper()
-	in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: verifier}
+	uid, err := inbox.NewUID()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	in := &inbox.Inbox{Slug: slug, UID: uid, IngestKey: slug, Name: slug, Verifier: verifier}
 	if secret != "" {
-		sealed, err := e.box.Seal([]byte(secret), inbox.VerifierSecretContext(slug))
+		sealed, err := e.box.Seal([]byte(secret), inbox.VerifierSecretContext(uid))
 		if err != nil {
 			e.t.Fatal(err)
 		}
@@ -650,8 +654,9 @@ func TestIngestServerSideProblemsAreNotReportedAsBadSignatures(t *testing.T) {
 		}, nil},
 		{"secret sealed under a different master key", func(e *env) {
 			other, _ := secretbox.New(bytes.Repeat([]byte{99}, secretbox.KeySize))
-			sealed, _ := other.Seal([]byte("secret"), inbox.VerifierSecretContext("broken"))
-			e.newInbox("broken", "github", "", func(in *inbox.Inbox) { in.VerifierSecret = sealed })
+			e.newInbox("broken", "github", "", func(in *inbox.Inbox) {
+				in.VerifierSecret, _ = other.Seal([]byte("secret"), inbox.VerifierSecretContext(in.UID))
+			})
 		}, nil},
 		{"inbox has a secret but the server has no SecretBox", func(e *env) { e.newInbox("broken", "github", "secret") },
 			[]func(*Options){func(o *Options) { o.SecretBox = nil }}},
