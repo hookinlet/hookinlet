@@ -117,7 +117,7 @@ func TestSecretsAreCheckedWhenSetAndDoNotSurviveAVerifierChange(t *testing.T) {
 	if st, _ := a.admin("PUT", "/v1/admin/inboxes/sw-ok/secret", map[string]any{"secret": "plain-secret"}); st != http.StatusBadRequest {
 		t.Errorf("an unusable secret was accepted: %d", st)
 	}
-	good := unjson[viewJSON](t, a.mustAdmin("PUT", "/v1/admin/inboxes/sw-ok/secret", map[string]any{"secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"}, 200)) //nolint:gosec // a value made up for a test
+	good := unjson[viewJSON](t, a.mustAdmin("PUT", "/v1/admin/inboxes/sw-ok/secret", map[string]any{"secret": "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"}, 200)) //nolint:gosec // the example secret published in the Standard Webhooks docs (the value of swSecret in pkg/verify/verify_test.go)
 	if !good.HasVerifierSecret || len(good.Warnings) != 0 {
 		t.Errorf("after a good secret: %+v", good)
 	}
