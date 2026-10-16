@@ -30,6 +30,12 @@ This will be 0.2.0. It changes how a stored secret is bound to its inbox and cha
 - **`ScopedPrincipal.InboxIDs` takes a context and returns an error:** `InboxIDs(ctx) ([]ID, error)`, so a
   principal that has to look its inboxes up can.
 
+- **`/readyz` opens a sample of the stored secrets, not all of them.** It used to list every inbox and open every
+  verifier secret each time the answer expired, so its cost grew with the number of inboxes. It now opens at most 25
+  (looking at no more than 5000 inboxes); a master key that opens nothing shows in any sample, and one inbox with a
+  damaged secret is still found at start-up, which checks them all. `Options.SkipReadinessSecretCheck` turns the check
+  off for a `SecretBox` that has its own health check, such as one that calls a key service.
+
 **Upgrading**
 
 - The migration gives each existing inbox a UID. A verifier secret that is already stored was sealed to the slug,

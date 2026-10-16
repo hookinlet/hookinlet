@@ -29,6 +29,8 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 The optional ones are found with a type assertion, and the server copes when they
 are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, and `Hooks` without `Admitter` admits every read, stream and wait. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
 
+`/readyz` opens a sample of the stored verifier secrets (up to 25, at most every 30 seconds) to catch a master key that is not the one the data was sealed under. A `SecretBox` whose opens are expensive, such as one that asks a key service, can turn that off with `Options.SkipReadinessSecretCheck` and report its own health. `Server.CheckSecrets`, which the `hookinlet` program runs before it listens, always opens every secret.
+
 ## Tenants
 
 A Store may hold the inboxes of several independent parties, each under its own

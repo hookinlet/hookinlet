@@ -442,7 +442,7 @@ delivery returns the `seq` of the message that is already stored.
 
 ```
 GET /healthz   200 {"status": "ok"}     the process is up
-GET /readyz    200 {"status": "ready"}  the store is reachable, there is room, secrets open
+GET /readyz    200 {"status": "ready"}  the store is reachable, there is room, a sample of secrets open
                503 {"error": {"code": "not_ready", ...}} it is not, or it is draining or shutting down
 ```
 
