@@ -58,7 +58,7 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 
 	// An ingest key is a capability, so inboxes that had their slug for a key now have
 	// a random one, and the slug is no longer a way in.
-	keys := map[string]bool{}
+	keys, uids := map[string]bool{}, map[string]bool{}
 	for _, slug := range []string{"signed", "open"} {
 		in, err := s.GetInboxBySlug(t.Context(), slug)
 		if err != nil {
@@ -68,6 +68,11 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 			t.Errorf("the key of %q is %q", slug, in.IngestKey)
 		}
 		keys[in.IngestKey] = true
+		// Every inbox gets a uid of its own, which is what a secret is sealed to from now on.
+		if !inbox.ValidUID(in.UID) || uids[in.UID] {
+			t.Errorf("the uid of %q is %q", slug, in.UID)
+		}
+		uids[in.UID] = true
 		if r, err := s.ResolveIngestKey(t.Context(), in.IngestKey); err != nil || r.Slug != slug {
 			t.Errorf("ResolveIngestKey(%q) = %+v, %v", in.IngestKey, r, err)
 		}

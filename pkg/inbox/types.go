@@ -14,6 +14,8 @@
 package inbox
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -79,12 +81,26 @@ func KnownVerifier(name string) bool {
 var (
 	slugRE         = regexp.MustCompile(`^[a-z0-9-]{3,64}$`)
 	ingestKeyRE    = regexp.MustCompile(`^[A-Za-z0-9_-]{3,64}$`)
+	uidRE          = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
 	verifierNameRE = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 )
 
 // ValidIngestKey reports whether s can be the key in an ingest URL: 3 to 64
 // characters from letters, digits, underscore, and hyphen.
 func ValidIngestKey(s string) bool { return ingestKeyRE.MatchString(s) }
+
+// ValidUID reports whether s can be an inbox UID: 16 to 64 characters from
+// letters, digits, underscore, and hyphen.
+func ValidUID(s string) bool { return uidRE.MatchString(s) }
+
+// NewUID returns a new inbox UID: 128 random bits as 32 lowercase hex characters.
+func NewUID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // ValidSlug reports whether s is a valid inbox slug: 3 to 64 characters from
 // a-z, 0-9, and hyphen.
@@ -94,6 +110,16 @@ func ValidSlug(s string) bool { return slugRE.MatchString(s) }
 type Inbox struct {
 	ID   ID
 	Slug string // immutable after creation; the external name
+	// UID identifies this inbox for as long as it exists and never changes. Unlike
+	// the slug it is not reused when an inbox is deleted and another is made with
+	// the same name, and it is unique across everything a Store holds, so it is what
+	// a value is bound to when it must not open on any other inbox (see
+	// VerifierSecretContext). It is not secret and is not part of any URL. A caller
+	// may supply one to CreateInbox, which a caller does when it must seal
+	// something to the inbox before the row exists; when it is empty the Store makes
+	// one with NewUID. UpdateInbox ignores the value supplied. A restore from a
+	// backup keeps it, so that what was sealed to the inbox still opens.
+	UID string
 	// IngestKey is the key in the inbox's ingest URL (/in/{key}). It is a
 	// capability: whoever has it can post to the inbox, so it must not be a name
 	// anyone can guess. It is required: a Store does not invent one, and the admin
@@ -186,6 +212,8 @@ func (in *Inbox) Validate() error {
 	switch {
 	case !ValidSlug(in.Slug):
 		return Invalidf("slug must be 3-64 characters from a-z, 0-9, and hyphen")
+	case in.UID != "" && !ValidUID(in.UID):
+		return Invalidf("uid must be 16-64 characters from a-z, A-Z, 0-9, underscore, and hyphen")
 	case !ValidIngestKey(in.IngestKey):
 		return Invalidf("ingest_key must be 3-64 characters from a-z, A-Z, 0-9, underscore, and hyphen")
 	case !utf8.ValidString(in.Name) || in.Name == "" || utf8.RuneCountInString(in.Name) > 200:
@@ -402,10 +430,12 @@ func (p ListParams) EffectiveLimit() int {
 
 // VerifierSecretContext is the context a verifier secret is sealed with
 // (SecretBox.Seal) and opened with: "hookinlet/verifier-secret/" followed by the
-// inbox's slug, which never changes, under a name that says what is being sealed, so the same box can seal other kinds of
-// value without one passing for another.
-func VerifierSecretContext(slug string) []byte {
-	return []byte("hookinlet/verifier-secret/" + slug)
+// inbox's UID, under a name that says what is being sealed, so the same box can
+// seal other kinds of value without one passing for another. The UID, not the
+// slug, because the slug can be used again by a later inbox, and in a store that
+// holds several organizations' inboxes it is not even unique.
+func VerifierSecretContext(uid string) []byte {
+	return []byte("hookinlet/verifier-secret/" + uid)
 }
 
 // MaxTokenInboxes bounds how many inboxes one token can be scoped to.

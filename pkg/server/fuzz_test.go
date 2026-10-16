@@ -83,13 +83,17 @@ func newFuzzEnv(tb testing.TB) *fuzzEnv {
 		"fz-none": "none", "fz-github": "github", "fz-token": "token", "fz-stripe": "stripe",
 		"fz-slack": "slack", "fz-hmac": "hmac", "fz-sw": "standardwebhooks",
 	} {
-		in := &inbox.Inbox{Slug: slug, IngestKey: slug, Name: slug, Verifier: verifier, EventTypePointer: "/type"}
+		uid, err := inbox.NewUID()
+		if err != nil {
+			tb.Fatal(err)
+		}
+		in := &inbox.Inbox{Slug: slug, UID: uid, IngestKey: slug, Name: slug, Verifier: verifier, EventTypePointer: "/type"}
 		secret := fuzzSecrets[slug]
 		if slug == "fz-sw" {
 			secret = "whsec_c3dvcmQ=" //nolint:gosec // a test secret
 		}
 		if secret != "" {
-			if in.VerifierSecret, err = box.Seal([]byte(secret), inbox.VerifierSecretContext(slug)); err != nil {
+			if in.VerifierSecret, err = box.Seal([]byte(secret), inbox.VerifierSecretContext(uid)); err != nil {
 				tb.Fatal(err)
 			}
 		}

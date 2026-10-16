@@ -43,6 +43,7 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"UpdateInbox", testUpdateInbox},
 		{"UpdateInboxVersioning", testUpdateVersioning},
 		{"Epochs", testEpochs},
+		{"UIDs", testUIDs},
 		{"OldestSeqInAPage", testOldestSeqInAPage},
 		{"Tokens", testTokens},
 		{"TokensOfADeletedInbox", testTokensOfADeletedInbox},
@@ -1312,6 +1313,74 @@ func testEpochs(t *testing.T, s inbox.Store, _ *Clock) {
 	again := createInbox(t, s, "epoch-a")
 	if again.Epoch == a.Epoch {
 		t.Error("an inbox recreated under the same slug has the old epoch")
+	}
+}
+
+func testUIDs(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	a := createInbox(t, s, "uid-a")
+	b := createInbox(t, s, "uid-b")
+	if !inbox.ValidUID(a.UID) || !inbox.ValidUID(b.UID) || a.UID == b.UID {
+		t.Fatalf("UIDs of two inboxes: %q and %q; want two different, valid values", a.UID, b.UID)
+	}
+	for name, get := range map[string]func() (*inbox.Inbox, error){
+		"GetInbox":         func() (*inbox.Inbox, error) { return s.GetInbox(ctx, a.ID) },
+		"GetInboxBySlug":   func() (*inbox.Inbox, error) { return s.GetInboxBySlug(ctx, "uid-a") },
+		"ResolveIngestKey": func() (*inbox.Inbox, error) { return s.ResolveIngestKey(ctx, a.IngestKey) },
+	} {
+		if got, err := get(); err != nil || got.UID != a.UID {
+			t.Errorf("%s: uid %q, %v; want %q", name, got.UID, err, a.UID)
+		}
+	}
+	listed, err := s.ListInboxes(ctx, inbox.ListParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]string{}
+	for _, in := range listed {
+		seen[in.Slug] = in.UID
+	}
+	if seen["uid-a"] != a.UID || seen["uid-b"] != b.UID {
+		t.Errorf("ListInboxes: uids %v; want %q and %q", seen, a.UID, b.UID)
+	}
+
+	// An edit does not change it, whatever the caller puts in the field.
+	got, _ := s.GetInbox(ctx, a.ID)
+	got.Name = "renamed"
+	got.UID = b.UID
+	if err := s.UpdateInbox(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.GetInbox(ctx, a.ID); again.UID != a.UID {
+		t.Errorf("an update changed the uid to %q", again.UID)
+	}
+
+	// A caller that must seal something to the inbox first may choose it.
+	chosen, err := inbox.NewUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := mkInbox("uid-c")
+	c.UID = chosen
+	if err := s.CreateInbox(ctx, c); err != nil || c.UID != chosen {
+		t.Errorf("CreateInbox with a uid: kept %q, %v; want %q", c.UID, err, chosen)
+	}
+	// Another inbox cannot have it, and one that is not valid is refused.
+	d := mkInbox("uid-d")
+	d.UID = chosen
+	isErr(t, "a uid in use", s.CreateInbox(ctx, d), inbox.ErrConflict)
+	e := mkInbox("uid-e")
+	e.UID = "short"
+	isErr(t, "an invalid uid", s.CreateInbox(ctx, e), inbox.ErrInvalid)
+
+	// The same slug, made again after a delete, is a different inbox, and so has a
+	// different uid: what was sealed to the old one must not open on the new one.
+	if err := s.DeleteInbox(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	again := createInbox(t, s, "uid-a")
+	if again.UID == a.UID {
+		t.Error("an inbox recreated under the same slug has the old uid")
 	}
 }
 
