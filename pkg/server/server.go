@@ -14,10 +14,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -453,6 +456,30 @@ func (s *Server) newHTTP(h http.Handler) *http.Server {
 // Handler returns the fully wrapped http.Handler, for embedding or testing. When
 // Options.AdminAddr is set it does not serve the admin API; AdminHandler does.
 func (s *Server) Handler() http.Handler { return s.handler }
+
+// MetricsHandler returns a handler that serves the same counters as GET /metrics, in
+// the Prometheus text format, to GET and HEAD. It does no authentication, so it is for
+// an embedder to mount where only the operator can reach it: a listener of its own, or
+// behind its own credentials. This is how to serve metrics without the admin API (which
+// carries the admin token) on the same address. The series are the server's own; an
+// embedder's go beside them in its own handler.
+func (s *Server) MetricsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var b strings.Builder
+		_ = s.writeMetrics(&b) // writing to a Builder cannot fail
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, b.String())
+		}
+	})
+}
 
 // AdminHandler returns the handler for the admin API when it has its own
 // listener (Options.AdminAddr), and nil otherwise.
