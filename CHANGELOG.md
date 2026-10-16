@@ -6,6 +6,15 @@ applies.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.1.4 - 2026-10-16
+
+A small release: a wrong label in the console fixed, and clearer documentation. The server's behaviour is
+unchanged, so there is nothing to migrate; upgrade by starting the new version on the same data directory.
+
+**Console**
+
 - **The console no longer says that keeping a failed delivery refuses it.** The choice "When a signature fails"
   offered "Refuse it, but keep a copy marked as failed", but with `on_verify_fail=store` the sender is not refused:
   it gets a `200`, so it stops retrying, and the message is stored marked not verified. The choice is now
@@ -13,9 +22,22 @@ applies.
   nothing is stored (default)" and "Keep it, marked not verified: the sender gets a 200 and stops retrying"),
   a note that an inbox keeps a limited number of unverified messages, and, for an inbox whose verifier is
   `none`, a line saying that nothing is checked in place of the choice.
+
+**Documentation**
+
 - **The default is stated where it was missing.** `on_verify_fail` defaults to `reject`; the administration
   guide, the verifiers guide, the `hookinlet inbox create` and `inbox update` help, and the OpenAPI document
   (which now describes the field, and marks the default on creating an inbox) say so.
+- **The README is shorter and opens with what hookinlet does.** The step-by-step walk-through (run it, send a
+  signed event, read it back) moved to [docs/quickstart.md](docs/quickstart.md), which is still run by the docs
+  tests; the README keeps the warning about the verifier `none` and the commercial-license contact.
+- The MCP guide shows a project's `.mcp.json` for connecting a client, and the examples README says more about
+  what `relay` does and does not do with headers and timestamps.
+
+**Release process**
+
+- A release now waits for CI on the tagged commit instead of failing when CI is still running; a run that
+  finishes without passing, or none appearing within three minutes, is still an error.
 
 ## 0.1.3 - 2026-10-15
 
