@@ -20,6 +20,16 @@ This will be 0.2.0. It changes how a stored secret is bound to its inbox and cha
   restore from a backup keeps it, so that what was sealed still opens. The conformance suite (`pkg/inboxtest`)
   checks all of this for any `Store`.
 
+- **Inboxes have a tenant, and slugs are unique within one.** `Inbox.Tenant` is an opaque key, empty by default,
+  that keeps the inboxes of independent parties apart in one `Store`: the context passed to a `Store` call can be
+  scoped to a tenant (`inbox.WithTenant`), and then every method acts only within it, so another tenant's inbox is
+  `ErrNotFound` by ID, slug or ingest key and a slug can be used by every tenant. A context that is not scoped is
+  the operator's view, as before. A `Principal` that implements the new `inbox.TenantPrincipal` has the server
+  scope each of its requests. Installations that do not use tenants see no difference. The `StoreSuite`
+  conformance suite checks it for any `Store`.
+- **`ScopedPrincipal.InboxIDs` takes a context and returns an error:** `InboxIDs(ctx) ([]ID, error)`, so a
+  principal that has to look its inboxes up can.
+
 **Upgrading**
 
 - The migration gives each existing inbox a UID. A verifier secret that is already stored was sealed to the slug,
@@ -27,6 +37,8 @@ This will be 0.2.0. It changes how a stored secret is bound to its inbox and cha
   opens. The server names those inboxes and refuses to start; set each secret again with
   `hookinlet inbox set-secret SLUG --secret-stdin`. There is no way back to 0.1.x on a migrated data directory
   except the copy the migration keeps.
+- Migration 10 adds the tenant column and moves the slug to a column that is unique with it. The old column stays,
+  unused, because SQLite cannot drop its constraint without rebuilding the table and every message with it.
 
 ## 0.1.4 - 2026-10-16
 
