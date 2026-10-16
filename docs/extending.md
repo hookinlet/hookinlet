@@ -31,6 +31,8 @@ are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, and `Hook
 
 `/readyz` opens a sample of the stored verifier secrets (up to 25, at most every 30 seconds) to catch a master key that is not the one the data was sealed under. A `SecretBox` whose opens are expensive, such as one that asks a key service, can turn that off with `Options.SkipReadinessSecretCheck` and report its own health. `Server.CheckSecrets`, which the `hookinlet` program runs before it listens, always opens every secret.
 
+`GET /metrics` is part of the admin API and needs the admin token. To serve the same series somewhere else, for an operator's scraper and without the admin API on that address, mount `Server.MetricsHandler()` on a listener or a route of your own. It does no authentication; protecting where it is mounted is up to you.
+
 ## Tenants
 
 A Store may hold the inboxes of several independent parties, each under its own
