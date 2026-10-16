@@ -87,8 +87,8 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 			t.Fatal(err)
 		}
 		if sc, ok := pa.(inbox.ScopedPrincipal); ok {
-			if ids := sc.InboxIDs(); len(ids) != 1 || ids[0] != f.InboxA.ID {
-				t.Errorf("InboxIDs = %v, but the token reads inbox %d", ids, f.InboxA.ID)
+			if ids, err := sc.InboxIDs(t.Context()); err != nil || len(ids) != 1 || ids[0] != f.InboxA.ID {
+				t.Errorf("InboxIDs = %v, %v, but the token reads inbox %d", ids, err, f.InboxA.ID)
 			}
 		}
 		if f.TokenBoth != "" {
@@ -102,8 +102,10 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 			if p.CanReadInbox(nil) {
 				t.Error("a nil inbox must not be readable")
 			}
-			if sc, ok := p.(inbox.ScopedPrincipal); ok && len(sc.InboxIDs()) != 2 {
-				t.Errorf("InboxIDs = %v, want both inboxes", sc.InboxIDs())
+			if sc, ok := p.(inbox.ScopedPrincipal); ok {
+				if ids, err := sc.InboxIDs(t.Context()); err != nil || len(ids) != 2 {
+					t.Errorf("InboxIDs = %v, %v, want both inboxes", ids, err)
+				}
 			}
 		}
 		for name, tok := range map[string]string{"admin": f.AdminToken, "all-inboxes": f.TokenAll} {

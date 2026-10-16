@@ -219,17 +219,18 @@ func TestRekeyUpgradesAFirstReleaseSecret(t *testing.T) {
 	}
 }
 
-// storeThatChangesAnInboxBetweenThePlanAndTheWrite edits "alpha" the first time
-// Rekey fetches it to write, as another process would.
+// editsOnFetch edits the inbox with the given ID the first time Rekey fetches it to
+// write, as another process would.
 type editsOnFetch struct {
 	inbox.Store
+	id   inbox.ID
 	done bool
 }
 
-func (e *editsOnFetch) GetInboxBySlug(ctx context.Context, slug string) (*inbox.Inbox, error) {
-	if slug == "alpha" && !e.done {
+func (e *editsOnFetch) GetInbox(ctx context.Context, id inbox.ID) (*inbox.Inbox, error) {
+	if id == e.id && !e.done {
 		e.done = true
-		in, err := e.Store.GetInboxBySlug(ctx, slug)
+		in, err := e.Store.GetInbox(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -239,12 +240,13 @@ func (e *editsOnFetch) GetInboxBySlug(ctx context.Context, slug string) (*inbox.
 			return nil, err
 		}
 	}
-	return e.Store.GetInboxBySlug(ctx, slug)
+	return e.Store.GetInbox(ctx, id)
 }
 
 func TestRekeyDoesNotOverwriteAnEditMadeWhileItRan(t *testing.T) {
 	_, st := secretService(t)
-	svc := &admin.Service{Store: &editsOnFetch{Store: st}, Box: boxOf(t, 2)}
+	alpha, _ := st.GetInboxBySlug(t.Context(), "alpha")
+	svc := &admin.Service{Store: &editsOnFetch{Store: st, id: alpha.ID}, Box: boxOf(t, 2)}
 	res, err := svc.Rekey(t.Context(), boxOf(t, 1))
 	if err != nil || res.Skipped != 1 || res.Resealed != 2 {
 		t.Fatalf("rekey: %+v, %v", res, err)

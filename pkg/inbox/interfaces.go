@@ -46,6 +46,29 @@ import (
 // decreases as Seq increases, even if the system clock steps backwards:
 // Append uses the later of the clock and the previous message's ReceivedAt.
 //
+// # Tenants
+//
+// A Store may hold the inboxes of several independent parties, each under its own
+// tenant key (Inbox.Tenant). The caller says which by scoping the context with
+// WithTenant; the server does it for every request whose Principal is a
+// TenantPrincipal. What a Store does depends on whether its context is scoped:
+//
+//   - Scoped to tenant T: every method acts only within T. An inbox of another
+//     tenant is ErrNotFound to every method that takes an inbox, a slug or an
+//     ingest key, whatever the ID, and ListInboxes does not show it. CreateInbox
+//     makes the inbox in T (an Inbox.Tenant that is neither empty nor T is
+//     ErrInvalid). Two tenants may use the same slug. A token may be given only
+//     inboxes of T.
+//   - Not scoped: the operator's view, used for deliveries, the retention sweep,
+//     the command line and anything else that is not on behalf of a tenant. Methods
+//     that take an ID or an ingest key, and ListInboxes, reach every inbox;
+//     CreateInbox makes the inbox in Inbox.Tenant. GetInboxBySlug looks in the
+//     default tenant (the empty key), since a slug names an inbox only within one.
+//
+// Ingest keys and UIDs are unique across all tenants, because an ingest key alone
+// finds the inbox a delivery is for. Installations that never scope a context see
+// no difference: every inbox is in the default tenant.
+//
 // # Errors
 //
 // Missing inboxes or messages yield ErrNotFound (including Query, LatestSeq,
@@ -140,7 +163,8 @@ type Store interface {
 
 	// GetInbox returns the inbox with that ID, or ErrNotFound.
 	GetInbox(ctx context.Context, id ID) (*Inbox, error)
-	// GetInboxBySlug returns the inbox with that slug, or ErrNotFound.
+	// GetInboxBySlug returns the inbox with that slug in the context's tenant (the
+	// default tenant if it is not scoped), or ErrNotFound.
 	GetInboxBySlug(ctx context.Context, slug string) (*Inbox, error)
 	// ListInboxes pages through the inboxes in ID order (see ListParams).
 	ListInboxes(ctx context.Context, p ListParams) ([]*Inbox, error)
@@ -296,7 +320,8 @@ type Principal interface {
 }
 
 // ScopedPrincipal is an optional capability of a Principal that can read a known,
-// finite list of inboxes (an agent token scoped to some of them). Anything that
+// finite list of inboxes (an agent token scoped to some of them; not to be confused
+// with a Store context scoped to a tenant). Anything that
 // needs to list the inboxes a caller can read uses it to go straight to those,
 // instead of walking every inbox and asking CanReadInbox, which would cost time in
 // proportion to the number of inboxes and could not tell a caller that its list
@@ -310,8 +335,10 @@ type Principal interface {
 // accepts. Keep it small enough to hold in memory for each request.
 type ScopedPrincipal interface {
 	Principal
-	// InboxIDs lists the inboxes the principal is limited to.
-	InboxIDs() []ID
+	// InboxIDs lists the inboxes the principal is limited to. It is asked once per
+	// request that needs the list, with that request's context, so an implementation
+	// that has to look the answer up may. An error is a server error for that request.
+	InboxIDs(ctx context.Context) ([]ID, error)
 }
 
 // IngestRequest describes a delivery that has been received and not yet verified,

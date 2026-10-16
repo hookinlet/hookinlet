@@ -99,10 +99,11 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 		// Only a verified delivery can be deduplicated, and only against another
 		// verified one. The partial unique index enforces the same rule.
 		if m.Verified && dedupeKey != "" {
+			scope, scopeArgs := messageScope(ctx)
 			existing, err := scanMessage(tx.QueryRowContext(ctx,
 				`SELECT `+messageCols+`, body FROM messages
-				 WHERE inbox_id = ? AND dedupe_key = ? AND dedupe_key IS NOT NULL AND verified = 1`,
-				int64(inboxID), dedupeKey), inboxID, nil)
+				 WHERE inbox_id = ? AND dedupe_key = ? AND dedupe_key IS NOT NULL AND verified = 1`+scope,
+				append([]any{int64(inboxID), dedupeKey}, scopeArgs...)...), inboxID, nil)
 			switch {
 			case err == nil:
 				stored, created = existing, false
@@ -116,8 +117,9 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 		// serializes appends, and RETURNING hands back the value this exact
 		// transaction claimed.
 		var seq int64
+		scope, scopeArgs := scoped(ctx, int64(inboxID))
 		if err := tx.QueryRowContext(ctx,
-			`UPDATE inboxes SET last_seq = last_seq + 1, message_count = message_count + 1 WHERE id = ? AND deleting = 0 RETURNING last_seq`, int64(inboxID)).Scan(&seq); err != nil {
+			`UPDATE inboxes SET last_seq = last_seq + 1, message_count = message_count + 1 WHERE id = ? AND deleting = 0`+scope+` RETURNING last_seq`, scopeArgs...).Scan(&seq); err != nil {
 			return notFound(fmt.Errorf("sqlite: assign seq: %w", err), "inbox")
 		}
 
@@ -175,7 +177,8 @@ func (s *Store) CountUnverified(ctx context.Context, inboxID inbox.ID, limit int
 	var n int64
 	err := s.readTx(ctx, func(tx *sql.Tx) error {
 		var live int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&live); err != nil {
+		scope, scopeArgs := scoped(ctx, int64(inboxID))
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE id = ? AND deleting = 0`+scope, scopeArgs...).Scan(&live); err != nil {
 			return notFound(err, "inbox")
 		}
 		return tx.QueryRowContext(ctx,
@@ -193,8 +196,10 @@ func (s *Store) Get(ctx context.Context, inboxID inbox.ID, seq int64) (*inbox.Me
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	scope, scopeArgs := messageScope(ctx)
 	m, err := scanMessage(s.rdb.QueryRowContext(ctx,
-		`SELECT `+messageCols+`, body FROM messages WHERE inbox_id = ? AND seq = ?`, int64(inboxID), seq), inboxID, nil)
+		`SELECT `+messageCols+`, body FROM messages WHERE inbox_id = ? AND seq = ?`+scope,
+		append([]any{int64(inboxID), seq}, scopeArgs...)...), inboxID, nil)
 	if err != nil {
 		return nil, s.ctxErr(ctx, notFound(err, "message"))
 	}
@@ -207,7 +212,8 @@ func (s *Store) LatestSeq(ctx context.Context, inboxID inbox.ID) (int64, error) 
 		return 0, err
 	}
 	var seq int64
-	if err := s.rdb.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&seq); err != nil {
+	scope, scopeArgs := scoped(ctx, int64(inboxID))
+	if err := s.rdb.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ? AND deleting = 0`+scope, scopeArgs...).Scan(&seq); err != nil {
 		return 0, s.ctxErr(ctx, notFound(err, "inbox"))
 	}
 	return seq, nil
@@ -223,7 +229,8 @@ func (s *Store) LatestSeq(ctx context.Context, inboxID inbox.ID) (int64, error) 
 func (s *Store) Stats(ctx context.Context, inboxID inbox.ID) (*inbox.InboxStats, error) {
 	var st inbox.InboxStats
 	err := s.readTx(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, `SELECT last_seq, message_count FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&st.LatestSeq, &st.MessageCount); err != nil {
+		scope, scopeArgs := scoped(ctx, int64(inboxID))
+		if err := tx.QueryRowContext(ctx, `SELECT last_seq, message_count FROM inboxes WHERE id = ? AND deleting = 0`+scope, scopeArgs...).Scan(&st.LatestSeq, &st.MessageCount); err != nil {
 			return notFound(err, "inbox")
 		}
 		var oldest sql.NullInt64
@@ -290,7 +297,8 @@ func (s *Store) Query(ctx context.Context, inboxID inbox.ID, q inbox.Query) (*in
 	page := &inbox.Page{Messages: []*inbox.Message{}}
 	// One read transaction gives LatestSeq and the messages the same snapshot.
 	err := s.readTx(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&page.LatestSeq); err != nil {
+		scope, scopeArgs := scoped(ctx, int64(inboxID))
+		if err := tx.QueryRowContext(ctx, `SELECT last_seq FROM inboxes WHERE id = ? AND deleting = 0`+scope, scopeArgs...).Scan(&page.LatestSeq); err != nil {
 			return notFound(err, "inbox")
 		}
 		var oldest sql.NullInt64

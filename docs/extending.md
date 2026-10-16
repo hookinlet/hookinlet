@@ -22,11 +22,39 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
 | `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | the server's tests |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
-| `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. | the agent principal | checked by `AuthenticatorSuite` |
+| `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. `InboxIDs(ctx)` may look the list up, and may fail. | the agent principal | checked by `AuthenticatorSuite` |
+| `TenantPrincipal` (optional) | A `Principal` that belongs to one tenant. After authenticating, the server scopes the request's context to it (`inbox.WithTenant`), so slugs are looked up in that tenant and nothing outside it is reachable. See [Tenants](#tenants). | none: the shipped principals are not in a tenant | `StoreSuite` (the `Tenants` case) and the server's tests |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they
 are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, and `Hooks` without `Admitter` admits every read, stream and wait. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
+
+## Tenants
+
+A Store may hold the inboxes of several independent parties, each under its own
+tenant key (`Inbox.Tenant`, an opaque string, empty by default). This is how a hosted
+service keeps its customers' inboxes apart while running one server. An installation
+that never uses it has one tenant, the empty one, and sees no difference.
+
+- A **context scoped to a tenant** (`inbox.WithTenant(ctx, "acme")`) limits every
+  `Store` call to it: an inbox of another tenant is `ErrNotFound` whether it is
+  named by ID, slug or ingest key, listings leave it out, and `CreateInbox` makes the
+  inbox in that tenant. Two tenants can both have an inbox called `alerts`.
+- A **context that is not scoped** is the operator's view. A delivery, the retention
+  sweep and the command line use it: IDs and ingest keys reach every inbox, and a slug
+  names an inbox in the default tenant. `CreateInbox` makes the inbox in
+  `Inbox.Tenant`, so provisioning code can create one for any tenant.
+- **The server scopes the context for you.** If the `Principal` your `Authenticator`
+  returns implements `TenantPrincipal`, every Store call made for that request (the
+  read API, the admin API, streams, MCP) runs in its tenant. Your `Principal` is still
+  what decides which of those inboxes the caller may read (`CanReadInbox`).
+- **A principal that is not a `TenantPrincipal` is not scoped**, so one belonging to a
+  tenant must implement it. The shipped token authenticator does not: it is for one
+  tenant, and its all-inboxes tokens read every inbox in the Store.
+- Ingest keys and UIDs are unique across tenants, since an ingest key alone finds the
+  inbox a delivery is for. A `Store` you write must keep to all of this; the `Tenants`
+  case of `StoreSuite` checks it, including that one tenant cannot read, write, list or
+  delete another's inbox by any method.
 
 ## Putting them together
 

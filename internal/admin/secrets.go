@@ -139,6 +139,7 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 		return res, ErrNoSecretBox
 	}
 	type work struct {
+		id       inbox.ID // not the slug: another tenant's inbox can have the same one
 		slug     string
 		original []byte // what was read, which the write must still find
 		sealed   []byte
@@ -177,7 +178,7 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 			if err != nil {
 				return res, err
 			}
-			todo = append(todo, work{in.Slug, bytes.Clone(in.VerifierSecret), sealed})
+			todo = append(todo, work{in.ID, in.Slug, bytes.Clone(in.VerifierSecret), sealed})
 		}
 		if len(page) < inbox.MaxListLimit {
 			break
@@ -187,7 +188,7 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 	defer s.editMu.Unlock()
 	for _, w := range todo {
 		for attempt := 0; ; attempt++ {
-			in, err := s.Store.GetInboxBySlug(ctx, w.slug)
+			in, err := s.Store.GetInbox(ctx, w.id)
 			if errors.Is(err, inbox.ErrNotFound) {
 				break // deleted since
 			}

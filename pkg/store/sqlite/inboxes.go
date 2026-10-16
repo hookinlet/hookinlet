@@ -17,7 +17,7 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
-const inboxCols = `id, slug, uid, ingest_key, name, version, verifier, verifier_config, verifier_secret, on_verify_fail,
+const inboxCols = `id, slug, tenant, uid, ingest_key, name, version, verifier, verifier_config, verifier_secret, on_verify_fail,
 	max_body_bytes, retention_days, retention_max_count, event_type_pointer,
 	last_seq, disabled, created_at, updated_at, epoch`
 
@@ -32,7 +32,7 @@ func scanInbox(row rowScanner) (*inbox.Inbox, error) {
 		disabled             int
 		createdAt, updatedAt string
 	)
-	if err := row.Scan(&in.ID, &in.Slug, &in.UID, &in.IngestKey, &in.Name, &in.Version, &in.Verifier, &config, &secret, &in.OnVerifyFail,
+	if err := row.Scan(&in.ID, &in.Slug, &in.Tenant, &in.UID, &in.IngestKey, &in.Name, &in.Version, &in.Verifier, &config, &secret, &in.OnVerifyFail,
 		&in.MaxBodyBytes, &in.RetentionDays, &in.RetentionMaxCount, &in.EventTypePointer,
 		&in.LastSeq, &disabled, &createdAt, &updatedAt, &in.Epoch); err != nil {
 		return nil, err
@@ -58,11 +58,36 @@ func notFound(err error, what string) error {
 	return err
 }
 
+// scopeSQL is what limits a statement on the inboxes table to the tenant the context
+// is scoped to, with the value for its placeholder, or nothing if it is not scoped.
+func scopeSQL(ctx context.Context) (clause string, args []any) {
+	if t, scoped := inbox.TenantFrom(ctx); scoped {
+		return ` AND tenant = ?`, []any{t}
+	}
+	return "", nil
+}
+
+// scoped returns args followed by the arguments of scopeSQL.
+func scoped(ctx context.Context, args ...any) (clause string, all []any) {
+	clause, extra := scopeSQL(ctx)
+	return clause, append(args, extra...)
+}
+
+// messageScope limits a statement on the messages table to the inboxes of the
+// tenant the context is scoped to, if it is.
+func messageScope(ctx context.Context) (clause string, args []any) {
+	if t, scopedTo := inbox.TenantFrom(ctx); scopedTo {
+		return ` AND inbox_id IN (SELECT id FROM inboxes WHERE tenant = ?)`, []any{t}
+	}
+	return "", nil
+}
+
 func (s *Store) getInboxWhere(ctx context.Context, where string, arg any, what string) (*inbox.Inbox, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	in, err := scanInbox(s.rdb.QueryRowContext(ctx, `SELECT `+inboxCols+` FROM inboxes WHERE deleting = 0 AND `+where, arg))
+	scope, args := scoped(ctx, arg)
+	in, err := scanInbox(s.rdb.QueryRowContext(ctx, `SELECT `+inboxCols+` FROM inboxes WHERE deleting = 0 AND `+where+scope, args...))
 	if err != nil {
 		return nil, s.ctxErr(ctx, notFound(err, what))
 	}
@@ -76,7 +101,18 @@ func (s *Store) GetInbox(ctx context.Context, id inbox.ID) (*inbox.Inbox, error)
 
 // GetInboxBySlug implements inbox.Store.
 func (s *Store) GetInboxBySlug(ctx context.Context, slug string) (*inbox.Inbox, error) {
-	return s.getInboxWhere(ctx, `slug = ?`, slug, "inbox")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// A slug names an inbox within one tenant: the one the context is scoped to, or
+	// the default tenant when it is not.
+	tenant, _ := inbox.TenantFrom(ctx)
+	in, err := scanInbox(s.rdb.QueryRowContext(ctx,
+		`SELECT `+inboxCols+` FROM inboxes WHERE deleting = 0 AND tenant = ? AND slug = ?`, tenant, slug))
+	if err != nil {
+		return nil, s.ctxErr(ctx, notFound(err, "inbox"))
+	}
+	return in, nil
 }
 
 // ResolveIngestKey implements inbox.Store.
@@ -89,8 +125,10 @@ func (s *Store) ListInboxes(ctx context.Context, p inbox.ListParams) ([]*inbox.I
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	scope, args := scoped(ctx, int64(p.AfterID))
+	args = append(args, p.EffectiveLimit())
 	rows, err := s.rdb.QueryContext(ctx,
-		`SELECT `+inboxCols+` FROM inboxes WHERE deleting = 0 AND id > ? ORDER BY id LIMIT ?`, int64(p.AfterID), p.EffectiveLimit())
+		`SELECT `+inboxCols+` FROM inboxes WHERE deleting = 0 AND id > ?`+scope+` ORDER BY id LIMIT ?`, args...) //nolint:gosec // scope is a constant fragment with a placeholder
 	if err != nil {
 		return nil, s.ctxErr(ctx, fmt.Errorf("sqlite: list inboxes: %w", err))
 	}
@@ -129,6 +167,12 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 	if err := cp.Validate(); err != nil {
 		return err
 	}
+	if t, scopedTo := inbox.TenantFrom(ctx); scopedTo {
+		if cp.Tenant != "" && cp.Tenant != t {
+			return inbox.Invalidf("the inbox is for tenant %q, but the context is scoped to another", cp.Tenant)
+		}
+		cp.Tenant = t
+	}
 	now := inbox.NormalizeTime(s.now())
 	epoch, err := newEpoch()
 	if err != nil {
@@ -145,10 +189,10 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 		// Writes are serialized, so checking first and then inserting cannot
 		// race with another writer.
 		var one int
-		switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE slug = ?`, cp.Slug).Scan(&one); {
+		switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE tenant = ? AND slug = ?`, cp.Tenant, cp.Slug).Scan(&one); {
 		case err == nil:
 			var deleting int
-			if tx.QueryRowContext(ctx, `SELECT deleting FROM inboxes WHERE slug = ?`, cp.Slug).Scan(&deleting) == nil && deleting == 1 {
+			if tx.QueryRowContext(ctx, `SELECT deleting FROM inboxes WHERE tenant = ? AND slug = ?`, cp.Tenant, cp.Slug).Scan(&deleting) == nil && deleting == 1 {
 				return fmt.Errorf("%w: slug %q belongs to an inbox that is still being deleted; the retention sweep finishes that (or run: hookinlet retention run)", inbox.ErrConflict, cp.Slug)
 			}
 			return fmt.Errorf("%w: slug %q is already taken", inbox.ErrConflict, cp.Slug)
@@ -168,11 +212,11 @@ func (s *Store) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
 			return fmt.Errorf("sqlite: check uid: %w", err)
 		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO inboxes (
-				slug, uid, ingest_key, name, version, verifier, verifier_config, verifier_secret, on_verify_fail, agent_token_hash,
+				slug, slug_unused, tenant, uid, ingest_key, name, version, verifier, verifier_config, verifier_secret, on_verify_fail, agent_token_hash,
 				max_body_bytes, retention_days, retention_max_count, event_type_pointer, last_seq, disabled,
 				created_at, updated_at, epoch)
-			VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, randomblob(32), ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
-			cp.Slug, cp.UID, cp.IngestKey, cp.Name, cp.Verifier, string(cp.VerifierConfig), secretArg(cp.VerifierSecret), cp.OnVerifyFail,
+			VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, randomblob(32), ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+			cp.Slug, cp.UID, cp.Tenant, cp.UID, cp.IngestKey, cp.Name, cp.Verifier, string(cp.VerifierConfig), secretArg(cp.VerifierSecret), cp.OnVerifyFail,
 			cp.MaxBodyBytes, cp.RetentionDays, cp.RetentionMaxCount, cp.EventTypePointer,
 			boolInt(cp.Disabled), formatTime(now), formatTime(now), epoch)
 		if err != nil {
@@ -208,7 +252,8 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 	var refreshed *inbox.Inbox
 	err := s.writeTx(ctx, func(tx *sql.Tx) error {
 		var stored int64
-		switch err := tx.QueryRowContext(ctx, `SELECT version FROM inboxes WHERE id = ? AND deleting = 0`, int64(cp.ID)).Scan(&stored); {
+		scope, scopeArgs := scoped(ctx, int64(cp.ID))
+		switch err := tx.QueryRowContext(ctx, `SELECT version FROM inboxes WHERE id = ? AND deleting = 0`+scope, scopeArgs...).Scan(&stored); {
 		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("%w: inbox", inbox.ErrNotFound)
 		case err != nil:
@@ -226,7 +271,7 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 			return fmt.Errorf("sqlite: check ingest key: %w", err)
 		}
 
-		// last_seq, slug, uid, and created_at are deliberately not in this list.
+		// last_seq, slug, tenant, uid, and created_at are deliberately not in this list.
 		if _, err := tx.ExecContext(ctx, `UPDATE inboxes SET
 				ingest_key = ?, name = ?, version = version + 1, verifier = ?, verifier_config = ?, verifier_secret = ?,
 				on_verify_fail = ?, max_body_bytes = ?, retention_days = ?,
@@ -258,10 +303,11 @@ func (s *Store) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
 // retention does, and only then the row. If the process stops part way, the
 // retention sweep (Prune) finishes the job, as does calling DeleteInbox again.
 func (s *Store) DeleteInbox(ctx context.Context, id inbox.ID) error {
+	scope, scopeArgs := scoped(ctx, int64(id))
 	err := s.writeTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			`UPDATE inboxes SET disabled = 1, deleting = 1, version = version + 1, updated_at = ? WHERE id = ?`,
-			formatTime(s.now()), int64(id))
+			`UPDATE inboxes SET disabled = 1, deleting = 1, version = version + 1, updated_at = ? WHERE id = ?`+scope, //nolint:gosec // scope is a constant fragment with a placeholder
+			append([]any{formatTime(s.now())}, scopeArgs...)...)
 		if err != nil {
 			return fmt.Errorf("sqlite: close inbox for deletion: %w", err)
 		}

@@ -61,7 +61,10 @@ the ids it had then again), and is what the admin list's `after` cursor counts. 
 embedder's Store may hand out another kind. Tokens have a numeric `id` for the same
 reason (to revoke one, and to page through them). The Go type `inbox.Inbox` also has a
 **UID**, which never changes and is never shared with another inbox: it is what a stored
-secret is sealed to, it is not secret, and no API shows it. An **ingest key** is not an
+secret is sealed to, it is not secret, and no API shows it. It has a **tenant** too, an
+opaque key that no API shows either, which keeps the inboxes of independent parties
+apart in one Store (see [extending](extending.md#tenants)); a slug is unique within a
+tenant. An **ingest key** is not an
 identifier but a capability: treat it like a password for senders.
 
 ## The command line

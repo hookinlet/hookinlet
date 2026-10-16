@@ -73,6 +73,17 @@ func TestAnEarlierDatabaseUpgrades(t *testing.T) {
 			t.Errorf("the uid of %q is %q", slug, in.UID)
 		}
 		uids[in.UID] = true
+		// Every inbox is in the default tenant, and a slug can now be used again in another.
+		if in.Tenant != "" {
+			t.Errorf("the tenant of %q is %q, want the default", slug, in.Tenant)
+		}
+		other := &inbox.Inbox{Slug: slug, IngestKey: "other-" + slug, Name: slug, Verifier: "none"}
+		if err := s.CreateInbox(inbox.WithTenant(t.Context(), "later"), other); err != nil || other.Tenant != "later" {
+			t.Errorf("%q in another tenant after the upgrade: tenant %q, %v", slug, other.Tenant, err)
+		}
+		if err := s.CreateInbox(t.Context(), &inbox.Inbox{Slug: slug, IngestKey: "again-" + slug, Name: slug, Verifier: "none"}); !errors.Is(err, inbox.ErrConflict) {
+			t.Errorf("the slug %q twice in the default tenant: %v, want a conflict", slug, err)
+		}
 		if r, err := s.ResolveIngestKey(t.Context(), in.IngestKey); err != nil || r.Slug != slug {
 			t.Errorf("ResolveIngestKey(%q) = %+v, %v", in.IngestKey, r, err)
 		}

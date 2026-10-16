@@ -129,8 +129,8 @@ func TestAgentTokenReadsOnlyItsOwnInbox(t *testing.T) {
 	if err != nil || !pb.CanReadInbox(f.b) || pb.CanReadInbox(f.a) {
 		t.Errorf("agent B: %v, %v", pb, err)
 	}
-	if got := pa.(token.Agent).InboxIDs(); len(got) != 1 || got[0] != f.a.ID {
-		t.Errorf("InboxIDs = %v, want [%d]", got, f.a.ID)
+	if got, err := pa.(token.Agent).InboxIDs(t.Context()); err != nil || len(got) != 1 || got[0] != f.a.ID {
+		t.Errorf("InboxIDs = %v, %v, want [%d]", got, err, f.a.ID)
 	}
 	pall, err := f.auth.Authenticate(req(t, "Authorization", "Bearer "+f.tokenAll))
 	if err != nil || pall.CanAdmin() || !pall.CanReadInbox(f.a) || !pall.CanReadInbox(f.b) {

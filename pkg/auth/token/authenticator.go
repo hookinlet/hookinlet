@@ -4,6 +4,7 @@
 package token
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -57,7 +58,7 @@ func (Admin) CanAdmin() bool { return true }
 type Agent struct{ ids []inbox.ID }
 
 // InboxIDs returns the inboxes this principal can read.
-func (a Agent) InboxIDs() []inbox.ID { return slices.Clone(a.ids) }
+func (a Agent) InboxIDs(context.Context) ([]inbox.ID, error) { return slices.Clone(a.ids), nil }
 
 // CanReadInbox implements inbox.Principal: an agent reads only the inboxes its
 // token names.
