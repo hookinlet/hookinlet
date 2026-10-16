@@ -104,7 +104,7 @@ func (s *Server) stillAllowed(r *http.Request, id inbox.ID) func(ctx context.Con
 		case err != nil:
 			return true, err
 		}
-		current, err := s.opts.Store.GetInbox(ctx, id)
+		current, err := s.opts.Store.GetInbox(scopedTo(ctx, principal), id)
 		switch {
 		case errors.Is(err, inbox.ErrNotFound):
 			return false, nil

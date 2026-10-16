@@ -38,7 +38,8 @@ func (s *Store) CreateToken(ctx context.Context, t *inbox.Token) error {
 			return fmt.Errorf("sqlite: check token hash: %w", err)
 		}
 		for _, inboxID := range cp.InboxIDs {
-			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE id = ? AND deleting = 0`, int64(inboxID)).Scan(&one); err != nil {
+			scope, scopeArgs := scoped(ctx, int64(inboxID))
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM inboxes WHERE id = ? AND deleting = 0`+scope, scopeArgs...).Scan(&one); err != nil {
 				return notFound(fmt.Errorf("sqlite: check inbox of token: %w", err), "inbox")
 			}
 		}

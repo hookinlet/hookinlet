@@ -293,7 +293,11 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 	// them, and could not report that it had searched them all without saying how
 	// many there are.
 	if scopedTo, ok := t.caller.principal.(inbox.ScopedPrincipal); ok {
-		for _, id := range scopedTo.InboxIDs() {
+		ids, err := scopedTo.InboxIDs(ctx)
+		if err != nil {
+			return nil, nil, t.fail(ctx, "list inboxes", err)
+		}
+		for _, id := range ids {
 			in, err := st.GetInbox(ctx, id)
 			switch {
 			case errors.Is(err, inbox.ErrNotFound):

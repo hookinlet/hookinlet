@@ -7,7 +7,9 @@
 // implementation (for example a hosted multi-node one) satisfy the same
 // interfaces and pass the same conformance suites in pkg/inboxtest.
 //
-// Nothing in this package knows about organizations, users, plans, or billing.
+// Nothing in this package knows about organizations, users, plans, or billing. A
+// tenant is only an opaque key that keeps one party's inboxes apart from another's
+// in a Store that holds both.
 //
 // Stability: this package is pre-1.0. Its API can still change, and every change is
 // listed in CHANGELOG.md; after v1.0.0, semantic versioning applies.
@@ -120,6 +122,13 @@ type Inbox struct {
 	// one with NewUID. UpdateInbox ignores the value supplied. A restore from a
 	// backup keeps it, so that what was sealed to the inbox still opens.
 	UID string
+	// Tenant says which tenant the inbox belongs to: an opaque key, empty by
+	// default, that a Store which holds the inboxes of several independent parties
+	// (the organizations of a hosted service) uses to keep them apart. Slugs are
+	// unique within a tenant, not across them. It is set when the inbox is created
+	// and never changes; see the Store's "Tenants" section for what it does.
+	// Installations that do not use tenants have only the empty one.
+	Tenant string
 	// IngestKey is the key in the inbox's ingest URL (/in/{key}). It is a
 	// capability: whoever has it can post to the inbox, so it must not be a name
 	// anyone can guess. It is required: a Store does not invent one, and the admin
@@ -212,6 +221,8 @@ func (in *Inbox) Validate() error {
 	switch {
 	case !ValidSlug(in.Slug):
 		return Invalidf("slug must be 3-64 characters from a-z, 0-9, and hyphen")
+	case !ValidTenant(in.Tenant):
+		return Invalidf("tenant must be at most %d bytes of valid UTF-8", MaxTenantLen)
 	case in.UID != "" && !ValidUID(in.UID):
 		return Invalidf("uid must be 16-64 characters from a-z, A-Z, 0-9, underscore, and hyphen")
 	case !ValidIngestKey(in.IngestKey):

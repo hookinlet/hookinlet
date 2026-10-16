@@ -199,9 +199,21 @@ const (
 
 func readFrom(ctx context.Context) *readRequest { return ctx.Value(readKey).(*readRequest) }
 
+// scopedTo returns ctx scoped to the principal's tenant if it has one (see
+// inbox.TenantPrincipal), and ctx itself if not. Everything the server does for a
+// caller with the Store goes through a context made this way, so that the names a
+// caller uses are looked up in its tenant and nothing outside it is reachable.
+func scopedTo(ctx context.Context, p inbox.Principal) context.Context {
+	if tp, ok := p.(inbox.TenantPrincipal); ok {
+		return inbox.WithTenant(ctx, tp.Tenant())
+	}
+	return ctx
+}
+
 // context gives the generated handlers, which are passed a context and nothing
 // else, what enforce found out.
 func (rr *readRequest) context(ctx context.Context) context.Context {
+	ctx = scopedTo(ctx, rr.principal)
 	ctx = context.WithValue(ctx, requestKey, rr.r)
 	ctx = context.WithValue(ctx, writerKey, rr.w)
 	return context.WithValue(ctx, readKey, rr)
@@ -245,7 +257,7 @@ func (s *Server) secure(w http.ResponseWriter, r *http.Request, op *specvalidate
 	if sec != specvalidate.Agent || !named {
 		return true
 	}
-	in, err := s.opts.Store.GetInboxBySlug(r.Context(), r.PathValue(name))
+	in, err := s.opts.Store.GetInboxBySlug(scopedTo(r.Context(), principal), r.PathValue(name))
 	switch {
 	case errors.Is(err, inbox.ErrNotFound), err == nil && !principal.CanReadInbox(in):
 		writeError(w, http.StatusNotFound, "not_found", "not found")
