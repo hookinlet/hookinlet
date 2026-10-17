@@ -4,10 +4,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -263,9 +267,90 @@ type listInboxesOutput struct {
 	Inboxes []inboxSummary `json:"inboxes"`
 	// Truncated is true when more inboxes could be read than are listed.
 	Truncated bool `json:"truncated,omitempty"`
+	// NextAfter, set exactly when Truncated is, is the cursor to pass as `after`
+	// for the next page.
+	NextAfter string `json:"next_after,omitempty"`
 }
 
-func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ api.McpListInboxesInput) (*mcp.CallToolResult, any, error) {
+// A list_inboxes cursor names the last inbox a page returned by its slug and
+// epoch, which the caller has just been shown, and never by its ID: IDs count
+// every inbox the server has made, in every tenant. It also says which kind of
+// list it continues, so a cursor is not read in the other's terms. The checksum
+// is not a secret: it only lets a mangled cursor be refused as such. A cursor
+// someone made up is no use: it names an inbox, which the caller must be able
+// to read, and every page is checked against the caller as the first is.
+//
+//	base64url(JSON {v, k, s: slug, e: epoch} | crc32 of the JSON)
+type listCursor struct {
+	V int    `json:"v"`
+	K string `json:"k"`
+	S string `json:"s"`
+	E string `json:"e"`
+}
+
+const (
+	listCursorVersion  = 1
+	listCursorScoped   = "s"
+	listCursorUnscoped = "u"
+	// listCursorMax bounds what is decoded; the document's maxLength says the same.
+	listCursorMax = 1024
+)
+
+var (
+	errListCursorInvalid = toolError("invalid after: it is not a next_after that list_inboxes returned; start again without after")
+	errListCursorGone    = toolError("after: the inbox this cursor continues from was deleted or can no longer be read; list again without after")
+)
+
+func encodeListCursor(kind string, last inboxSummary) string {
+	b, _ := json.Marshal(listCursor{V: listCursorVersion, K: kind, S: last.Slug, E: last.Epoch})
+	b = binary.BigEndian.AppendUint32(b, crc32.ChecksumIEEE(b))
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// decodeListCursor returns the slug and epoch a cursor for a list of this kind
+// names, or errListCursorInvalid.
+func decodeListCursor(s, kind string) (slug, epoch string, err error) {
+	if len(s) > listCursorMax {
+		return "", "", errListCursorInvalid
+	}
+	b, err := base64.RawURLEncoding.Strict().DecodeString(s)
+	if err != nil || len(b) <= 4 {
+		return "", "", errListCursorInvalid
+	}
+	body, sum := b[:len(b)-4], b[len(b)-4:]
+	if crc32.ChecksumIEEE(body) != binary.BigEndian.Uint32(sum) {
+		return "", "", errListCursorInvalid
+	}
+	var c listCursor
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&c) != nil || dec.More() || c.V != listCursorVersion || c.K != kind || c.S == "" {
+		return "", "", errListCursorInvalid
+	}
+	return c.S, c.E, nil
+}
+
+// listResume finds the inbox a cursor continues from. It must still be the
+// inbox the cursor was made from (same epoch) and readable by this caller: one
+// that is gone and one the caller cannot read get the same answer.
+func (t *mcpTools) listResume(ctx context.Context, after, kind string) (*inbox.Inbox, error) {
+	slug, epoch, err := decodeListCursor(after, kind)
+	if err != nil {
+		return nil, err
+	}
+	in, err := t.inbox(ctx, slug)
+	switch {
+	case errors.Is(err, errToolNotFound):
+		return nil, errListCursorGone
+	case err != nil:
+		return nil, err
+	case in.Epoch != epoch:
+		return nil, errListCursorGone
+	}
+	return in, nil
+}
+
+func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, args api.McpListInboxesInput) (*mcp.CallToolResult, any, error) {
 	ctx, done := t.bind(ctx)
 	defer done()
 	out := listInboxesOutput{Inboxes: []inboxSummary{}}
@@ -275,6 +360,10 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 	}
 	defer release()
 	st := t.s.opts.Store
+	var after string
+	if args.After != nil {
+		after = *args.After
+	}
 
 	add := func(in *inbox.Inbox) error {
 		latest, err := st.LatestSeq(ctx, in.ID)
@@ -287,6 +376,12 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 		out.Inboxes = append(out.Inboxes, inboxSummary{Slug: in.Slug, Name: in.Name, Verifier: in.Verifier, LatestSeq: latest, Epoch: in.Epoch})
 		return nil
 	}
+	// truncate ends a full page that has more after it.
+	truncate := func(kind string) (*mcp.CallToolResult, any, error) {
+		out.Truncated = true
+		out.NextAfter = encodeListCursor(kind, out.Inboxes[len(out.Inboxes)-1])
+		return result(out)
+	}
 
 	// A caller limited to some inboxes goes straight to them. Searching for them
 	// would cost time in proportion to everyone else's inboxes, might not find
@@ -294,10 +389,27 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 	// many there are. It may name many inboxes, so the same limit applies as
 	// below: the first mcpMaxInboxes readable ones, and truncated once one more
 	// is found. Nothing past that is looked up.
+	//
+	// A page continues after the inbox the cursor names, wherever it now is in
+	// the list, so inboxes added or removed elsewhere in it between pages make no
+	// other inbox be skipped or listed twice.
 	if scopedTo, ok := t.caller.principal.(inbox.ScopedPrincipal); ok {
+		var from *inbox.Inbox
+		if after != "" {
+			if from, err = t.listResume(ctx, after, listCursorScoped); err != nil {
+				return nil, nil, t.fail(ctx, "list inboxes", err)
+			}
+		}
 		ids, err := scopedTo.InboxIDs(ctx)
 		if err != nil {
 			return nil, nil, t.fail(ctx, "list inboxes", err)
+		}
+		if from != nil {
+			i := slices.Index(ids, from.ID)
+			if i < 0 {
+				return nil, nil, t.fail(ctx, "list inboxes", errListCursorGone)
+			}
+			ids = ids[i+1:]
 		}
 		for _, id := range ids {
 			in, err := st.GetInbox(ctx, id)
@@ -311,8 +423,7 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 				continue
 			}
 			if len(out.Inboxes) == mcpMaxInboxes {
-				out.Truncated = true
-				return result(out)
+				return truncate(listCursorScoped)
 			}
 			if err := add(in); err != nil {
 				return nil, nil, t.fail(ctx, "list inboxes", err)
@@ -323,12 +434,21 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 
 	// Otherwise a Principal can say whether it may read an inbox, not which ones
 	// it can read, so go through the inboxes in order and ask. This is fine at the
-	// scale of one node, and the scan is bounded. Only finding more than
-	// mcpMaxInboxes readable inboxes sets truncated; running out of scan budget
-	// is not reported, since that would tell a caller how many inboxes exist.
-	var after inbox.ID
+	// scale of one node, and the scan is bounded, per call. Only finding more
+	// than mcpMaxInboxes readable inboxes sets truncated and next_after; running
+	// out of scan budget is not reported, since that would tell a caller how many
+	// inboxes exist. So a page that runs out of budget ends the list, even if
+	// there are readable inboxes past it.
+	var afterID inbox.ID
+	if after != "" {
+		from, err := t.listResume(ctx, after, listCursorUnscoped)
+		if err != nil {
+			return nil, nil, t.fail(ctx, "list inboxes", err)
+		}
+		afterID = from.ID
+	}
 	for scanned := 0; scanned < mcpListScan; {
-		page, err := st.ListInboxes(ctx, inbox.ListParams{AfterID: after})
+		page, err := st.ListInboxes(ctx, inbox.ListParams{AfterID: afterID})
 		if err != nil {
 			return nil, nil, t.fail(ctx, "list inboxes", err)
 		}
@@ -339,14 +459,13 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 			if scanned == mcpListScan {
 				return result(out)
 			}
-			after = in.ID
+			afterID = in.ID
 			scanned++
 			if !t.caller.principal.CanReadInbox(in) {
 				continue
 			}
 			if len(out.Inboxes) == mcpMaxInboxes {
-				out.Truncated = true
-				return result(out)
+				return truncate(listCursorUnscoped)
 			}
 			if err := add(in); err != nil {
 				return nil, nil, t.fail(ctx, "list inboxes", err)

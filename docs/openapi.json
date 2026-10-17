@@ -5222,7 +5222,13 @@
       },
       "McpListInboxesInput": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "after": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "continue a list: the next_after from your previous list_inboxes result. Omit it, or pass an empty string, to start from the beginning"
+          }
+        },
         "additionalProperties": false
       },
       "McpQueryMessagesInput": {
@@ -5995,7 +6001,7 @@
   "x-mcp-tools": [
     {
       "name": "list_inboxes",
-      "description": "List the inboxes this token can read, with each one's latest_seq.",
+      "description": "List the inboxes this token can read, with each one's latest_seq and epoch, at most 100 at a time. When there are more, the result has truncated: true and a next_after cursor: call list_inboxes again with it as `after` for the next page, and keep going while next_after is present. A list that ends without next_after may still not be every inbox when the token can read inboxes among very many it cannot; read any inbox you know by its slug.",
       "input": {
         "$ref": "#/components/schemas/McpListInboxesInput"
       },

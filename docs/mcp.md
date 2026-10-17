@@ -81,12 +81,45 @@ value.)
 
 ### `list_inboxes`
 
-The inboxes this token can read: `slug`, `name`, `verifier`, `latest_seq`, and `epoch`.
-Every token lists up to 100, whether it is an agent token for some inboxes, a
-token for all inboxes, or the admin token; `truncated: true` says it can read
-more than that. An agent token lists its inboxes in the order it was given them.
+| Input | Meaning |
+|---|---|
+| `after` | optional: the `next_after` of your previous result, to read the next page. Omit it (or pass `""`) to start at the beginning |
+
+The inboxes this token can read: `slug`, `name`, `verifier`, `latest_seq`, and `epoch`,
+at most 100 per call, whether it is an agent token for some inboxes, a token for
+all inboxes, or the admin token. When it can read more than that, the result has
+`truncated: true` and `next_after`, an opaque cursor: pass it back as `after` for
+the next 100, and keep going while `next_after` is present. The last page has
+neither. An agent token lists its inboxes in the order it was given them; any other
+token lists them in the order they were made.
+
+```
+after = ""
+loop:
+    result = list_inboxes(after)
+    handle(result.inboxes)
+    if no result.next_after: stop
+    after = result.next_after
+```
+
+A page continues after the inbox the previous one ended with, so inboxes created or
+deleted elsewhere between calls do not make another inbox be skipped or listed
+twice. If that inbox itself has been deleted (or the token can no longer read it)
+the call fails, saying so, and you list again without `after`. A string that is
+not a `next_after` fails with `invalid after`. A cursor is only good for the kind of
+token that received it; it names an inbox, never says how many there are, and
+whoever passes one sees only inboxes their own token can read.
+
 Nothing is ever reported about inboxes the token cannot read, not even how many
-there are, and the result does not say how many more than 100 it can read.
+there are, and no result says how many more than 100 it can read. To keep it that
+way, a token that is not limited to a list of inboxes (a token for all inboxes,
+the admin token, or an embedder's principal) finds its inboxes by looking through
+the server's inboxes in order, at most 10,000 per call. A call that reaches that
+limit before it has 100 inboxes to return ends the list there, without
+`truncated` or `next_after`, since saying it stopped early would say how many
+inboxes there are. Such a token, among very many inboxes it cannot read, may
+therefore not see all of its own in the list; it can still read any inbox it
+knows by slug.
 
 ### `query_messages`
 

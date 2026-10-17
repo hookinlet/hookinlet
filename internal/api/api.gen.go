@@ -779,7 +779,10 @@ type McpGetMessageInput struct {
 }
 
 // McpListInboxesInput defines model for McpListInboxesInput.
-type McpListInboxesInput = map[string]interface{}
+type McpListInboxesInput struct {
+	// After continue a list: the next_after from your previous list_inboxes result. Omit it, or pass an empty string, to start from the beginning
+	After *string `json:"after,omitempty"`
+}
 
 // McpQueryMessagesInput defines model for McpQueryMessagesInput.
 type McpQueryMessagesInput struct {
