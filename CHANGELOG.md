@@ -6,6 +6,16 @@ applies.
 
 ## Unreleased
 
+**Added**
+
+- **`server.Options.RequireTenant`** refuses a caller whose `Principal` is neither an `inbox.TenantPrincipal` nor an
+  admin (`CanAdmin`), so that a hosted embedder's principal that forgets `Tenant()` fails closed instead of running
+  unscoped (naming inboxes in the default tenant, and seeing every tenant's inboxes in MCP `list_inboxes` that its
+  `CanReadInbox` allows). The refusal applies to the read API, streams and MCP waits (also when they are checked
+  again), every MCP call and the admin API; it is a `500` with code `internal`, and the log line names the
+  principal's type. An admin in no tenant is still served, as the operator's view. Off by default: nothing changes
+  unless it is set. See [Tenants](docs/extending.md#tenants).
+
 **Go API**
 
 - **Added `inboxtest.AssertStoreWrapperForwards(t, wrapper, inner)`**, which fails, naming each one and what the

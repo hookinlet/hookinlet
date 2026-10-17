@@ -57,6 +57,19 @@ that never uses it has one tenant, the empty one, and sees no difference.
 - **A principal that is not a `TenantPrincipal` is not scoped**, so one belonging to a
   tenant must implement it. The shipped token authenticator does not: it is for one
   tenant, and its all-inboxes tokens read every inbox in the Store.
+- **`Options.RequireTenant` makes a forgotten `Tenant()` fail closed.** Without it, a
+  customer's principal that does not implement `TenantPrincipal` is unscoped: it names
+  inboxes in the default tenant, and MCP's `list_inboxes` shows it every tenant's
+  inboxes that its `CanReadInbox` allows. With it, the server refuses a principal that
+  is neither a `TenantPrincipal` nor an admin (`CanAdmin`), on the read API, streams
+  (also when an open stream or MCP wait is checked again), MCP and the admin API. The
+  caller gets `500` with code `internal`, which says nothing of why; the log gets an
+  error that names the principal's Go type, and never the credential. An admin in no
+  tenant is still served, because that is how an operator gets its view across tenants;
+  an admin that is a `TenantPrincipal` keeps to its tenant as before. A hosted service
+  whose callers all belong to tenants should turn it on. It is off by default, and with
+  an `Authenticator` whose principals are never `TenantPrincipal`s, such as the shipped
+  token one, it would refuse every caller but the admin.
 - Ingest keys and UIDs are unique across tenants, since an ingest key alone finds the
   inbox a delivery is for. A `Store` you write must keep to all of this; the `Tenants`
   case of `StoreSuite` checks it, including that one tenant cannot read, write, list or

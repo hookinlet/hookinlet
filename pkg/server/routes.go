@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -231,11 +232,31 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, adminOnly 
 	case err != nil:
 		s.internalError(r.Context(), w, "authenticate", err)
 		return nil, false
+	case s.refusesUntenanted(r.Context(), principal):
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return nil, false
 	case adminOnly && !principal.CanAdmin():
 		writeError(w, http.StatusForbidden, "forbidden", "this credential cannot use the admin API")
 		return nil, false
 	}
 	return principal, true
+}
+
+// refusesUntenanted reports whether Options.RequireTenant refuses p: a principal that is
+// in no tenant and is not an admin. It logs why when it does. The caller is told only
+// that something went wrong on the server, which is the truth: the Authenticator gave a
+// principal the embedder said it never would.
+func (s *Server) refusesUntenanted(ctx context.Context, p inbox.Principal) bool {
+	if !s.opts.RequireTenant {
+		return false
+	}
+	if _, ok := p.(inbox.TenantPrincipal); ok || (p != nil && p.CanAdmin()) {
+		return false
+	}
+	s.log.LogAttrs(ctx, slog.LevelError,
+		"refused a caller in no tenant: Options.RequireTenant is set, and the Authenticator returned a principal that is not an inbox.TenantPrincipal and cannot admin",
+		slog.String("principal", fmt.Sprintf("%T", p)))
+	return true
 }
 
 // secure does what the operation's `security` asks. An operation that needs no

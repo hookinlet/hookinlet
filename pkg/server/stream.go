@@ -103,6 +103,8 @@ func (s *Server) stillAllowed(r *http.Request, id inbox.ID) func(ctx context.Con
 			return false, nil
 		case err != nil:
 			return true, err
+		case s.refusesUntenanted(ctx, principal):
+			return false, nil
 		}
 		current, err := s.opts.Store.GetInbox(scopedTo(ctx, principal), id)
 		switch {
