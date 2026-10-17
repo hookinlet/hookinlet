@@ -209,7 +209,19 @@ type Store interface {
 	// with the error. Pruning is idempotent.
 	Prune(ctx context.Context, now time.Time) (deleted int64, err error)
 
-	// Ping verifies the Store is reachable and usable, for readiness checks.
+	// Ping verifies the Store is reachable and usable, for readiness checks. It
+	// reports the health of the Store as a whole, as seen from this server: any
+	// error makes /readyz answer 503 (for one wrapping ErrStorageFull, saying there
+	// is no room left to store deliveries; for any other, that the store is not
+	// reachable), which takes the server out of a load balancer's rotation. Ping
+	// may return ErrStorageFull when the Store itself has no room, as the SQLite
+	// store does when its volume is nearly full or a write has just failed for
+	// lack of space. It must not return it, or any error, because one tenant or
+	// inbox is over a quota: every server sharing the Store would then fail
+	// readiness at once, for every tenant. A write refused for a quota is
+	// reported by Append, for that write (ErrStorageFull is answered with 503 and
+	// the sender retries), or refused earlier by Hooks.BeforeIngest
+	// (ErrQuotaExceeded, 402).
 	Ping(ctx context.Context) error
 
 	// Close releases resources. The Store must not be used afterward.

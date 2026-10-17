@@ -302,6 +302,12 @@ suite is what makes it testable. The points that are easy to get wrong:
 - **Secrets stay sealed.** A Store persists `VerifierSecret` verbatim and never
   sees plaintext, and returns inboxes whose `String` and log forms redact
   secrets and token hashes.
+- **`Ping` is about the whole Store.** Any error from it makes `/readyz` answer `503`
+  and takes the server out of rotation; `ErrStorageFull` says there is no room left at
+  all. A quota on one tenant or inbox must never show there, or every server sharing
+  the Store fails readiness at once. Refuse the write instead: `Append` returns
+  `ErrStorageFull` for it (`503`, and the sender retries), or a hook refuses the
+  delivery first with `ErrQuotaExceeded` (`402`).
 - **Large deletes must not block writes.** `DeleteInbox` and `Prune` run in small
   batches; deleting everything in one transaction stalls every delivery.
 

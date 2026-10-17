@@ -26,7 +26,8 @@ var (
 	// returns it.
 	ErrEpochChanged = errors.New("epoch changed")
 	// ErrStorageFull means the Store has no room to write. A Store returns it from
-	// a write that failed for lack of space, and from Ping while it is short of it.
+	// a write that failed for lack of space, and from Ping while the Store as a
+	// whole is short of it (never for one tenant's or inbox's quota: see Ping).
 	// The server answers a delivery with HTTP 503, since the sender should try again
 	// when there is room, and readiness fails.
 	ErrStorageFull = errors.New("storage full")
