@@ -4,10 +4,12 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.2.0 - 2026-10-16
 
-This will be 0.2.0. It changes how a stored secret is bound to its inbox and changes some Go interfaces under
-`pkg/`, because nothing depends on either yet; see **Upgrading** for what an existing data directory needs.
+The first release that changes how data is stored and what the Go interfaces under `pkg/` look like, made now
+because nothing depends on either yet. If you have no stored verifier secrets, upgrading is starting the new
+version on the same data directory; if you have, read **Upgrading** first. The HTTP API, the command line and the
+console are unchanged.
 
 **Breaking**
 
@@ -19,7 +21,6 @@ This will be 0.2.0. It changes how a stored secret is bound to its inbox and cha
   something to the inbox before the row exists chooses it (`inbox.NewUID`). `UpdateInbox` ignores it, and a
   restore from a backup keeps it, so that what was sealed still opens. The conformance suite (`pkg/inboxtest`)
   checks all of this for any `Store`.
-
 - **Inboxes have a tenant, and slugs are unique within one.** `Inbox.Tenant` is an opaque key, empty by default,
   that keeps the inboxes of independent parties apart in one `Store`: the context passed to a `Store` call can be
   scoped to a tenant (`inbox.WithTenant`), and then every method acts only within it, so another tenant's inbox is
@@ -30,11 +31,15 @@ This will be 0.2.0. It changes how a stored secret is bound to its inbox and cha
 - **`ScopedPrincipal.InboxIDs` takes a context and returns an error:** `InboxIDs(ctx) ([]ID, error)`, so a
   principal that has to look its inboxes up can.
 
+**Changed**
+
 - **`/readyz` opens a sample of the stored secrets, not all of them.** It used to list every inbox and open every
   verifier secret each time the answer expired, so its cost grew with the number of inboxes. It now opens at most 25
   (looking at no more than 5000 inboxes); a master key that opens nothing shows in any sample, and one inbox with a
   damaged secret is still found at start-up, which checks them all. `Options.SkipReadinessSecretCheck` turns the check
   off for a `SecretBox` that has its own health check, such as one that calls a key service.
+
+**Added**
 
 - **`Server.MetricsHandler()`** serves the series of `GET /metrics` (GET and HEAD, no authentication) for an embedder
   to mount on a listener of its own, so that metrics can be scraped without the admin API on the same address.
@@ -49,6 +54,8 @@ This will be 0.2.0. It changes how a stored secret is bound to its inbox and cha
   except the copy the migration keeps.
 - Migration 10 adds the tenant column and moves the slug to a column that is unique with it. The old column stays,
   unused, because SQLite cannot drop its constraint without rebuilding the table and every message with it.
+- If you implement a `Store`, a `Principal` or a `SecretBox` of your own, run the conformance suites in
+  `pkg/inboxtest` again: the `UIDs` and `Tenants` cases of `StoreSuite` are new.
 
 ## 0.1.4 - 2026-10-16
 
