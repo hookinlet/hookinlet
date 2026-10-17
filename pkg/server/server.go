@@ -68,6 +68,19 @@ type Options struct {
 	// API is not served at all: there is no safe default for who may read.
 	// token.NewAuthenticator provides the open-source default.
 	Authenticator inbox.Authenticator
+	// RequireTenant refuses a caller whose Principal is in no tenant (does not
+	// implement inbox.TenantPrincipal) and is not an admin (CanAdmin is false).
+	// Such a caller is otherwise unscoped: it names inboxes in the default tenant,
+	// and MCP's list_inboxes shows it every inbox in every tenant that CanReadInbox
+	// allows. An embedder whose callers all belong to tenants should set it, so that
+	// a Principal that forgets Tenant() fails closed. The refusal is a 500 that
+	// says nothing of why, and an error in the log that names the Principal's type;
+	// it applies to the read API, streams (also when one is checked again), MCP and
+	// the admin API. An admin in no tenant is still served, as the operator's view
+	// across tenants. With an Authenticator whose principals are never
+	// TenantPrincipals (the shipped token one), only the admin token is served.
+	// Defaults to false.
+	RequireTenant bool
 	// TrustedProxies lists the networks whose X-Forwarded-For header is
 	// believed when recording a delivery's source IP. Empty means the header
 	// is never trusted.
