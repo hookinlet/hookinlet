@@ -212,7 +212,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 	if err != nil {
 		return nil, fmt.Errorf("admin: generate uid: %w", err)
 	}
-	sealed, err := s.seal(uid, p.VerifierSecret)
+	sealed, err := s.seal(ctx, uid, p.VerifierSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +417,7 @@ func (s *Service) SetSecret(ctx context.Context, slug, secret string) (View, err
 		if err := s.checkSecret(in.Verifier, in.VerifierConfig, secret); err != nil {
 			return View{}, err
 		}
-		sealed, err := s.seal(in.UID, secret) // bound to this inbox's UID, so after the read
+		sealed, err := s.seal(ctx, in.UID, secret) // bound to this inbox's UID, so after the read
 		if err != nil {
 			return View{}, err
 		}
@@ -532,8 +532,9 @@ func (s *Service) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 
 // seal seals a verifier secret for the inbox with this UID, which is the context
 // it is bound to: the UID never changes and no other inbox has it, so a sealed
-// value copied onto another inbox's row does not open there.
-func (s *Service) seal(uid, secret string) ([]byte, error) {
+// value copied onto another inbox's row does not open there. ctx is the caller's,
+// for a SecretBox that takes one.
+func (s *Service) seal(ctx context.Context, uid, secret string) ([]byte, error) {
 	if secret == "" {
 		return nil, nil
 	}
@@ -543,7 +544,7 @@ func (s *Service) seal(uid, secret string) ([]byte, error) {
 	if s.Box == nil {
 		return nil, ErrNoSecretBox
 	}
-	return s.Box.Seal([]byte(secret), inbox.VerifierSecretContext(uid))
+	return inbox.SealWith(ctx, s.Box, []byte(secret), inbox.VerifierSecretContext(uid))
 }
 
 // checkVerifier makes sure the verifier exists and accepts its configuration,

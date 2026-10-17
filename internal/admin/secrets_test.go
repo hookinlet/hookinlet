@@ -377,3 +377,48 @@ func (b tenantBox) Open(ct, context []byte) ([]byte, error) {
 	}
 	return b.SecretBox.Open(ct, context)
 }
+
+// keyServiceBox stands for a box that asks a key service, which the caller gives up
+// on during the first open.
+type keyServiceBox struct {
+	*secretbox.Box
+	cancel context.CancelFunc
+}
+
+func (b keyServiceBox) OpenContext(ctx context.Context, _, _ []byte) ([]byte, error) {
+	b.cancel()
+	return nil, fmt.Errorf("key service: %w", ctx.Err())
+}
+
+func (b keyServiceBox) SealContext(ctx context.Context, pt, binding []byte) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return b.Seal(pt, binding)
+}
+
+// Rekey and CheckSecrets give the box the caller's context, and one that ends while
+// a secret is being opened is reported as that, not as a secret that does not open.
+func TestASecretCheckCutShortSaysSo(t *testing.T) {
+	_, st := secretService(t)
+	before := mustSecret(t, st, "alpha")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	svc := &admin.Service{Store: st, Box: boxOf(t, 2)}
+	_, err := svc.Rekey(ctx, keyServiceBox{boxOf(t, 1), cancel})
+	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "neither") {
+		t.Errorf("Rekey: %v, want context.Canceled", err)
+	}
+	if !bytes.Equal(before, mustSecret(t, st, "alpha")) {
+		t.Error("an interrupted rekey changed an inbox")
+	}
+
+	ctx, cancel = context.WithCancel(t.Context())
+	r, err := (&admin.Service{Store: st, Box: keyServiceBox{boxOf(t, 1), cancel}}).CheckSecrets(ctx)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, admin.ErrUnreadableSecrets) {
+		t.Errorf("CheckSecrets: %v, want context.Canceled", err)
+	}
+	if r.Unreadable() != 0 {
+		t.Errorf("an open cut short was counted as unreadable: %+v", r)
+	}
+}

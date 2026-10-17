@@ -11,14 +11,19 @@ package inboxtest
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
 
 // SecretBoxSuite runs the inbox.SecretBox conformance tests. newBox must
 // return a box under a fixed key each time it is called, so the suite can
-// check that separate boxes interoperate.
+// check that separate boxes interoperate. When the box is also an
+// inbox.ContextSecretBox, it checks that the context methods agree with Seal and
+// Open; ContextSecretBoxSuite checks that they honour the context.
 func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox, otherKey ...func(t *testing.T) inbox.SecretBox) {
 	t.Helper()
 	ctx1, ctx2 := []byte("inbox-one"), []byte("inbox-two")
@@ -142,6 +147,12 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox, oth
 		}
 	})
 
+	if _, ok := newBox(t).(inbox.ContextSecretBox); ok {
+		t.Run("ContextMethodsAgree", func(t *testing.T) {
+			testContextMethodsAgree(t, newBox(t).(inbox.ContextSecretBox), ctx1, ctx2)
+		})
+	}
+
 	t.Run("DoesNotAliasInput", func(t *testing.T) {
 		box := newBox(t)
 		pt := []byte("original")
@@ -152,6 +163,91 @@ func SecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox, oth
 			t.Errorf("Seal retained the caller's slice: %q, %v", got, err)
 		}
 	})
+}
+
+// ContextSecretBoxSuite runs the conformance tests of an inbox.ContextSecretBox
+// that does I/O, such as one that asks a key service: besides agreeing with Seal
+// and Open, its context methods must give up on a context that is already
+// cancelled or past its deadline, with an error that wraps ctx.Err(). A box that
+// does no I/O (pkg/secretbox) may ignore the context, and need only pass
+// SecretBoxSuite. newBox is as for SecretBoxSuite.
+func ContextSecretBoxSuite(t *testing.T, newBox func(t *testing.T) inbox.SecretBox) {
+	t.Helper()
+	ctx1, ctx2 := []byte("inbox-one"), []byte("inbox-two")
+	box := func(t *testing.T) inbox.ContextSecretBox {
+		t.Helper()
+		b := newBox(t)
+		cb, ok := b.(inbox.ContextSecretBox)
+		if !ok {
+			t.Fatalf("%T does not implement inbox.ContextSecretBox", b)
+		}
+		return cb
+	}
+
+	t.Run("ContextMethodsAgree", func(t *testing.T) {
+		testContextMethodsAgree(t, box(t), ctx1, ctx2)
+	})
+
+	t.Run("GivesUpOnAnEndedContext", func(t *testing.T) {
+		b := box(t)
+		ct, err := b.Seal([]byte("secret"), ctx1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cancelled, cancel := context.WithCancel(t.Context())
+		cancel()
+		expired, cancel2 := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+		defer cancel2()
+		for name, c := range map[string]struct {
+			ctx  context.Context
+			want error
+		}{"cancelled": {cancelled, context.Canceled}, "past its deadline": {expired, context.DeadlineExceeded}} {
+			if got, err := b.SealContext(c.ctx, []byte("secret"), ctx1); !errors.Is(err, c.want) {
+				t.Errorf("SealContext with a context %s: %q, %v; want an error wrapping %v", name, got, err, c.want)
+			}
+			if got, err := b.OpenContext(c.ctx, ct, ctx1); !errors.Is(err, c.want) {
+				t.Errorf("OpenContext with a context %s: %q, %v; want an error wrapping %v", name, got, err, c.want)
+			}
+		}
+	})
+}
+
+// testContextMethodsAgree checks that SealContext and OpenContext do what Seal and
+// Open do: a value sealed by either opens with either, and is bound the same way.
+func testContextMethodsAgree(t *testing.T, box inbox.ContextSecretBox, ctx1, ctx2 []byte) {
+	t.Helper()
+	ctx := t.Context()
+	pt := []byte("either way")
+	viaCtx, err := box.SealContext(ctx, pt, ctx1)
+	if err != nil {
+		t.Fatalf("SealContext: %v", err)
+	}
+	viaPlain, err := box.Seal(pt, ctx1)
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if bytes.Contains(viaCtx, pt) {
+		t.Error("SealContext's ciphertext contains the plaintext")
+	}
+	if again, err := box.SealContext(ctx, pt, ctx1); err != nil || bytes.Equal(again, viaCtx) {
+		t.Errorf("sealing the same plaintext twice with SealContext gave identical ciphertexts (%v)", err)
+	}
+	for name, ct := range map[string][]byte{"SealContext": viaCtx, "Seal": viaPlain} {
+		if got, err := box.Open(ct, ctx1); err != nil || !bytes.Equal(got, pt) {
+			t.Errorf("Open of a value from %s: %q, %v", name, got, err)
+		}
+		if got, err := box.OpenContext(ctx, ct, ctx1); err != nil || !bytes.Equal(got, pt) {
+			t.Errorf("OpenContext of a value from %s: %q, %v", name, got, err)
+		}
+		if got, err := box.OpenContext(ctx, ct, ctx2); err == nil {
+			t.Errorf("OpenContext opened a value from %s with another binding: %q", name, got)
+		}
+		bad := bytes.Clone(ct)
+		bad[len(bad)-1] ^= 0x01
+		if got, err := box.OpenContext(ctx, bad, ctx1); err == nil {
+			t.Errorf("OpenContext opened a tampered value from %s: %q", name, got)
+		}
+	}
 }
 
 func allBytes() []byte {

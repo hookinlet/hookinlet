@@ -17,6 +17,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Notifier` | Tells readers an inbox may have new messages. Carries no payload. | `pkg/notify/local` (in process) | `NotifierSuite` |
 | `Authenticator`, `Principal` | Says who a request is and what it may read or administer. | `pkg/auth/token` | `AuthenticatorSuite` |
 | `SecretBox` | Seals and opens verifier secrets, bound to a context: seal a verifier secret with `inbox.VerifierSecretContext(inbox.UID)`, or the server cannot open it. | `pkg/secretbox` | `SecretBoxSuite` |
+| `ContextSecretBox` (optional, of `SecretBox`) | `SealContext` and `OpenContext`: `Seal` and `Open` given the context of the work, so a box that asks a key service can stop when it is cancelled or past its deadline, and read what the embedder put on it. The server calls them in place of `Seal` and `Open`. See [Writing a SecretBox](#writing-a-secretbox). | `pkg/secretbox` (which ignores the context) | `SecretBoxSuite`, and `ContextSecretBoxSuite` for a box that does I/O |
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
 | `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
@@ -29,7 +30,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they
-are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, `Hooks` without `Admitter` admits every read, stream and wait, and `Hooks` without `IngestObserver` is told nothing more than `AfterIngest` says. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
+are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, `Hooks` without `Admitter` admits every read, stream and wait, `Hooks` without `IngestObserver` is told nothing more than `AfterIngest` says, and a `SecretBox` without `ContextSecretBox` is called with `Seal` and `Open`, without a context. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
 
 `/readyz` opens a sample of the stored verifier secrets to catch a master key that is not the one the data was sealed under, and answers `503` only if none of them opens. The sample is up to 25 secrets, at most 3 of each tenant before more of any one, oldest first; it looks at no more than the 5000 oldest inboxes, and, once it has 25 secrets in hand, at no more than 500 further inboxes for other tenants; the answer is kept for 30 seconds (5 while it is failing). So with a `SecretBox` that keeps a key per tenant, one tenant whose key is gone is logged (with the tenant, how many of its secrets did not open, and a few slugs) but does not take the server out of rotation for the others, as long as another tenant has a secret among the inboxes it looks at (with many tenants, those of the oldest inboxes get the places). A server whose inboxes with a secret all belong to one tenant cannot tell that tenant's key being gone from a wrong master key, and answers `503` for both. A `SecretBox` whose opens are expensive, such as one that asks a key service, can turn the check off with `Options.SkipReadinessSecretCheck` and report its own health. `Server.CheckSecrets`, which the `hookinlet` program runs before it listens, always opens every secret of every tenant, and fails for any one that does not open.
 
@@ -389,6 +390,43 @@ An in-process notifier must not drop signals. One that crosses the network may
 `HOOKINLET_SSE_RECHECK_INTERVAL` (`Options.SSERecheckInterval`), which makes every
 stream and MCP wait re-read the Store on that interval regardless. `Publish` is
 called with a context that may already be cancelled and must still deliver.
+
+## Writing a SecretBox
+
+A `SecretBox` seals a verifier secret when an inbox is created or its secret is set,
+and opens it on every delivery to an inbox that has one, on each `/readyz` sample
+and in `Server.CheckSecrets`. The server does not cache what it opens: a box that
+asks a key service for a data key should cache the key itself, for as long as it
+judges safe.
+
+```go
+inboxtest.SecretBoxSuite(t, func(t *testing.T) inbox.SecretBox { return newMyBox(t) })
+```
+
+A box that does I/O should also implement `inbox.ContextSecretBox`, whose
+`SealContext` and `OpenContext` are given the context of the work; the server then
+calls them and not `Seal` and `Open`. They must give the same results, and give up
+with an error that wraps `ctx.Err()` once the context ends. What the context is:
+
+- **A delivery**: the request's context, cancelled when the sender goes away. It is
+  not scoped to a tenant (`inbox.TenantFrom` reports none), because deliveries are
+  not: the inbox is found by its ingest key.
+- **The admin API** (creating an inbox with a secret, setting one): the request's
+  context, scoped to the caller's tenant (`inbox.WithTenant`) when its `Principal`
+  is a `TenantPrincipal`, and not scoped otherwise.
+- **`/readyz`**: the check's own context, which outlives the probe, has a deadline
+  of 20 seconds for the whole sample, and is not scoped. A check cut short by it
+  is not taken for a secret that does not open.
+- **`Server.CheckSecrets`**: the caller's context (`hookinlet serve` passes
+  `context.Background()`), not scoped, since it opens every tenant's secrets.
+
+Code of your own that seals or opens with a box calls `inbox.SealWith(ctx, box, …)`
+and `inbox.OpenWith(ctx, box, …)`, which pass the context to a box that takes one.
+To check that a box honours the context:
+
+```go
+inboxtest.ContextSecretBoxSuite(t, func(t *testing.T) inbox.SecretBox { return newMyBox(t) })
+```
 
 ## Writing an Authenticator
 

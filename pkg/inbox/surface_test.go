@@ -14,8 +14,8 @@ import (
 
 // These interfaces are implemented outside this module, so a method added to one
 // breaks every implementation. A new capability is a new interface that an
-// implementation may also satisfy, found with a type assertion (see Admitter, Backupper and
-// ScopedPrincipal and docs/stability.md). This test fails when a method set changes,
+// implementation may also satisfy, found with a type assertion (see Admitter, Backupper,
+// ContextSecretBox and ScopedPrincipal and docs/stability.md). This test fails when a method set changes,
 // so that the change is a decision and not an accident; before 1.0 a decision to
 // change one is allowed, and goes in CHANGELOG.md, and this list is updated with it.
 func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
@@ -66,7 +66,13 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"StatusReporter":    {"Status(context.Context) (inbox.StoreStatus, error)"},
 		"ScopedPrincipal":   {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "InboxIDs(context.Context) ([]inbox.ID, error)"},
 		"TenantPrincipal":   {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "Tenant() string"},
-		"Verifier":          {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
+		"ContextSecretBox": {
+			"Open([]uint8, []uint8) ([]uint8, error)",
+			"OpenContext(context.Context, []uint8, []uint8) ([]uint8, error)",
+			"Seal([]uint8, []uint8) ([]uint8, error)",
+			"SealContext(context.Context, []uint8, []uint8) ([]uint8, error)",
+		},
+		"Verifier": {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
 	}
 	got := map[string]reflect.Type{
 		"Store":             reflect.TypeFor[inbox.Store](),
@@ -83,6 +89,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"UnverifiedCounter": reflect.TypeFor[inbox.UnverifiedCounter](),
 		"StatusReporter":    reflect.TypeFor[inbox.StatusReporter](),
 		"ScopedPrincipal":   reflect.TypeFor[inbox.ScopedPrincipal](),
+		"ContextSecretBox":  reflect.TypeFor[inbox.ContextSecretBox](),
 		"Verifier":          reflect.TypeFor[verify.Verifier](),
 	}
 	for name, typ := range got {

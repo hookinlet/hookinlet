@@ -539,3 +539,51 @@ type SecretBox interface {
 	// sealed under another key, or sealed for another context.
 	Open(ciphertext, context []byte) ([]byte, error)
 }
+
+// ContextSecretBox is an optional capability of a SecretBox, found by type
+// assertion: a SecretBox that also implements it is given the context of the work
+// a secret is sealed or opened for, and the server calls these methods in place of
+// Seal and Open. A SecretBox without it is called as before. It is for a box that
+// does I/O, such as one that asks a key service to unwrap a data key: it can stop
+// when the context is cancelled (the sender of a delivery went away) or past its
+// deadline, and read values the embedder put on it.
+//
+// What the context carries depends on the work. For a delivery it is the
+// request's context, which is not scoped to a tenant (deliveries are not). For an
+// admin API call it is the request's context, scoped to the caller's tenant
+// (WithTenant) when the Principal is a TenantPrincipal. For the readiness check it
+// is the check's own context, with a deadline and no tenant; for
+// Server.CheckSecrets, the caller's.
+//
+// binding is what Seal and Open call context: the bytes the value is bound to,
+// such as VerifierSecretContext(uid). Results must be the same as Seal's and
+// Open's: a value sealed by one method opens with either. An implementation that
+// does I/O returns an error that wraps ctx.Err() when it gives up because of the
+// context. Call these through SealWith and OpenWith, not directly.
+type ContextSecretBox interface {
+	SecretBox
+	// SealContext is Seal, given the context.
+	SealContext(ctx context.Context, plaintext, binding []byte) ([]byte, error)
+	// OpenContext is Open, given the context.
+	OpenContext(ctx context.Context, ciphertext, binding []byte) ([]byte, error)
+}
+
+// SealWith seals plaintext with box, bound to binding (see SecretBox.Seal), giving
+// box the context if it is a ContextSecretBox. It is how the server seals every
+// secret.
+func SealWith(ctx context.Context, box SecretBox, plaintext, binding []byte) ([]byte, error) {
+	if cb, ok := box.(ContextSecretBox); ok {
+		return cb.SealContext(ctx, plaintext, binding)
+	}
+	return box.Seal(plaintext, binding)
+}
+
+// OpenWith opens ciphertext with box, given the binding it was sealed with (see
+// SecretBox.Open), giving box the context if it is a ContextSecretBox. It is how
+// the server opens every secret.
+func OpenWith(ctx context.Context, box SecretBox, ciphertext, binding []byte) ([]byte, error) {
+	if cb, ok := box.(ContextSecretBox); ok {
+		return cb.OpenContext(ctx, ciphertext, binding)
+	}
+	return box.Open(ciphertext, binding)
+}
