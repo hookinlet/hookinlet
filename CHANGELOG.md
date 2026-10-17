@@ -8,6 +8,13 @@ applies.
 
 **Added**
 
+- **MCP `list_inboxes` pages.** It takes an optional `after` and, when a result is `truncated`, returns `next_after`
+  to pass back for the next 100 inboxes, so a token that can read more than 100 can list them all. The cursor is
+  opaque: it names the last inbox listed by slug and epoch, not by ID, and every page is checked against the caller.
+  A page continues after that inbox, so inboxes created or deleted elsewhere between calls cause no skips or repeats;
+  if that inbox was deleted, the call fails and the client lists again without `after`. Nothing reports a total, and
+  a token not limited to a list still stops without saying so when a call has looked through 10,000 inboxes. A client
+  that never passes `after` gets the same inboxes and `truncated` as before. See [`list_inboxes`](docs/mcp.md#list_inboxes).
 - **`server.Options.RequireTenant`** refuses a caller whose `Principal` is neither an `inbox.TenantPrincipal` nor an
   admin (`CanAdmin`), so that a hosted embedder's principal that forgets `Tenant()` fails closed instead of running
   unscoped (naming inboxes in the default tenant, and seeing every tenant's inboxes in MCP `list_inboxes` that its
