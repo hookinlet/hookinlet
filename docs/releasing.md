@@ -7,10 +7,11 @@ For whoever tags a release. The work is in `.github/workflows/release.yml` and
 
 1. `main` is green, and `CHANGELOG.md` has the release's entry at the top (move "Unreleased" into a
    heading for the version).
-2. Start the full CI on `main` (Actions, CI, Run workflow). A push to `main` runs only the fast checks, to
-   save CI minutes; the full set adds the race detector, the documentation examples, the image build and the
-   release dry run, and also runs every night. The release workflow will not publish a tag whose commit is
-   not on `main` or has no passing full run, so there is nothing to bypass: wait for it.
+2. Start the full CI on `main` (Actions, CI, Run workflow). A merge to `main` runs the heavy checks (the race
+   detector, the documentation examples, the image build and the release dry run) only if it changed
+   something they read, to save CI minutes, and they run every night; a manual run always runs them all. The
+   release workflow will not publish a tag whose commit is not on `main` or has no passing nightly or manual
+   run, so there is nothing to bypass: wait for it.
 3. Run the workflow by hand (Actions, Release, Run workflow). It builds the
    archives, checksums, SBOMs, and both image architectures, and smoke-tests the
    image, but publishes nothing, whatever ref you run it from.

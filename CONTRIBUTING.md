@@ -95,10 +95,11 @@ the examples. Go is pinned in `go.mod`. The Docker image and its smoke test are 
 and checks that nothing acknowledged is lost (`go run -tags soak ./scripts/soak -h`); it is behind a build tag and
 is not part of `go build ./...` or `go test ./...`.
 
-A pull request, and a change landing on `main`, run the fast checks: build, vet, unit tests (without the race
-detector), lint, the static checks on the OpenAPI document and the generated code, and the admin console's build,
-unit tests and end-to-end tests in a browser. The race detector, the documentation examples, the image build and
-smoke test, and the release dry run run every night and when a maintainer starts CI by hand, and a release needs
-that full run to have passed. So run the ones you touched yourself before asking for review.
+A pull request runs the fast checks: build, vet, unit tests (without the race detector), lint, the static
+checks on the OpenAPI document and the generated code, and the admin console's build, unit tests and end-to-end
+tests in a browser. The race detector, the documentation examples, the image build and smoke test, and the release
+dry run run every night, when a maintainer starts CI by hand, and when a change lands on `main` that touches
+anything they read (not one that only edits the changelog or another project document). A release needs a full
+run to have passed. So run the ones you touched yourself before asking for review.
 
 Commit messages say what changed and why, for whoever reads the history later.
