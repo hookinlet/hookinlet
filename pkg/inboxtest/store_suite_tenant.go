@@ -5,6 +5,7 @@ package inboxtest
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -176,5 +177,81 @@ func testTenants(t *testing.T, s inbox.Store, _ *Clock) {
 	}
 	if got, err := s.GetInboxBySlug(ctxB, "shared"); err != nil || got.ID != b.ID {
 		t.Errorf("tenant B's inbox after tenant A's was deleted: %v, %v", got, err)
+	}
+}
+
+// testTokensAreNotScopedByTenant pins what the Store contract says of tokens today:
+// they are the operator's. A Token has no tenant, and GetTokenByHash, ListTokens and
+// DeleteToken act on every token whatever tenant the context is scoped to; the only
+// check a scope adds is CreateToken's, that the token's inboxes are the tenant's
+// (the Tenants case checks that). GetTokenByHash must ignore the scope in any case,
+// since the server calls it to authenticate a request before it knows the tenant.
+//
+// Whether tokens should instead belong to a tenant is an open design question. This
+// case checks only the current contract, so that a Store does not quietly differ
+// from it; if the contract changes, this case changes with it.
+func testTokensAreNotScopedByTenant(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	ctxA := inbox.WithTenant(ctx, "org-a")
+	ctxB := inbox.WithTenant(ctx, "org-b")
+	a := tenantInbox(t, ctxA, s, "tokens", "tokens-key-a")
+	b := tenantInbox(t, ctxB, s, "tokens", "tokens-key-b")
+
+	tokA := mkToken("of-a", scoped(a.ID))
+	if err := s.CreateToken(ctxA, tokA); err != nil {
+		t.Fatalf("CreateToken in tenant A for its own inbox: %v", err)
+	}
+	tokB := mkToken("of-b", scoped(b.ID))
+	if err := s.CreateToken(ctxB, tokB); err != nil {
+		t.Fatalf("CreateToken in tenant B for its own inbox: %v", err)
+	}
+
+	// Found by its hash from any context, as authentication needs.
+	for name, c := range map[string]context.Context{"unscoped": ctx, "tenant A": ctxA, "tenant B": ctxB} {
+		got, err := s.GetTokenByHash(c, tokenHash("of-a"))
+		if err != nil || got.ID != tokA.ID || len(got.InboxIDs) != 1 || got.InboxIDs[0] != a.ID {
+			t.Errorf("GetTokenByHash of tenant A's token, %s: %+v, %v; want it, as without a scope", name, got, err)
+		}
+	}
+
+	// Listed the same from any context, with or without an inbox to filter by.
+	ids := func(c context.Context, p inbox.TokenListParams) []inbox.TokenID { //nolint:revive // a helper
+		t.Helper()
+		tks, err := s.ListTokens(c, p)
+		if err != nil {
+			t.Fatalf("ListTokens: %v", err)
+		}
+		out := []inbox.TokenID{}
+		for _, tk := range tks {
+			out = append(out, tk.ID)
+		}
+		return out
+	}
+	for name, p := range map[string]inbox.TokenListParams{
+		"every token":          {},
+		"tokens of A's inbox":  {InboxID: a.ID},
+		"tokens of B's inbox":  {InboxID: b.ID},
+		"after the first, one": {AfterID: tokA.ID, Limit: 1},
+	} {
+		want := ids(ctx, p)
+		for scope, c := range map[string]context.Context{"tenant A": ctxA, "tenant B": ctxB} {
+			if got := ids(c, p); !reflect.DeepEqual(got, want) {
+				t.Errorf("ListTokens (%s) in %s = %v; want %v, as without a scope", name, scope, got, want)
+			}
+		}
+	}
+	if got := ids(ctxB, inbox.TokenListParams{}); !reflect.DeepEqual(got, []inbox.TokenID{tokA.ID, tokB.ID}) {
+		t.Errorf("ListTokens in tenant B = %v; want both tenants' tokens %v", got, []inbox.TokenID{tokA.ID, tokB.ID})
+	}
+
+	// Deleted by its ID from any context.
+	if err := s.DeleteToken(ctxB, tokA.ID); err != nil {
+		t.Errorf("DeleteToken of tenant A's token in tenant B: %v; want it deleted, as without a scope", err)
+	}
+	_, err := s.GetTokenByHash(ctx, tokenHash("of-a"))
+	isErr(t, "a token deleted from another tenant's context", err, inbox.ErrNotFound)
+	isErr(t, "a second delete, from its own tenant", s.DeleteToken(ctxA, tokA.ID), inbox.ErrNotFound)
+	if got, err := s.GetTokenByHash(ctxA, tokenHash("of-b")); err != nil || got.ID != tokB.ID {
+		t.Errorf("tenant B's token after tenant A's was deleted: %+v, %v", got, err)
 	}
 }

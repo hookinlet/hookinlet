@@ -57,8 +57,9 @@ import (
 //     tenant is ErrNotFound to every method that takes an inbox, a slug or an
 //     ingest key, whatever the ID, and ListInboxes does not show it. CreateInbox
 //     makes the inbox in T (an Inbox.Tenant that is neither empty nor T is
-//     ErrInvalid). Two tenants may use the same slug. A token may be given only
-//     inboxes of T.
+//     ErrInvalid). Two tenants may use the same slug. CreateToken refuses an
+//     InboxIDs entry that is not an inbox of T (ErrNotFound); the token methods
+//     are otherwise not scoped (see below).
 //   - Not scoped: the operator's view, used for deliveries, the retention sweep,
 //     the command line and anything else that is not on behalf of a tenant. Methods
 //     that take an ID or an ingest key, and ListInboxes, reach every inbox;
@@ -68,6 +69,18 @@ import (
 // Ingest keys and UIDs are unique across all tenants, because an ingest key alone
 // finds the inbox a delivery is for. Installations that never scope a context see
 // no difference: every inbox is in the default tenant.
+//
+// Tokens are the operator's, not a tenant's: a Token has no tenant, and
+// GetTokenByHash, ListTokens (including TokenListParams.InboxID) and DeleteToken
+// act on every token whether or not the context is scoped, returning and
+// deleting exactly what they would unscoped. GetTokenByHash has to: the server
+// calls it to authenticate a request, before it knows the tenant. The one check
+// a scope adds is CreateToken's, above; an AllInboxes token is not limited to T,
+// since a Token records no tenant, and reads every inbox in the Store. An
+// embedder that gives each tenant's callers credentials of their own keeps them
+// in its own Authenticator, which returns a TenantPrincipal, rather than in
+// these methods. The Tenants and TokensAreNotScopedByTenant cases of StoreSuite
+// check this.
 //
 // # Errors
 //
@@ -171,17 +184,19 @@ type Store interface {
 
 	// CreateToken validates t, assigns ID and CreatedAt, and stores it, updating
 	// *t. Every inbox in t.InboxIDs must exist (ErrNotFound otherwise, and
-	// nothing is stored), and the hash must not belong to another token
+	// nothing is stored, and in a context scoped to a tenant that includes an
+	// inbox of another tenant), and the hash must not belong to another token
 	// (ErrConflict).
 	CreateToken(ctx context.Context, t *Token) error
 	// GetTokenByHash finds the token with this hash, or returns ErrNotFound. It
 	// must be an indexed lookup, not a scan: the server calls it on every
-	// authenticated request.
+	// authenticated request. It ignores the context's tenant (see Tenants).
 	GetTokenByHash(ctx context.Context, hash []byte) (*Token, error)
-	// ListTokens pages through tokens (see TokenListParams).
+	// ListTokens pages through tokens (see TokenListParams). It ignores the
+	// context's tenant (see Tenants): it lists every token.
 	ListTokens(ctx context.Context, p TokenListParams) ([]*Token, error)
 	// DeleteToken removes a token, which stops working at once. It returns
-	// ErrNotFound if there is none.
+	// ErrNotFound if there is none. It ignores the context's tenant (see Tenants).
 	DeleteToken(ctx context.Context, id TokenID) error
 
 	// Prune applies every inbox's retention policy as of now. A message is

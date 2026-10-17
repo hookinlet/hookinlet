@@ -87,6 +87,22 @@ that never uses it has one tenant, the empty one, and sees no difference.
   inbox a delivery is for. A `Store` you write must keep to all of this; the `Tenants`
   case of `StoreSuite` checks it, including that one tenant cannot read, write, list or
   delete another's inbox by any method.
+- **Tokens are the operator's, not a tenant's.** An `inbox.Token` has no tenant.
+  `GetTokenByHash`, `ListTokens` (its `InboxID` filter included) and `DeleteToken`
+  act on every token whether or not the context is scoped, exactly as they do
+  unscoped; `GetTokenByHash` has to, because the server calls it to authenticate a
+  request before it knows the tenant. The one check a scope adds is `CreateToken`'s:
+  every inbox in `InboxIDs` must be one of the tenant's (`ErrNotFound` otherwise). An
+  `AllInboxes` token is not limited to the tenant and reads every inbox in the Store.
+  The `TokensAreNotScopedByTenant` case of `StoreSuite` checks this. So the agent
+  tokens of `pkg/auth/token`, and the admin API's `/v1/admin/tokens`, which works
+  through these methods, are for the operator: a tenant's admin (a `TenantPrincipal`
+  whose `CanAdmin` is true) that calls `/v1/admin/tokens` lists tokens of other
+  tenants that read every inbox, can revoke any token by its `id`, and can issue an
+  `all_inboxes` token that reads every tenant's inboxes. An embedder that gives each
+  tenant's callers credentials of their own keeps them in its own `Authenticator`,
+  whose principals are `TenantPrincipal`s, and does not let a tenant's admin reach
+  the token endpoints.
 
 ## Putting them together
 
@@ -272,6 +288,10 @@ suite is what makes it testable. The points that are easy to get wrong:
   the message: a wake-up followed by a read must not find it missing.
 - **The Store owns the clock** (UTC, microsecond precision), and `ReceivedAt`
   never decreases with `Seq` within an inbox.
+- **Scope by tenant, except tokens.** A context scoped with `inbox.WithTenant` limits
+  every method to that tenant's inboxes (see [Tenants](#tenants)). The token methods
+  are the operator's: `GetTokenByHash`, `ListTokens` and `DeleteToken` ignore the
+  scope, and `CreateToken` only checks that a token's inboxes are the tenant's.
 - **An inbox has an ingest key** (`Inbox.IngestKey`, the `{key}` in `/in/{key}`), which
   the caller supplies when it creates the inbox; a Store does not make one up. It is
   a capability, so it should be random.

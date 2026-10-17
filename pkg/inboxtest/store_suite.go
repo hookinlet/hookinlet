@@ -45,6 +45,7 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"Epochs", testEpochs},
 		{"UIDs", testUIDs},
 		{"Tenants", testTenants},
+		{"TokensAreNotScopedByTenant", testTokensAreNotScopedByTenant},
 		{"OldestSeqInAPage", testOldestSeqInAPage},
 		{"Tokens", testTokens},
 		{"TokensOfADeletedInbox", testTokensOfADeletedInbox},
