@@ -148,7 +148,7 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 	}
 	secret, err := s.verifierSecret(in)
 	if err != nil {
-		return s.internalFailure(ctx, "open verifier secret", err)
+		return s.internalFailure(ctx, "open verifier secret", err, inboxAttrs(in)...)
 	}
 	// The decrypted secret is wiped when verification ends, however it ends.
 	res, verr := func() (verify.Result, error) {
@@ -390,7 +390,7 @@ func (s *Server) verifierSecret(in *inbox.Inbox) ([]byte, error) {
 	}
 	secret, err := s.opts.SecretBox.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
 	if err != nil {
-		return nil, fmt.Errorf("the stored verifier secret cannot be opened (was the master key changed?): %w", err)
+		return nil, fmt.Errorf("the stored verifier secret cannot be opened (is the master key the one it was sealed under, and is the key service, if any, working for this inbox's tenant?): %w", err)
 	}
 	return secret, nil
 }
