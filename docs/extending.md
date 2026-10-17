@@ -23,6 +23,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | the server's tests |
 | `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, and for a stored message its `Seq` and whether it is verified), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | the server's tests |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
+| `StatusReporter` (optional) | The schema version, the size of the data and the free space, for `GET /v1/admin/status` and the console. | the SQLite store | none |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. `InboxIDs(ctx)` may look the list up, and may fail. | the agent principal | checked by `AuthenticatorSuite` |
 | `TenantPrincipal` (optional) | A `Principal` that belongs to one tenant. After authenticating, the server scopes the request's context to it (`inbox.WithTenant`), so slugs are looked up in that tenant and nothing outside it is reachable. See [Tenants](#tenants). | none: the shipped principals are not in a tenant | `StoreSuite` (the `Tenants` case) and the server's tests |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
@@ -242,6 +243,121 @@ from a snapshot's bytes. If it can count unverified messages cheaply (reading no
 more rows than the limit), implement `inbox.UnverifiedCounter` and add
 `inboxtest.UnverifiedCounterSuite(t, newStore)`; the server then caps the unverified
 messages an inbox keeps (see [verifiers](verifiers.md#unverified-messages-are-capped)).
+
+## Wrapping a Store
+
+To add something around a Store (tenancy, a quota, a byte count per tenant), wrap it
+in a type of your own and give the server the wrapper. Besides the 19 methods of
+`inbox.Store`, the server looks on the Store it is given for three optional
+interfaces, by type assertion, and does without each one it does not find:
+
+| Optional interface | Without it |
+|---|---|
+| `inbox.UnverifiedCounter` | Unverified messages are not capped: `Options.MaxUnverified` and an `UnverifiedLimiter` on your `Hooks` have no effect. Every delivery stored unverified (with `on_verify_fail=store`, or the verifier `none`) is accepted with `200`. The only sign is a warning in the log when the server starts. |
+| `inbox.Backupper` | `GET /v1/admin/backup` answers `501 not_implemented`, and `hookinlet backup` says the store does not support backups. |
+| `inbox.StatusReporter` | `GET /v1/admin/status` reports `schema_version` and `database_bytes` as `0` and leaves out `free_bytes`. |
+
+The core grows by adding optional interfaces like these ([Stability](stability.md#the-go-packages)), so
+a later release may add to this table.
+
+There are two easy ways to get a wrapper wrong:
+
+- **Embedding the interface hides them.** A `struct{ inbox.Store }` has exactly the 19
+  methods of `inbox.Store`, whatever the value inside it can do, so the server finds
+  none of the optional interfaces. Nothing fails: the cap is silently off, backups
+  answer `501`, and the status shows zeros.
+- **Embedding the concrete type skips the wrapper.** A `struct{ *sqlite.Store }` keeps
+  them, because the methods are promoted, but every method the wrapper does not write
+  itself, including any the concrete type gains later, goes straight to the inner
+  store, past whatever the wrapper is for.
+
+Embed the interface for the methods you do not change, and forward each optional
+interface explicitly, applying the wrapper's own logic where it applies:
+
+```go
+type metered struct {
+	inbox.Store // the methods this wrapper does not change
+	meter       *Meter
+}
+
+func (s *metered) Append(ctx context.Context, id inbox.ID, m *inbox.NewMessage) (*inbox.Message, bool, error) {
+	msg, created, err := s.Store.Append(ctx, id, m)
+	if err == nil && created {
+		s.meter.Add(ctx, id, msg.Size) // best effort: see "Counting, copying and forwarding messages"
+	}
+	return msg, created, err
+}
+
+// The optional interfaces of the store inside, forwarded one by one.
+func (s *metered) CountUnverified(ctx context.Context, id inbox.ID, limit int64) (int64, error) {
+	return s.Store.(inbox.UnverifiedCounter).CountUnverified(ctx, id, limit)
+}
+
+func (s *metered) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
+	return s.Store.(inbox.Backupper).Backup(ctx)
+}
+
+func (s *metered) Status(ctx context.Context) (inbox.StoreStatus, error) {
+	return s.Store.(inbox.StatusReporter).Status(ctx)
+}
+```
+
+Forward only the interfaces the inner store has. A method that exists but cannot work
+is worse than none: the server would call it instead of doing without.
+
+`inboxtest.AssertStoreWrapperForwards(t, wrapper, inner)` checks a wrapper: it fails,
+naming each one and what the server does without it, if the wrapper lacks an optional
+interface the inner store implements. Call it in a test of the wrapper with the store
+it wraps in production. It checks that the methods exist, not what they do, so a
+wrapper that embeds the concrete type passes it.
+
+### Counting, copying and forwarding messages
+
+- **Hooks are best effort for metering.** `AfterIngest` runs after the commit, and
+  only if `Append` returned without an error. If the Store commits and `Append` then
+  returns an error anyway (an acknowledgement lost on the way back from a database, for
+  instance), or the server stops between the commit and the hook, the message is stored
+  and `AfterIngest` is never called for it. The sender got no `200` and sends again:
+  a verified delivery with a dedupe key is then a duplicate (`created == false`), and
+  anything else is stored a second time. Either way a count kept in `AfterIngest`
+  falls short of what is stored. An exact count is kept inside the Store's own
+  transaction, or taken from the inbox's `LastSeq` (`Store.LatestSeq`): it only goes
+  up, a duplicate does not consume a sequence number, and it counts every message
+  created, verified or not.
+- **Decide on `Message.Verified`.** With `on_verify_fail=store` a forged delivery is
+  stored with `Verified == false`, and unverified messages are never deduplicated, so
+  each replay of one is a new message (`created == true`). A count of what customers
+  are billed for, or of genuine deliveries, should look at `Verified`.
+- **`Store.Append` does not signal the Notifier.** The server calls
+  `Notifier.Publish` after a delivery that created a message. Anything else that
+  appends (a Store or a hook that writes to another inbox) must call `Publish` for
+  that inbox after the commit. Otherwise a reader waiting on that inbox does not see
+  the message until something else wakes it: the next delivery the server makes to
+  that inbox, `Options.SSERecheckInterval` if it is set (it is off by default), or, for
+  an MCP wait, its timeout or the next authorization recheck
+  (`Options.StreamRevalidateInterval`). An SSE stream is not re-read on that recheck.
+- **Copying a message to another inbox from `AfterIngest` is not durable.** The copy
+  is a second write after the first has committed. `AfterIngest` must not block, so a
+  copy made in the background can still be running after the sender has its `200`; if
+  the process stops then, the copy is lost and nobody sends the delivery again. A copy
+  made before the response is lost too if the process stops after the commit and
+  before the copy: the sender's retry of a verified delivery is then a duplicate
+  (`created == false`), which a hook that copies new messages skips. And a copy cannot
+  be deduplicated like the original: `Message` has the `DeliveryID` but not the dedupe
+  key the server stored with it (for an id the signature does not cover, the id and a
+  hash of the body). A fan-out or forward that must not lose messages belongs inside
+  the Store's `Append`, in the same transaction as the original, which an embedder that
+  owns the Store can do; once that transaction commits, it calls `Publish` for the other
+  inbox itself, as above.
+- **Forwarding stored messages from a cursor.** Retention (`Store.Prune`) deletes old
+  messages whether or not they have been forwarded. Hold retention back for inboxes
+  you forward from, or notice the loss: a page whose `OldestSeq` is above your cursor
+  plus one, or an unfiltered page with no messages whose `LatestSeq` is above your cursor, means
+  messages were deleted before you read them. Stored headers can include
+  the sender's signature header (`X-Hub-Signature-256`, `Stripe-Signature`,
+  `webhook-signature` and the like; only the `token` verifier's header, and
+  `Authorization`, `Cookie` and `Proxy-Authorization`, are dropped before storing). A
+  forwarder must not pass it on as though it signed the request itself.
 
 ## Writing a Notifier
 

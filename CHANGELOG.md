@@ -4,6 +4,18 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+**Go API**
+
+- **Added `inboxtest.AssertStoreWrapperForwards(t, wrapper, inner)`**, which fails, naming each one and what the
+  server does without it, when a Store wrapper lacks an optional Store interface (`inbox.UnverifiedCounter`,
+  `inbox.Backupper`, `inbox.StatusReporter`) that the store it wraps implements. A wrapper that embeds `inbox.Store`
+  hides all three, and the server then silently stops capping unverified messages, answers backups with `501` and
+  reports zeros in the admin status. `docs/extending.md` has a new section, **Wrapping a Store**, on this and on what
+  hooks can and cannot be relied on for: metering, copying to another inbox, signalling the Notifier, and forwarding
+  stored messages.
+
 ## 0.3.0 - 2026-10-17
 
 Two changes for servers that hold more than one tenant's inboxes, and a way to see how every delivery ended.
