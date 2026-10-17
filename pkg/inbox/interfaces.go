@@ -431,6 +431,102 @@ type UnverifiedLimiter interface {
 	MaxUnverified(ctx context.Context, in *Inbox) int
 }
 
+// IngestOutcome says how a delivery ended, for IngestObserver. New outcomes may be
+// added; an observer should treat one it does not know as a refusal it does not
+// count separately.
+type IngestOutcome string
+
+const (
+	// IngestStored: the message was committed (200).
+	IngestStored IngestOutcome = "stored"
+	// IngestDuplicate: a repeat of a verified delivery the inbox already holds; it
+	// was acknowledged (200) and nothing new was stored.
+	IngestDuplicate IngestOutcome = "duplicate"
+	// IngestHandshake: a verified handshake (Slack's url_verification) was answered
+	// (200) and not stored.
+	IngestHandshake IngestOutcome = "handshake"
+	// IngestVerificationFailed: the signature did not verify and the inbox refuses
+	// such deliveries (401). With on_verify_fail=store the delivery is stored
+	// unverified instead, and the outcome is IngestStored with Verified false.
+	IngestVerificationFailed IngestOutcome = "verification_failed"
+	// IngestRateLimited, IngestQuotaExceeded and IngestForbidden: Hooks.BeforeIngest
+	// refused the delivery with an error wrapping ErrRateLimited (429),
+	// ErrQuotaExceeded (402) or ErrForbidden (403).
+	IngestRateLimited   IngestOutcome = "rate_limited"
+	IngestQuotaExceeded IngestOutcome = "quota_exceeded"
+	IngestForbidden     IngestOutcome = "forbidden"
+	// IngestUnverifiedLimit: the delivery would have been stored unverified and the
+	// inbox holds as many unverified messages as it may (429).
+	IngestUnverifiedLimit IngestOutcome = "unverified_limit"
+	// IngestStorageFull: the Store had no room for it (503).
+	IngestStorageFull IngestOutcome = "storage_full"
+	// IngestOverloaded: the server was holding as many bodies in memory as it may
+	// and told the sender to come back (503).
+	IngestOverloaded IngestOutcome = "overloaded"
+	// IngestTooLarge: the body was over the inbox's MaxBodyBytes (413).
+	IngestTooLarge IngestOutcome = "too_large"
+	// IngestBadRequest: the body could not be read, for instance because the sender
+	// went away part way (400).
+	IngestBadRequest IngestOutcome = "bad_request"
+	// IngestNotFound: the inbox is disabled, or was deleted while the delivery was
+	// being received (404, as for a key that names no inbox).
+	IngestNotFound IngestOutcome = "not_found"
+	// IngestError: something failed on the server's side, including a BeforeIngest
+	// error that wraps none of the refusals above (500). The cause is in the log.
+	IngestError IngestOutcome = "error"
+)
+
+// IngestEvent is how one delivery to a known inbox ended, for IngestObserver. It
+// grows by adding fields, which is why it is a struct. An observer must not modify
+// it or the Inbox it points to.
+//
+// It carries nothing the sender sent beyond its size and address: no headers, no
+// body, and not the reason a signature failed (the server logs that itself), so
+// that what an embedder logs or forwards from it cannot leak them.
+type IngestEvent struct {
+	// Inbox is the inbox the delivery was for. It is never nil; its Slug, Tenant and
+	// UID say which inbox it is.
+	Inbox *Inbox
+	// Outcome is how the delivery ended, and Status the HTTP status the sender was
+	// sent.
+	Outcome IngestOutcome
+	Status  int
+	// Size is how many body bytes were read: 0 for a delivery refused before its
+	// body was read (one whose Content-Length is over the limit, or a disabled
+	// inbox), and as far as reading got for one refused while it was read.
+	Size int64
+	// SourceIP is where the delivery came from, as in IngestRequest. It may be
+	// empty.
+	SourceIP string
+	// Seq is the message's sequence number for IngestStored, and for
+	// IngestDuplicate that of the message it repeats; 0 otherwise.
+	Seq int64
+	// Verified is whether the stored message is verified, for IngestStored and
+	// IngestDuplicate (a duplicate is always verified); false otherwise.
+	Verified bool
+}
+
+// IngestObserver is an optional capability of Hooks, found by type assertion: a
+// Hooks that also implements it is told how every delivery to a known inbox ended,
+// including those refused or failed, which AfterIngest never sees. Hooks itself
+// does not change, and a Hooks without it changes nothing. It is how an embedder
+// counts, per inbox or tenant, what the server's metrics count only in total, for
+// instance to alert when verification failures for one inbox spike.
+//
+// A delivery whose ingest key names no inbox is not observed, nor is one refused
+// before the inbox is looked up (a wrong method): there is no inbox to attribute it
+// to, and an observer that saw them would see whatever anyone guesses.
+type IngestObserver interface {
+	// ObserveIngest is called once for every delivery to a known inbox, after the
+	// outcome is decided, after AfterIngest for a stored message or duplicate, and
+	// before the response is written. It runs on the request's goroutine and must not
+	// block: a slow observer delays the response. The ctx may be cancelled already
+	// (the sender may have gone away) or soon after; work that outlives the call
+	// must use context.WithoutCancel. A panic in it is logged and swallowed, and does
+	// not change the response.
+	ObserveIngest(ctx context.Context, ev *IngestEvent)
+}
+
 // SecretBox seals secrets for storage at rest.
 type SecretBox interface {
 	// Seal encrypts plaintext and binds it to context: the same context must be

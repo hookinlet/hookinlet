@@ -21,6 +21,20 @@ applies.
   some were left out. The result says nothing about how many more there are. Inboxes past the limit are no longer
   looked up, so the cost of a call no longer grows with the number of inboxes a token names.
 
+**Go API**
+
+- **Added `inbox.IngestObserver`**, an optional interface of `Hooks` (found by type assertion, so `Hooks` is
+  unchanged), with `inbox.IngestEvent` and `inbox.IngestOutcome` and its constants. A `Hooks` that implements it is
+  told how every delivery to a known inbox ended: stored, duplicate, handshake, or refused or failed and why
+  (verification failed, refused by `BeforeIngest`, unverified cap, storage full, overloaded, too large, unreadable,
+  inbox disabled or gone, internal error), with the inbox (so its tenant), the status sent, the size, the source
+  address and, for a stored message, its `Seq` and whether it is verified. `AfterIngest` sees only stored messages
+  and duplicates, and `/metrics` counts outcomes only in total; this is for counting, auditing or logging them per
+  inbox or tenant. It runs synchronously after the outcome is decided (after `AfterIngest`), before the response; a
+  panic in it is logged. A delivery whose ingest key names no inbox is not observed. The event carries no headers,
+  body or verification reason. A `Hooks` without it behaves as before.
+- `examples/custom-hooks` counts outcomes per inbox with it, and serves the counts on `EXAMPLE_COUNTS_ADDR`.
+
 ## 0.2.0 - 2026-10-16
 
 The first release that changes how data is stored and what the Go interfaces under `pkg/` look like, made now
