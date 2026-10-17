@@ -70,8 +70,11 @@ older one.
 
 `GET /readyz` answers `503` with a reason: `the store is not reachable`; `there is no
 room left to store deliveries` (the volume has under 32 MiB free, or a write just failed
-for lack of room); `stored verifier secrets cannot be opened with the master key` (see
-above); `the server is shutting down` (it was told to stop and is draining).
+for lack of room); `none of the stored verifier secrets tried can be opened` (see
+above: usually the master key is wrong; with a `SecretBox` that asks a key service, the
+service may be failing, or, when every inbox with a secret is one tenant's, that tenant's
+key may be gone; the log names the tenant); `the server is shutting down` (it was told to
+stop and is draining).
 
 ## Sending webhooks
 
