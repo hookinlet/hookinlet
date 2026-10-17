@@ -40,9 +40,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # A release is a commit that is on main and that CI passed on, not whichever commit
-      # someone tagged. (A manual dry run checks neither: it publishes nothing.)
-      - name: The tagged commit is on main, and CI passed on it
+      # A release is a commit that is on main and that the full CI passed on (the nightly
+      # run or one started by hand; a push to main runs only the fast checks), not
+      # whichever commit someone tagged. (A manual dry run checks neither: it publishes
+      # nothing.)
+      - name: The tagged commit is on main, and the full CI passed on it
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,29 +57,29 @@ jobs:
             echo "::error::$GITHUB_REF_NAME is not a commit on main; release from a commit that was merged"
             exit 1
           fi
-          # Tagging right after the merge is the normal order of things, so CI on main may
+          # Tagging right after starting the full CI is the normal order of things, so it may
           # still be running: wait for it, rather than failing a release that would pass.
           # A run that finished without succeeding, or none appearing, is still an error.
           started=$SECONDS
           while :; do
             runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$sha" --json status,conclusion,event \
-              --jq '[.[] | select(.event == "push" or .event == "schedule" or .event == "workflow_dispatch")]')
+              --jq '[.[] | select(.event == "schedule" or .event == "workflow_dispatch")]')
             passed=$(jq '[.[] | select(.conclusion == "success")] | length' <<<"$runs")
             pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
             total=$(jq 'length' <<<"$runs")
             if [ "$passed" -ge 1 ]; then
               break
             elif [ "$total" -gt 0 ] && [ "$pending" -eq 0 ]; then
-              echo "::error::CI finished on ${sha::12} without passing. Fix main and tag a new commit, or re-run the failed CI jobs and then this workflow"
+              echo "::error::The full CI finished on ${sha::12} without passing. Fix main and tag a new commit, or re-run the failed CI jobs and then this workflow"
               exit 1
             elif [ "$total" -eq 0 ] && [ $((SECONDS - started)) -gt 180 ]; then
-              echo "::error::No CI run was found for ${sha::12} on main. Is the commit on main? Re-run this workflow once CI has run"
+              echo "::error::No full CI run was found for ${sha::12}. Start one (Actions, CI, Run workflow, on main), then re-run this workflow. A push to main runs only the fast checks"
               exit 1
             elif [ $((SECONDS - started)) -gt 2700 ]; then
-              echo "::error::CI on ${sha::12} did not finish in 45 minutes. Re-run this workflow when it has"
+              echo "::error::The full CI on ${sha::12} did not finish in 45 minutes. Re-run this workflow when it has"
               exit 1
             fi
-            echo "Waiting for CI on ${sha::12} (${pending} running)..."
+            echo "Waiting for the full CI on ${sha::12} (${pending} running)..."
             sleep 30
           done
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

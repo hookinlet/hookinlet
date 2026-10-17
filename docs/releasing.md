@@ -6,12 +6,15 @@ For whoever tags a release. The work is in `.github/workflows/release.yml` and
 ## Before tagging
 
 1. `main` is green, and `CHANGELOG.md` has the release's entry at the top (move "Unreleased" into a
-   heading for the version). The workflow will not publish a tag whose commit is not on `main` or
-   has no passing CI run, so there is nothing to bypass: wait for CI.
-2. Run the workflow by hand (Actions, Release, Run workflow). It builds the
+   heading for the version).
+2. Start the full CI on `main` (Actions, CI, Run workflow). A push to `main` runs only the fast checks, to
+   save CI minutes; the full set adds the race detector, the documentation examples, the image build and the
+   release dry run, and also runs every night. The release workflow will not publish a tag whose commit is
+   not on `main` or has no passing full run, so there is nothing to bypass: wait for it.
+3. Run the workflow by hand (Actions, Release, Run workflow). It builds the
    archives, checksums, SBOMs, and both image architectures, and smoke-tests the
    image, but publishes nothing, whatever ref you run it from.
-3. Optionally try it locally: `goreleaser release --snapshot --clean` (needs
+4. Optionally try it locally: `goreleaser release --snapshot --clean` (needs
    `syft` on the PATH for the SBOMs).
 
 ## Tagging

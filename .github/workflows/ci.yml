@@ -1,11 +1,13 @@
 name: CI
 
-# A pull request gets the fast checks: build, vet, the unit tests, lint, the static
-# checks on the OpenAPI document and the generated code, the console's build and unit
-# tests, and its end-to-end tests in a browser. The race detector, the documentation
-# examples, the image build and the release dry run run when a change lands on main
-# and every night (a tag runs the release workflow, which does the release checks
-# itself), so they are never skipped, only moved off the critical path of a review.
+# A pull request, and a change landing on main, get the fast checks: build, vet, the
+# unit tests, lint, the static checks on the OpenAPI document and the generated code,
+# the console's build and unit tests, and its end-to-end tests in a browser. The full
+# set adds the race detector, the documentation examples, the image build and the
+# release dry run (about twice the minutes), and runs every night and when someone
+# starts CI by hand (Actions, CI, Run workflow). A release waits for a full run that
+# passed on the tagged commit (see docs/releasing.md), so the heavy checks are never
+# skipped before a release, only kept off every merge.
 on:
   push:
     branches: [main]
@@ -51,7 +53,7 @@ jobs:
       # review.
       - name: Test (everything but pkg/server, which has its own job)
         env:
-          RACE: ${{ github.event_name != 'pull_request' }}
+          RACE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         # A test that hangs fails with its goroutines in a few minutes, not after the
         # job's whole budget.
         run: go test -timeout 6m $([ "$RACE" = true ] && echo -race) $(go list ./... | grep -v '/pkg/server$')
@@ -151,7 +153,7 @@ jobs:
           go-version-file: go.mod
       - name: Test pkg/server
         env:
-          RACE: ${{ github.event_name != 'pull_request' }}
+          RACE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: go test -timeout 8m $([ "$RACE" = true ] && echo -race) ./pkg/server/
 
   # Known vulnerabilities in the code we call, in the standard library we are built
@@ -185,7 +187,7 @@ jobs:
           version: v2.14.0
 
   docker:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -224,7 +226,7 @@ jobs:
         run: go test -count=1 -run TestLinks ./docs
       # Starts servers and runs the examples against them: not for a review.
       - name: Run the examples in the documentation
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: scripts/test-docs.sh
       - name: Lint the OpenAPI document
         env:
@@ -233,7 +235,7 @@ jobs:
 
   # A release is only worth tagging if it would work, so check it on every change.
   release-config:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
