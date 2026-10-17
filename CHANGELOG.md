@@ -4,7 +4,13 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.3.0 - 2026-10-17
+
+Two changes for servers that hold more than one tenant's inboxes, and a way to see how every delivery ended.
+There is nothing to migrate: upgrade by starting the new version on the same data directory. If you are coming
+from 0.1.x, read the 0.2.0 **Upgrading** notes below first, because 0.2.0 needs stored verifier secrets set
+again. One change is visible to MCP clients: `list_inboxes` now lists at most 100 inboxes for every token (see
+**Changed**). The HTTP API, the command line and the console are otherwise unchanged.
 
 **Changed**
 
