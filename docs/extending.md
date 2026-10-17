@@ -287,7 +287,17 @@ suite is what makes it testable. The points that are easy to get wrong:
 - **Read your writes.** Once `Append` returns, every later read, on any node, sees
   the message: a wake-up followed by a read must not find it missing.
 - **The Store owns the clock** (UTC, microsecond precision), and `ReceivedAt`
-  never decreases with `Seq` within an inbox.
+  never decreases with `Seq` within an inbox, even if the system clock steps back:
+  `Append` uses the later of the clock and the previous message's `ReceivedAt`. So
+  within one inbox, ordering by (`ReceivedAt`, `Seq`) and ordering by `Seq` agree, and
+  the messages in a range of times are a range of `Seq`s. A query filtered by time
+  (`Query.Since`, `Query.Until`) and paged by `Seq` can be served from one index on
+  (inbox, received_at, seq), and retention by age always deletes a prefix.
+- **A restore is a new epoch.** `Inbox.Epoch` must change for every inbox when the
+  Store is restored from a backup, so that an old cursor is refused. A `Backupper`'s
+  snapshot does it (`BackupperSuite` checks it); a Store restored by other means, such
+  as a database's own backups, must renew every epoch as part of the restore. The
+  suite cannot check that, since restoring is not a method of `Store`.
 - **Scope by tenant, except tokens.** A context scoped with `inbox.WithTenant` limits
   every method to that tenant's inboxes (see [Tenants](#tenants)). The token methods
   are the operator's: `GetTokenByHash`, `ListTokens` and `DeleteToken` ignore the
