@@ -76,6 +76,7 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"RetentionCombined", testRetentionCombined},
 		{"RetentionDeletesAPrefix", testRetentionIsPrefix},
 		{"RetentionAndDedupe", testRetentionAndDedupe},
+		{"PruneCancelledPartway", testPruneCancelledPartway},
 		{"ConcurrentAppendsAreGapless", testConcurrentGapless},
 		{"CursorSafety", testCursorSafety},
 		{"UpdateDoesNotDisturbAppends", testUpdateDuringAppends},
