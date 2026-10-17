@@ -50,6 +50,7 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"Tokens", testTokens},
 		{"TokensOfADeletedInbox", testTokensOfADeletedInbox},
 		{"DeleteInbox", testDeleteInbox},
+		{"DeleteInboxRacingAppendsAndTokens", testDeleteRacesWrites},
 		{"ListInboxes", testListInboxes},
 		{"Ping", testPing},
 		{"AppendBasics", testAppendBasics},
