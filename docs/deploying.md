@@ -404,6 +404,16 @@ sensible. Changes that affect anyone
 embedding the packages are listed in `CHANGELOG.md`; this is a pre-1.0 project
 and those may be breaking.
 
+**From 0.1.x to 0.2.0, your verifier secrets need setting again.** The migration gives every inbox a
+UID, and a verifier secret is now sealed to that UID instead of the slug. A secret that was already stored was
+sealed to the slug, and the migration does not have the master key, so it cannot seal it again: those secrets no
+longer open. The server names the inboxes and refuses to start. Set each one again, in the data
+directory with the same master key: `hookinlet inbox set-secret SLUG --secret-stdin` (see
+[the server refuses to start](troubleshooting.md#the-server-refuses-to-start)). Take your own
+[backup](admin.md#backups) before upgrading, because after the migration the copy described above is the only way
+back to 0.1.x. If none of your inboxes has a stored verifier secret (the `none` verifier has none), there is nothing to
+do.
+
 ## Backups
 
 `GET /v1/admin/backup`, `hookinlet backup --out FILE`, or copying the data
