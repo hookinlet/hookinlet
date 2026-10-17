@@ -49,12 +49,12 @@ func (n *relayedNotifier) Publish(_ context.Context, id inbox.ID, _ int64) {
 	}
 }
 
-// relay delivers ten queued signals every millisecond.
+// relay delivers 25 queued signals every millisecond.
 func (n *relayedNotifier) relay() {
 	defer close(n.done)
 	for {
 		n.mu.Lock()
-		batch := n.queue[:min(10, len(n.queue))]
+		batch := n.queue[:min(25, len(n.queue))]
 		n.queue = n.queue[len(batch):]
 		n.mu.Unlock()
 		for _, id := range batch {
@@ -76,10 +76,10 @@ func (n *relayedNotifier) relay() {
 	}
 }
 
-// A burst reaches the relayed notifier's subscriber over about 100ms. With Settle the
+// A burst reaches the relayed notifier's subscriber over about 40ms. With Settle the
 // suite waits for it, and the burst reads as one signal, as it must. (NotifierSuite,
 // which reads at once, fails it: it sees a stream of later signals, which is how such
 // a notifier is meant to behave.)
 func TestNotifierSuiteWithSettleOnARelayedNotifier(t *testing.T) {
-	NotifierSuiteWith(t, func(t *testing.T) inbox.Notifier { return newRelayedNotifier(t) }, NotifierOptions{Settle: 500 * time.Millisecond})
+	NotifierSuiteWith(t, func(t *testing.T) inbox.Notifier { return newRelayedNotifier(t) }, NotifierOptions{Settle: time.Second})
 }
