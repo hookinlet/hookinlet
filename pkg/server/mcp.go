@@ -291,7 +291,9 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 	// A caller limited to some inboxes goes straight to them. Searching for them
 	// would cost time in proportion to everyone else's inboxes, might not find
 	// them, and could not report that it had searched them all without saying how
-	// many there are.
+	// many there are. It may name many inboxes, so the same limit applies as
+	// below: the first mcpMaxInboxes readable ones, and truncated once one more
+	// is found. Nothing past that is looked up.
 	if scopedTo, ok := t.caller.principal.(inbox.ScopedPrincipal); ok {
 		ids, err := scopedTo.InboxIDs(ctx)
 		if err != nil {
@@ -305,10 +307,15 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, _ ap
 			case err != nil:
 				return nil, nil, t.fail(ctx, "list inboxes", err)
 			}
-			if t.caller.principal.CanReadInbox(in) {
-				if err := add(in); err != nil {
-					return nil, nil, t.fail(ctx, "list inboxes", err)
-				}
+			if !t.caller.principal.CanReadInbox(in) {
+				continue
+			}
+			if len(out.Inboxes) == mcpMaxInboxes {
+				out.Truncated = true
+				return result(out)
+			}
+			if err := add(in); err != nil {
+				return nil, nil, t.fail(ctx, "list inboxes", err)
 			}
 		}
 		return result(out)

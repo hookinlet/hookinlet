@@ -13,6 +13,13 @@ applies.
   `tenant` attribute next to `slug` when the inbox belongs to a tenant. A slug is unique only within a tenant, so on a
   server that holds several tenants' inboxes the slug alone did not say which inbox a line was about. An inbox in the
   default (empty) tenant logs exactly what it did before.
+- **The MCP `list_inboxes` tool lists at most 100 inboxes for every token.** A token limited to some inboxes (an
+  agent token, or any `inbox.ScopedPrincipal`) used to get all of them, however many it named; it now gets the
+  first 100 it can read, in the order the principal gives them, with `truncated: true` when it can read more, as a
+  token for all inboxes and the admin token already did. This changes what MCP clients see: a client whose token
+  reads more than 100 inboxes no longer gets them all from `list_inboxes`, and should treat `truncated` as meaning
+  some were left out. The result says nothing about how many more there are. Inboxes past the limit are no longer
+  looked up, so the cost of a call no longer grows with the number of inboxes a token names.
 
 ## 0.2.0 - 2026-10-16
 

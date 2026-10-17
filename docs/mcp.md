@@ -82,10 +82,11 @@ value.)
 ### `list_inboxes`
 
 The inboxes this token can read: `slug`, `name`, `verifier`, `latest_seq`, and `epoch`.
-An agent token lists the inboxes it reads. A token for all inboxes, and the admin
-token, list up to 100;
-`truncated: true` says it can read more than that. Nothing is ever reported about
-inboxes the token cannot read, not even how many there are.
+Every token lists up to 100, whether it is an agent token for some inboxes, a
+token for all inboxes, or the admin token; `truncated: true` says it can read
+more than that. An agent token lists its inboxes in the order it was given them.
+Nothing is ever reported about inboxes the token cannot read, not even how many
+there are, and the result does not say how many more than 100 it can read.
 
 ### `query_messages`
 
