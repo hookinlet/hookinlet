@@ -435,6 +435,54 @@ func TestCheckSecretsOpensWithTheCallersContextAndEachInboxsTenant(t *testing.T)
 	checkUnscoped(t, "ListInboxes", rs.scopes("ListInboxes"))
 }
 
+// A readiness check cut short by its deadline, as when the key service is slow or
+// down, answers 503 with a reason that says so, and logs it. It is remembered as
+// briefly as a failing check, and not as secrets that do not open.
+func TestReadinessSaysWhenCheckingTheSecretsTimedOut(t *testing.T) {
+	e, box := ctxBoxEnv(t)
+	e.server.secretsCheckTimeout = 200 * time.Millisecond
+	e.newInbox("slow", "github", "a-secret")
+	box.setBlock(true)
+	rec := e.do(req{method: http.MethodGet, path: "/readyz"})
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "timed out") || !strings.Contains(rec.Body.String(), "key service") {
+		t.Fatalf("/readyz with a key service that does not answer: %d %s", rec.Code, rec.Body)
+	}
+	if err := <-box.returned; !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("OpenContext ended with %v, want context.DeadlineExceeded", err)
+	}
+	logs := e.logs.String()
+	if !strings.Contains(logs, `"level":"WARN"`) || !strings.Contains(logs, "timed out") {
+		t.Errorf("no warning that the check timed out:\n%s", logs)
+	}
+	if strings.Contains(logs, "a-secret") {
+		t.Error("the log holds the secret")
+	}
+	e.server.secretsMu.Lock()
+	cached := e.server.secretsErr
+	e.server.secretsMu.Unlock()
+	if errors.Is(cached, ErrUnreadableSecrets) {
+		t.Errorf("a check that timed out was remembered as unreadable secrets: %v", cached)
+	}
+
+	// Asked again at once, the answer is the one remembered, without another wait.
+	box.setBlock(false)
+	_, before, _ := box.recorded()
+	if rec := e.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/readyz at once: %d %s", rec.Code, rec.Body)
+	}
+	if _, after, _ := box.recorded(); len(after) != len(before) {
+		t.Errorf("the check was repeated at once")
+	}
+	// Once that has passed (as long as for a failing check), the healthy box is asked
+	// again and the server is ready.
+	e.server.secretsMu.Lock()
+	e.server.secretsAt = e.server.secretsAt.Add(-secretsBad)
+	e.server.secretsMu.Unlock()
+	if rec := e.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
+		t.Errorf("/readyz with the key service back: %d %s", rec.Code, rec.Body)
+	}
+}
+
 // A check whose context ends while a secret is being opened did not find out
 // whether the secrets open: it is an error, not a report of unreadable secrets.
 func TestACheckCutShortIsNotAnUnreadableSecret(t *testing.T) {

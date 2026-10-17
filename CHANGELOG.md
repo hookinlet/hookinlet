@@ -39,7 +39,9 @@ applies.
   before. `pkg/secretbox.Box` implements it and ignores the context. `inboxtest.SecretBoxSuite` checks that the
   context methods agree with `Seal` and `Open`, and the new `inboxtest.ContextSecretBoxSuite` that a box doing I/O
   gives up on a cancelled or expired context. A secret check whose context ends while a secret is being opened now
-  fails with that error instead of counting the secret as unreadable. See
+  fails with that error instead of counting the secret as unreadable; for `/readyz` that is a `503` saying that
+  checking the secrets timed out (the key service may be slow or down), with a warning in the log, checked again
+  after 5 seconds. See
   [Writing a SecretBox](docs/extending.md#writing-a-secretbox).
 - **Added `inboxtest.AssertStoreWrapperForwards(t, wrapper, inner)`**, which fails, naming each one and what the
   server does without it, when a Store wrapper lacks an optional Store interface (`inbox.UnverifiedCounter`,

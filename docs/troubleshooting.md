@@ -73,8 +73,9 @@ room left to store deliveries` (the volume has under 32 MiB free, or a write jus
 for lack of room); `none of the stored verifier secrets tried can be opened` (see
 above: usually the master key is wrong; with a `SecretBox` that asks a key service, the
 service may be failing, or, when every inbox with a secret is one tenant's, that tenant's
-key may be gone; the log names the tenant); `the server is shutting down` (it was told to
-stop and is draining).
+key may be gone; the log names the tenant); `checking the stored secrets timed out` (a
+`SecretBox` that asks a key service did not answer within 20 seconds; it is checked again
+after 5); `the server is shutting down` (it was told to stop and is draining).
 
 ## Sending webhooks
 
