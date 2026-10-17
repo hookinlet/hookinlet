@@ -2,10 +2,13 @@ name: CI
 
 # A pull request gets the fast checks: build, vet, the unit tests, lint, the static
 # checks on the OpenAPI document and the generated code, the console's build and unit
-# tests, and its end-to-end tests in a browser. The race detector, the documentation
-# examples, the image build and the release dry run run when a change lands on main
-# and every night (a tag runs the release workflow, which does the release checks
-# itself), so they are never skipped, only moved off the critical path of a review.
+# tests, and its end-to-end tests in a browser. The heavy ones (the race detector, the
+# documentation examples, the image build and the release dry run, about as many
+# minutes again) run every night, when someone starts CI by hand (Actions, CI, Run
+# workflow), and on a push to main that changed anything they read (not one that only
+# edited the changelog or another project document: scripts/ci-heavy.sh decides). A
+# release waits for a full run that passed on the tagged commit (see
+# docs/releasing.md), so the heavy checks are never skipped before a release.
 on:
   push:
     branches: [main]
@@ -25,9 +28,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A push compares itself with the previous tip of main (see scripts/ci-heavy.sh).
+          fetch-depth: ${{ github.event_name == 'push' && 2 || 1 }}
+      - name: Do the heavy checks apply to this run?
+        id: heavy
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: scripts/ci-heavy.sh
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: Which pushes get the heavy checks (scripts/ci-heavy.sh) still works
+        run: scripts/test-ci-heavy.sh
       - name: Build (CGO disabled)
         run: CGO_ENABLED=0 go build ./...
       - name: Vet
@@ -51,7 +65,7 @@ jobs:
       # review.
       - name: Test (everything but pkg/server, which has its own job)
         env:
-          RACE: ${{ github.event_name != 'pull_request' }}
+          RACE: ${{ steps.heavy.outputs.heavy }}
         # A test that hangs fails with its goroutines in a few minutes, not after the
         # job's whole budget.
         run: go test -timeout 6m $([ "$RACE" = true ] && echo -race) $(go list ./... | grep -v '/pkg/server$')
@@ -146,12 +160,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A push compares itself with the previous tip of main (see scripts/ci-heavy.sh).
+          fetch-depth: ${{ github.event_name == 'push' && 2 || 1 }}
+      - name: Do the heavy checks apply to this run?
+        id: heavy
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: scripts/ci-heavy.sh
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: Test pkg/server
         env:
-          RACE: ${{ github.event_name != 'pull_request' }}
+          RACE: ${{ steps.heavy.outputs.heavy }}
         run: go test -timeout 8m $([ "$RACE" = true ] && echo -race) ./pkg/server/
 
   # Known vulnerabilities in the code we call, in the standard library we are built
@@ -185,6 +208,7 @@ jobs:
           version: v2.14.0
 
   docker:
+    # Not on a pull request. A push to main gets the heavy checks only if it changed something they read.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -192,12 +216,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A push compares itself with the previous tip of main (see scripts/ci-heavy.sh).
+          fetch-depth: ${{ github.event_name == 'push' && 2 || 1 }}
+      - name: Do the heavy checks apply to this run?
+        id: heavy
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: scripts/ci-heavy.sh
       - name: Build image
+        if: steps.heavy.outputs.heavy == 'true'
         run: docker build -t hookinlet:ci .
       - name: Smoke test the image
+        if: steps.heavy.outputs.heavy == 'true'
         run: scripts/smoke-docker.sh hookinlet:ci
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.heavy.outputs.heavy == 'true'
       - name: The image also builds for amd64 and arm64
+        if: steps.heavy.outputs.heavy == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -206,6 +243,7 @@ jobs:
           provenance: mode=max
           sbom: true
       - name: Every platform's image carries its healthcheck
+        if: steps.heavy.outputs.heavy == 'true'
         run: scripts/check-image-healthcheck.sh "$RUNNER_TEMP/image.tar"
 
   # The documentation is code too: its examples must run, and the OpenAPI
@@ -217,6 +255,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # A push compares itself with the previous tip of main (see scripts/ci-heavy.sh).
+          fetch-depth: ${{ github.event_name == 'push' && 2 || 1 }}
+      - name: Do the heavy checks apply to this run?
+        id: heavy
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: scripts/ci-heavy.sh
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -224,7 +271,7 @@ jobs:
         run: go test -count=1 -run TestLinks ./docs
       # Starts servers and runs the examples against them: not for a review.
       - name: Run the examples in the documentation
-        if: github.event_name != 'pull_request'
+        if: steps.heavy.outputs.heavy == 'true'
         run: scripts/test-docs.sh
       - name: Lint the OpenAPI document
         env:
@@ -233,6 +280,7 @@ jobs:
 
   # A release is only worth tagging if it would work, so check it on every change.
   release-config:
+    # Not on a pull request. A push to main gets the heavy checks only if it changed something they read.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -241,21 +289,33 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Do the heavy checks apply to this run?
+        id: heavy
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: scripts/ci-heavy.sh
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.heavy.outputs.heavy == 'true'
         with:
           go-version-file: go.mod
       - name: Install syft (for the SBOMs)
+        if: steps.heavy.outputs.heavy == 'true'
         uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        if: steps.heavy.outputs.heavy == 'true'
         with:
           version: v2.17.0
           args: check
       - name: Build the archives, checksums, and SBOMs (nothing is published)
+        if: steps.heavy.outputs.heavy == 'true'
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: v2.17.0
           args: release --snapshot --clean
       - name: Check the archive contents
+        if: steps.heavy.outputs.heavy == 'true'
         run: |
           set -e
           cd dist
