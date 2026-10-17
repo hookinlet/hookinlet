@@ -381,7 +381,9 @@ func (s *Server) afterCommit(ctx context.Context, in *inbox.Inbox, msg *inbox.Me
 
 // verifierSecret returns the inbox's decrypted verifier secret, or nil if it
 // has none. The caller should clear the result when done. ctx is the delivery's,
-// so a SecretBox that takes one stops when the sender goes away.
+// so a SecretBox that takes one stops when the sender goes away; the box is given
+// it scoped to the inbox's tenant (see inbox.ContextSecretBox), while the Store is
+// still asked unscoped.
 func (s *Server) verifierSecret(ctx context.Context, in *inbox.Inbox) ([]byte, error) {
 	if len(in.VerifierSecret) == 0 {
 		return nil, nil
@@ -389,7 +391,7 @@ func (s *Server) verifierSecret(ctx context.Context, in *inbox.Inbox) ([]byte, e
 	if s.opts.SecretBox == nil {
 		return nil, errors.New("the inbox has a verifier secret but the server has no SecretBox")
 	}
-	secret, err := inbox.OpenWith(ctx, s.opts.SecretBox, in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
+	secret, err := inbox.OpenWith(inbox.WithTenant(ctx, in.Tenant), s.opts.SecretBox, in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
 	if err != nil {
 		return nil, fmt.Errorf("the stored verifier secret cannot be opened (is the master key the one it was sealed under, and is the key service, if any, working for this inbox's tenant?): %w", err)
 	}

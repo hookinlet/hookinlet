@@ -17,7 +17,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Notifier` | Tells readers an inbox may have new messages. Carries no payload. | `pkg/notify/local` (in process) | `NotifierSuite` |
 | `Authenticator`, `Principal` | Says who a request is and what it may read or administer. | `pkg/auth/token` | `AuthenticatorSuite` |
 | `SecretBox` | Seals and opens verifier secrets, bound to a context: seal a verifier secret with `inbox.VerifierSecretContext(inbox.UID)`, or the server cannot open it. | `pkg/secretbox` | `SecretBoxSuite` |
-| `ContextSecretBox` (optional, of `SecretBox`) | `SealContext` and `OpenContext`: `Seal` and `Open` given the context of the work, so a box that asks a key service can stop when it is cancelled or past its deadline, and read what the embedder put on it. The server calls them in place of `Seal` and `Open`. See [Writing a SecretBox](#writing-a-secretbox). | `pkg/secretbox` (which ignores the context) | `SecretBoxSuite`, and `ContextSecretBoxSuite` for a box that does I/O |
+| `ContextSecretBox` (optional, of `SecretBox`) | `SealContext` and `OpenContext`: `Seal` and `Open` given the context of the work, so a box that asks a key service can stop when it is cancelled or past its deadline, read what the embedder put on it, and see the inbox's tenant (`inbox.TenantFrom`). The server calls them in place of `Seal` and `Open`. See [Writing a SecretBox](#writing-a-secretbox). | `pkg/secretbox` (which ignores the context) | `SecretBoxSuite`, and `ContextSecretBoxSuite` for a box that does I/O |
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
 | `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
@@ -406,19 +406,26 @@ inboxtest.SecretBoxSuite(t, func(t *testing.T) inbox.SecretBox { return newMyBox
 A box that does I/O should also implement `inbox.ContextSecretBox`, whose
 `SealContext` and `OpenContext` are given the context of the work; the server then
 calls them and not `Seal` and `Open`. They must give the same results, and give up
-with an error that wraps `ctx.Err()` once the context ends. What the context is:
+with an error that wraps `ctx.Err()` once the context ends.
 
-- **A delivery**: the request's context, cancelled when the sender goes away. It is
-  not scoped to a tenant (`inbox.TenantFrom` reports none), because deliveries are
-  not: the inbox is found by its ingest key.
+The box is always given the context scoped (`inbox.WithTenant`) to the tenant of the
+inbox whose secret it is, so `inbox.TenantFrom` reports that tenant and `scoped`
+true, and a box that keeps a key per tenant can pick it. An inbox in the default
+tenant is scoped to `""`, which is not the same as not scoped: a box can tell the
+default tenant from a context that says nothing. The scoping is for the box only;
+the Store calls of the same work keep their own context (a delivery's are not
+scoped at all, since the inbox is found by its ingest key). What the context is:
+
+- **A delivery**: the request's context, cancelled when the sender goes away.
 - **The admin API** (creating an inbox with a secret, setting one): the request's
-  context, scoped to the caller's tenant (`inbox.WithTenant`) when its `Principal`
-  is a `TenantPrincipal`, and not scoped otherwise.
-- **`/readyz`**: the check's own context, which outlives the probe, has a deadline
-  of 20 seconds for the whole sample, and is not scoped. A check cut short by it
-  is not taken for a secret that does not open.
-- **`Server.CheckSecrets`**: the caller's context (`hookinlet serve` passes
-  `context.Background()`), not scoped, since it opens every tenant's secrets.
+  context. The tenant is the one the inbox is made in or belongs to: the caller's
+  for a `TenantPrincipal`, the default tenant for a caller in none. It is the tenant
+  the box is given when a delivery later opens the secret.
+- **`/readyz`**: the check's own context, which outlives the probe and has a
+  deadline of 20 seconds for the whole sample. A check cut short by it is not taken
+  for secrets that do not open.
+- **`Server.CheckSecrets`** and `hookinlet rekey`: the caller's context (`hookinlet
+  serve` passes `context.Background()`).
 
 Code of your own that seals or opens with a box calls `inbox.SealWith(ctx, box, …)`
 and `inbox.OpenWith(ctx, box, …)`, which pass the context to a box that takes one.

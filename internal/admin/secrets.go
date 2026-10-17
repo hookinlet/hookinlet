@@ -213,7 +213,8 @@ func inboxName(in *inbox.Inbox) string {
 
 // openSecret opens one inbox's verifier secret and counts what it found in r. It
 // returns an error only when ctx ended while the secret was being opened: the check
-// did not find out whether it opens, and does not count it as unreadable.
+// did not find out whether it opens, and does not count it as unreadable. The box is
+// given ctx scoped to the inbox's tenant; the Store calls of the check are not.
 func (s *Service) openSecret(ctx context.Context, r *SecretReport, tenants map[string]int, in *inbox.Inbox) error {
 	i, ok := tenants[in.Tenant]
 	if !ok {
@@ -229,7 +230,7 @@ func (s *Service) openSecret(ctx context.Context, r *SecretReport, tenants map[s
 		t.Unreadable = append(t.Unreadable, in.Slug)
 		return nil
 	}
-	pt, err := inbox.OpenWith(ctx, s.Box, in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
+	pt, err := inbox.OpenWith(inbox.WithTenant(ctx, in.Tenant), s.Box, in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
 	clear(pt)
 	if err != nil && ctx.Err() != nil {
 		return fmt.Errorf("checking the secret of inbox %q: %w", in.Slug, err)
@@ -295,16 +296,17 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 				continue
 			}
 			ctxb := inbox.VerifierSecretContext(in.UID)
-			if pt, err := inbox.OpenWith(ctx, s.Box, in.VerifierSecret, ctxb); err == nil {
+			bctx := inbox.WithTenant(ctx, in.Tenant) // for the box only: the Store calls stay unscoped
+			if pt, err := inbox.OpenWith(bctx, s.Box, in.VerifierSecret, ctxb); err == nil {
 				clear(pt)
 				if !secretbox.Legacy(in.VerifierSecret) {
 					res.Unchanged++
 					continue
 				}
 			}
-			pt, err := inbox.OpenWith(ctx, old, in.VerifierSecret, ctxb)
+			pt, err := inbox.OpenWith(bctx, old, in.VerifierSecret, ctxb)
 			if err != nil {
-				if pt2, err2 := inbox.OpenWith(ctx, s.Box, in.VerifierSecret, ctxb); err2 == nil { // a legacy value under the current key
+				if pt2, err2 := inbox.OpenWith(bctx, s.Box, in.VerifierSecret, ctxb); err2 == nil { // a legacy value under the current key
 					pt, err = pt2, nil
 				}
 			}
@@ -314,7 +316,7 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 			if err != nil {
 				return res, fmt.Errorf("the secret of inbox %q opens with neither the old nor the new master key; nothing was changed", in.Slug)
 			}
-			sealed, err := inbox.SealWith(ctx, s.Box, pt, ctxb)
+			sealed, err := inbox.SealWith(bctx, s.Box, pt, ctxb)
 			clear(pt)
 			if err != nil {
 				return res, err

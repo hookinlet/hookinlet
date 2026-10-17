@@ -32,9 +32,10 @@ applies.
 - **Added `inbox.ContextSecretBox`**, an optional interface of `SecretBox` (found by type assertion) with
   `SealContext(ctx, plaintext, binding)` and `OpenContext(ctx, ciphertext, binding)`, and the helpers
   `inbox.SealWith` and `inbox.OpenWith`, through which the server now seals and opens every secret. A box that asks a
-  key service gets the delivery's request context (cancelled when the sender goes away, not scoped to a tenant), the
-  admin request's context (scoped to the caller's tenant for a `TenantPrincipal`), the readiness check's context
-  (with its deadline) or the caller's context for `Server.CheckSecrets`. A `SecretBox` without it is called as
+  key service gets the delivery's request context (cancelled when the sender goes away), the admin request's context,
+  the readiness check's context (with its deadline) or the caller's context for `Server.CheckSecrets`, always scoped
+  with `inbox.WithTenant` to the tenant of the inbox whose secret it is (`""` for the default tenant, so it is never
+  unscoped); the Store calls of the same work keep their own context. A `SecretBox` without it is called as
   before. `pkg/secretbox.Box` implements it and ignores the context. `inboxtest.SecretBoxSuite` checks that the
   context methods agree with `Seal` and `Open`, and the new `inboxtest.ContextSecretBoxSuite` that a box doing I/O
   gives up on a cancelled or expired context. A secret check whose context ends while a secret is being opened now

@@ -212,7 +212,10 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 	if err != nil {
 		return nil, fmt.Errorf("admin: generate uid: %w", err)
 	}
-	sealed, err := s.seal(ctx, uid, p.VerifierSecret)
+	// The inbox is made in the tenant ctx is scoped to, or in the default tenant when
+	// it is not scoped (in.Tenant is left empty), and the secret is sealed for that one.
+	tenant, _ := inbox.TenantFrom(ctx)
+	sealed, err := s.seal(ctx, tenant, uid, p.VerifierSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +420,7 @@ func (s *Service) SetSecret(ctx context.Context, slug, secret string) (View, err
 		if err := s.checkSecret(in.Verifier, in.VerifierConfig, secret); err != nil {
 			return View{}, err
 		}
-		sealed, err := s.seal(ctx, in.UID, secret) // bound to this inbox's UID, so after the read
+		sealed, err := s.seal(ctx, in.Tenant, in.UID, secret) // bound to this inbox's UID, so after the read
 		if err != nil {
 			return View{}, err
 		}
@@ -532,9 +535,9 @@ func (s *Service) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 
 // seal seals a verifier secret for the inbox with this UID, which is the context
 // it is bound to: the UID never changes and no other inbox has it, so a sealed
-// value copied onto another inbox's row does not open there. ctx is the caller's,
-// for a SecretBox that takes one.
-func (s *Service) seal(ctx context.Context, uid, secret string) ([]byte, error) {
+// value copied onto another inbox's row does not open there. A SecretBox that takes
+// a context is given ctx scoped to the inbox's tenant.
+func (s *Service) seal(ctx context.Context, tenant, uid, secret string) ([]byte, error) {
 	if secret == "" {
 		return nil, nil
 	}
@@ -544,7 +547,7 @@ func (s *Service) seal(ctx context.Context, uid, secret string) ([]byte, error) 
 	if s.Box == nil {
 		return nil, ErrNoSecretBox
 	}
-	return inbox.SealWith(ctx, s.Box, []byte(secret), inbox.VerifierSecretContext(uid))
+	return inbox.SealWith(inbox.WithTenant(ctx, tenant), s.Box, []byte(secret), inbox.VerifierSecretContext(uid))
 }
 
 // checkVerifier makes sure the verifier exists and accepts its configuration,

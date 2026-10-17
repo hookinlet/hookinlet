@@ -548,12 +548,14 @@ type SecretBox interface {
 // when the context is cancelled (the sender of a delivery went away) or past its
 // deadline, and read values the embedder put on it.
 //
-// What the context carries depends on the work. For a delivery it is the
-// request's context, which is not scoped to a tenant (deliveries are not). For an
-// admin API call it is the request's context, scoped to the caller's tenant
-// (WithTenant) when the Principal is a TenantPrincipal. For the readiness check it
-// is the check's own context, with a deadline and no tenant; for
-// Server.CheckSecrets, the caller's.
+// The context is that of the work: for a delivery, the request's; for an admin API
+// call, the request's; for the readiness check, the check's own, with a deadline;
+// for Server.CheckSecrets and the command line, the caller's. Whatever the work, the
+// box is given it scoped (WithTenant) to the tenant of the inbox whose secret it is,
+// the default tenant as "", so TenantFrom always reports scoped and a box can tell
+// the default tenant from a context that says nothing. Only the box's context is
+// scoped so: the Store calls of the same work keep theirs (a delivery's are not
+// scoped at all).
 //
 // binding is what Seal and Open call context: the bytes the value is bound to,
 // such as VerifierSecretContext(uid). Results must be the same as Seal's and

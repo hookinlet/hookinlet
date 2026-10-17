@@ -5,8 +5,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,22 +20,45 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/secretbox"
 )
 
-// ctxRecBox is the env's box with the context methods: it records the context of
-// every seal and open, and can be made to wait in OpenContext until its context
-// ends, like a box whose key service does not answer.
+// boxCall is one call to the box: its context, and the UID of the inbox whose secret
+// it was, from the binding.
+type boxCall struct {
+	ctx context.Context
+	uid string
+}
+
+// scope is what inbox.TenantFrom reports.
+type scope struct {
+	tenant string
+	scoped bool
+}
+
+func scopeOf(ctx context.Context) scope {
+	t, ok := inbox.TenantFrom(ctx)
+	return scope{t, ok}
+}
+
+// ctxRecBox is the env's box with the context methods: it records every seal and
+// open, and can be made to wait in OpenContext until its context ends, like a box
+// whose key service does not answer.
 type ctxRecBox struct {
 	*secretbox.Box
 	mu       sync.Mutex
-	seals    []context.Context
-	opens    []context.Context
+	seals    []boxCall
+	opens    []boxCall
 	plain    int           // calls to Seal or Open, which the server must not make
 	block    bool          // OpenContext waits for ctx.Done
-	entered  chan struct{} // closed when a blocking OpenContext starts waiting
-	returned chan error    // what a blocking OpenContext returned
+	once     sync.Once     // closes entered
+	entered  chan struct{} // closed when a blocking OpenContext first starts waiting
+	returned chan error    // what the first blocking OpenContext returned
 }
 
 func newCtxRecBox(b *secretbox.Box) *ctxRecBox {
 	return &ctxRecBox{Box: b, entered: make(chan struct{}), returned: make(chan error, 1)}
+}
+
+func uidOf(binding []byte) string {
+	return strings.TrimPrefix(string(binding), string(inbox.VerifierSecretContext("")))
 }
 
 func (b *ctxRecBox) Seal(pt, binding []byte) ([]byte, error) {
@@ -52,35 +77,44 @@ func (b *ctxRecBox) Open(ct, binding []byte) ([]byte, error) {
 
 func (b *ctxRecBox) SealContext(ctx context.Context, pt, binding []byte) ([]byte, error) {
 	b.mu.Lock()
-	b.seals = append(b.seals, ctx)
+	b.seals = append(b.seals, boxCall{ctx, uidOf(binding)})
 	b.mu.Unlock()
 	return b.Box.Seal(pt, binding)
 }
 
+func (b *ctxRecBox) setBlock(v bool) {
+	b.mu.Lock()
+	b.block = v
+	b.mu.Unlock()
+}
+
 func (b *ctxRecBox) OpenContext(ctx context.Context, ct, binding []byte) ([]byte, error) {
 	b.mu.Lock()
-	b.opens = append(b.opens, ctx)
+	b.opens = append(b.opens, boxCall{ctx, uidOf(binding)})
 	block := b.block
 	b.mu.Unlock()
 	if block {
-		close(b.entered)
+		b.once.Do(func() { close(b.entered) })
+		var err error
 		select {
 		case <-ctx.Done():
-			err := ctx.Err()
-			b.returned <- err
-			return nil, err
+			err = ctx.Err()
 		case <-time.After(30 * time.Second):
-			b.returned <- nil
-			return nil, errors.New("the key service never answered")
+			err = errors.New("the key service never answered")
 		}
+		select {
+		case b.returned <- err:
+		default:
+		}
+		return nil, err
 	}
 	return b.Box.Open(ct, binding)
 }
 
-func (b *ctxRecBox) recorded() (seals, opens []context.Context, plain int) {
+func (b *ctxRecBox) recorded() (seals, opens []boxCall, plain int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return append([]context.Context(nil), b.seals...), append([]context.Context(nil), b.opens...), b.plain
+	return append([]boxCall(nil), b.seals...), append([]boxCall(nil), b.opens...), b.plain
 }
 
 var _ inbox.ContextSecretBox = (*ctxRecBox)(nil)
@@ -95,33 +129,145 @@ func ctxBoxEnv(t *testing.T, mods ...func(*Options)) (*env, *ctxRecBox) {
 	return e, box
 }
 
-// A delivery opens the inbox's secret with the request's context, which is not
-// scoped to a tenant even when the inbox is in one.
-func TestADeliveryOpensItsSecretWithTheRequestContext(t *testing.T) {
+// ctxRecStore records the context of the Store calls on the paths that open or seal
+// a secret, so a test can check that giving the box a tenant left them alone.
+type ctxRecStore struct {
+	inbox.Store
+	mu    sync.Mutex
+	calls map[string][]scope
+}
+
+func (s *ctxRecStore) rec(name string, ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls[name] = append(s.calls[name], scopeOf(ctx))
+}
+
+func (s *ctxRecStore) scopes(name string) []scope {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]scope(nil), s.calls[name]...)
+}
+
+func (s *ctxRecStore) ResolveIngestKey(ctx context.Context, key string) (*inbox.Inbox, error) {
+	s.rec("ResolveIngestKey", ctx)
+	return s.Store.ResolveIngestKey(ctx, key)
+}
+
+func (s *ctxRecStore) Append(ctx context.Context, id inbox.ID, m *inbox.NewMessage) (*inbox.Message, bool, error) {
+	s.rec("Append", ctx)
+	return s.Store.Append(ctx, id, m)
+}
+
+func (s *ctxRecStore) ListInboxes(ctx context.Context, p inbox.ListParams) ([]*inbox.Inbox, error) {
+	s.rec("ListInboxes", ctx)
+	return s.Store.ListInboxes(ctx, p)
+}
+
+func (s *ctxRecStore) GetInboxBySlug(ctx context.Context, slug string) (*inbox.Inbox, error) {
+	s.rec("GetInboxBySlug", ctx)
+	return s.Store.GetInboxBySlug(ctx, slug)
+}
+
+func (s *ctxRecStore) CreateInbox(ctx context.Context, in *inbox.Inbox) error {
+	s.rec("CreateInbox", ctx)
+	return s.Store.CreateInbox(ctx, in)
+}
+
+func (s *ctxRecStore) UpdateInbox(ctx context.Context, in *inbox.Inbox) error {
+	s.rec("UpdateInbox", ctx)
+	return s.Store.UpdateInbox(ctx, in)
+}
+
+// recordStore puts a ctxRecStore in front of the env's store.
+func recordStore(e *env) *ctxRecStore {
+	rs := &ctxRecStore{Store: e.store, calls: map[string][]scope{}}
+	e.server.opts.Store = rs
+	e.server.adm.Store = rs
+	return rs
+}
+
+// threeTenants makes an inbox with a secret in each of org-a, org-b and the default
+// tenant, and returns them by tenant.
+func threeTenants(e *env) map[string]*inbox.Inbox {
+	out := map[string]*inbox.Inbox{}
+	for _, c := range []struct{ tenant, slug string }{{"org-a", "in-a"}, {"org-b", "in-b"}, {"", "in-d"}} {
+		out[c.tenant] = e.newInbox(c.slug, "github", "secret-"+c.slug, func(in *inbox.Inbox) { in.Tenant = c.tenant })
+	}
+	return out
+}
+
+// checkTenants checks that each call was for one of ins and that its context was
+// scoped to that inbox's tenant, the default one included, and that each of ins was
+// seen.
+func checkTenants(t *testing.T, what string, calls []boxCall, ins map[string]*inbox.Inbox) {
+	t.Helper()
+	byUID := map[string]*inbox.Inbox{}
+	for _, in := range ins {
+		byUID[in.UID] = in
+	}
+	seen := map[string]bool{}
+	for _, c := range calls {
+		in, ok := byUID[c.uid]
+		if !ok {
+			t.Errorf("%s: a call for an unknown inbox %q", what, c.uid)
+			continue
+		}
+		seen[in.UID] = true
+		if got, want := scopeOf(c.ctx), (scope{in.Tenant, true}); got != want {
+			t.Errorf("%s of %s: the box's context is %+v, want %+v", what, in.Slug, got, want)
+		}
+	}
+	if len(seen) != len(byUID) {
+		t.Errorf("%s: %d of %d inboxes seen", what, len(seen), len(byUID))
+	}
+}
+
+func checkUnscoped(t *testing.T, what string, scopes []scope) {
+	t.Helper()
+	if len(scopes) == 0 {
+		t.Errorf("%s was not called", what)
+	}
+	for _, sc := range scopes {
+		if sc.scoped {
+			t.Errorf("%s was called scoped to %q; it must stay unscoped", what, sc.tenant)
+		}
+	}
+}
+
+// A delivery opens the inbox's secret with the request's context, given to the box
+// with the inbox's tenant (the default tenant as ""), while the Store is still asked
+// unscoped, as for every delivery.
+func TestADeliveryOpensItsSecretWithTheRequestContextAndItsInboxsTenant(t *testing.T) {
 	e, box := ctxBoxEnv(t)
-	e.newInbox("tenanted", "github", "gh-secret", func(in *inbox.Inbox) { in.Tenant = "org-a" })
-	body := `{"zen":"x"}`
-	rec := e.post("/in/tenanted", body, "X-Hub-Signature-256", githubSig("gh-secret", body))
-	if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
-		t.Fatalf("delivery: %d %s", rec.Code, rec.Body)
+	ins := threeTenants(e)
+	rs := recordStore(e)
+	for _, in := range ins {
+		body := `{"zen":"x"}`
+		rec := e.post("/in/"+in.IngestKey, body, "X-Hub-Signature-256", githubSig("secret-"+in.Slug, body))
+		if rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+			t.Fatalf("delivery to %s: %d %s", in.Slug, rec.Code, rec.Body)
+		}
 	}
 	_, opens, plain := box.recorded()
-	if len(opens) != 1 || plain != 0 {
-		t.Fatalf("%d context opens and %d plain calls, want 1 and 0", len(opens), plain)
+	if len(opens) != 3 || plain != 0 {
+		t.Fatalf("%d context opens and %d plain calls, want 3 and 0", len(opens), plain)
 	}
-	if opens[0].Value(requestKey) == nil {
-		t.Error("the context is not the request's")
+	for _, c := range opens {
+		if c.ctx.Value(requestKey) == nil {
+			t.Error("the context is not the request's")
+		}
 	}
-	if tenant, scoped := inbox.TenantFrom(opens[0]); scoped {
-		t.Errorf("the delivery's context is scoped to %q; deliveries are not scoped", tenant)
-	}
+	checkTenants(t, "delivery", opens, ins)
+	checkUnscoped(t, "ResolveIngestKey", rs.scopes("ResolveIngestKey"))
+	checkUnscoped(t, "Append", rs.scopes("Append"))
 }
 
 // A sender that goes away while the key service is slow cancels the open, and the
 // server stops waiting for it.
 func TestASenderThatGoesAwayCancelsASlowSecretOpen(t *testing.T) {
 	e, box := ctxBoxEnv(t)
-	box.block = true
+	box.setBlock(true)
 	e.newInbox("slow", "github", "gh-secret")
 	base := serveOn(t, e)
 
@@ -163,82 +309,137 @@ func TestASenderThatGoesAwayCancelsASlowSecretOpen(t *testing.T) {
 	}
 }
 
-// Setting a secret through the admin API seals it with the request's context,
-// scoped to the caller's tenant.
-func TestAnAdminSecretIsSealedWithTheCallersContext(t *testing.T) {
+// The admin API seals with the request's context, given to the box with the
+// inbox's tenant: the caller's for a TenantPrincipal, and the default tenant ("")
+// for an unscoped caller. The Store is asked as before.
+func TestAnAdminSecretIsSealedWithTheCallersContextAndItsInboxsTenant(t *testing.T) {
 	e, box := ctxBoxEnv(t, func(o *Options) { o.Authenticator = tenantAuth{} })
-	uid, err := inbox.NewUID()
-	if err != nil {
-		t.Fatal(err)
+	ins := map[string]*inbox.Inbox{
+		"org-a": e.newInbox("in-a", "github", "", func(in *inbox.Inbox) { in.Tenant = "org-a" }),
+		"":      e.newInbox("in-d", "github", ""),
 	}
-	if err := e.store.CreateInbox(inbox.WithTenant(t.Context(), "org-a"), &inbox.Inbox{
-		Slug: "ghx", UID: uid, IngestKey: "gh-key", Name: "gh", Verifier: "github",
-	}); err != nil {
-		t.Fatal(err)
+	rs := recordStore(e)
+	put := func(slug, tok string) {
+		t.Helper()
+		rec := e.do(req{method: http.MethodPut, path: "/v1/admin/inboxes/" + slug + "/secret", body: `{"secret":"new-secret"}`,
+			headers: http.Header{"Authorization": {"Bearer " + tok}, "Content-Type": {"application/json"}}})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("set secret of %s as %s: %d %s", slug, tok, rec.Code, rec.Body)
+		}
 	}
-	rec := e.do(req{method: http.MethodPut, path: "/v1/admin/inboxes/ghx/secret", body: `{"secret":"new-secret"}`,
-		headers: http.Header{"Authorization": {"Bearer admin-a"}, "Content-Type": {"application/json"}}})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("set secret: %d %s", rec.Code, rec.Body)
-	}
+	put("in-a", "admin-a")
+	put("in-d", "operator")
 	seals, _, plain := box.recorded()
-	if len(seals) != 1 || plain != 0 {
-		t.Fatalf("%d context seals and %d plain calls, want 1 and 0", len(seals), plain)
+	if len(seals) != 2 || plain != 0 {
+		t.Fatalf("%d context seals and %d plain calls, want 2 and 0", len(seals), plain)
 	}
-	if seals[0].Value(requestKey) == nil {
-		t.Error("the context is not the request's")
+	for _, c := range seals {
+		if c.ctx.Value(requestKey) == nil {
+			t.Error("the context is not the request's")
+		}
 	}
-	if tenant, scoped := inbox.TenantFrom(seals[0]); !scoped || tenant != "org-a" {
-		t.Errorf("the context is scoped to %q (%v), want org-a", tenant, scoped)
+	checkTenants(t, "set secret", seals, ins)
+	if got, want := rs.scopes("GetInboxBySlug"), []scope{{"org-a", true}, {"", false}}; !slices.Equal(got, want) {
+		t.Errorf("GetInboxBySlug was asked with %+v, want %+v", got, want)
+	}
+
+	// An inbox made with a secret: sealed with the tenant it is made in, which is the
+	// tenant the box is given when a delivery opens it.
+	rec := e.do(req{method: http.MethodPost, path: "/v1/admin/inboxes", body: `{"slug":"fresh","verifier":"github","verifier_secret":"fresh-secret"}`,
+		headers: http.Header{"Authorization": {"Bearer admin-b"}, "Content-Type": {"application/json"}}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	var created struct {
+		Inbox struct {
+			IngestPath string `json:"ingest_path"`
+		} `json:"inbox"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"zen":"x"}`
+	if rec := e.post(created.Inbox.IngestPath, body, "X-Hub-Signature-256", githubSig("fresh-secret", body)); rec.Code != http.StatusOK && rec.Code != http.StatusCreated {
+		t.Fatalf("delivery to the new inbox: %d %s", rec.Code, rec.Body)
+	}
+	seals, opens, _ := box.recorded()
+	sealed, opened := seals[len(seals)-1], opens[len(opens)-1]
+	if sealed.uid != opened.uid {
+		t.Fatalf("the last seal and open are of different inboxes")
+	}
+	if got := scopeOf(sealed.ctx); got != (scope{"org-b", true}) {
+		t.Errorf("create sealed with %+v, want org-b", got)
+	}
+	if scopeOf(opened.ctx) != scopeOf(sealed.ctx) {
+		t.Errorf("sealed with %+v and opened with %+v", scopeOf(sealed.ctx), scopeOf(opened.ctx))
+	}
+	// An operator, in no tenant, makes the inbox in the default tenant: the box is
+	// given "", and the Store is still asked unscoped.
+	rec = e.do(req{method: http.MethodPost, path: "/v1/admin/inboxes", body: `{"slug":"fresh-d","verifier":"github","verifier_secret":"d-secret"}`,
+		headers: http.Header{"Authorization": {"Bearer operator"}, "Content-Type": {"application/json"}}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create as the operator: %d %s", rec.Code, rec.Body)
+	}
+	seals, _, _ = box.recorded()
+	if got := scopeOf(seals[len(seals)-1].ctx); got != (scope{"", true}) {
+		t.Errorf("the operator's create sealed with %+v, want the default tenant", got)
+	}
+	if got, want := rs.scopes("CreateInbox"), []scope{{"org-b", true}, {"", false}}; !slices.Equal(got, want) {
+		t.Errorf("CreateInbox was asked with %+v, want %+v", got, want)
 	}
 }
 
-// Readiness opens its sample with its own context, which has a deadline and no
-// tenant.
-func TestReadinessOpensItsSampleWithTheChecksContext(t *testing.T) {
+// Readiness opens its sample with its own context, which has a deadline, given to
+// the box with each inbox's tenant. The Store is listed unscoped, as before.
+func TestReadinessOpensItsSampleWithTheChecksContextAndEachInboxsTenant(t *testing.T) {
 	e, box := ctxBoxEnv(t)
-	e.newInbox("sealed", "github", "a-secret", func(in *inbox.Inbox) { in.Tenant = "org-a" })
+	ins := threeTenants(e)
+	rs := recordStore(e)
 	if rec := e.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
 		t.Fatalf("/readyz: %d %s", rec.Code, rec.Body)
 	}
 	_, opens, plain := box.recorded()
-	if len(opens) != 1 || plain != 0 {
-		t.Fatalf("%d context opens and %d plain calls, want 1 and 0", len(opens), plain)
+	if len(opens) != 3 || plain != 0 {
+		t.Fatalf("%d context opens and %d plain calls, want 3 and 0", len(opens), plain)
 	}
-	if dl, ok := opens[0].Deadline(); !ok || time.Until(dl) > secretsTimeout {
-		t.Errorf("deadline %v (%v), want one within %v", dl, ok, secretsTimeout)
+	for _, c := range opens {
+		if dl, ok := c.ctx.Deadline(); !ok || time.Until(dl) > secretsTimeout {
+			t.Errorf("deadline %v (%v), want one within %v", dl, ok, secretsTimeout)
+		}
 	}
-	if _, scoped := inbox.TenantFrom(opens[0]); scoped {
-		t.Error("the readiness check's context is scoped to a tenant")
-	}
+	checkTenants(t, "readiness", opens, ins)
+	checkUnscoped(t, "ListInboxes", rs.scopes("ListInboxes"))
 }
 
-// Server.CheckSecrets opens every secret with the caller's context.
-func TestCheckSecretsOpensWithTheCallersContext(t *testing.T) {
+// Server.CheckSecrets opens every secret with the caller's context, given to the box
+// with each inbox's tenant. The Store is listed unscoped, as before.
+func TestCheckSecretsOpensWithTheCallersContextAndEachInboxsTenant(t *testing.T) {
 	e, box := ctxBoxEnv(t)
-	e.newInbox("one", "github", "a-secret")
-	e.newInbox("two", "github", "b-secret")
+	ins := threeTenants(e)
+	rs := recordStore(e)
 	type key struct{}
 	ctx := context.WithValue(t.Context(), key{}, "caller")
 	if err := e.server.CheckSecrets(ctx); err != nil {
 		t.Fatal(err)
 	}
 	_, opens, plain := box.recorded()
-	if len(opens) != 2 || plain != 0 {
-		t.Fatalf("%d context opens and %d plain calls, want 2 and 0", len(opens), plain)
+	if len(opens) != 3 || plain != 0 {
+		t.Fatalf("%d context opens and %d plain calls, want 3 and 0", len(opens), plain)
 	}
 	for _, c := range opens {
-		if c.Value(key{}) != "caller" {
+		if c.ctx.Value(key{}) != "caller" {
 			t.Error("an open was not given the caller's context")
 		}
 	}
+	checkTenants(t, "CheckSecrets", opens, ins)
+	checkUnscoped(t, "ListInboxes", rs.scopes("ListInboxes"))
 }
 
 // A check whose context ends while a secret is being opened did not find out
 // whether the secrets open: it is an error, not a report of unreadable secrets.
 func TestACheckCutShortIsNotAnUnreadableSecret(t *testing.T) {
 	e, box := ctxBoxEnv(t)
-	box.block = true
+	box.setBlock(true)
 	e.newInbox("slow", "github", "a-secret")
 	ctx, cancel := context.WithCancel(t.Context())
 	go func() { <-box.entered; cancel() }()
