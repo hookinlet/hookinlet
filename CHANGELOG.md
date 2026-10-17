@@ -18,12 +18,14 @@ applies.
 
 **Changed**
 
-- **`/readyz` samples the stored secrets across tenants.** It takes at most 5 secrets of each tenant, oldest first,
-  before more of any one (still 25 in all, from at most the 5000 oldest inboxes), and still answers `503` only if none
+- **`/readyz` samples the stored secrets across tenants.** It takes at most 3 secrets of each tenant, oldest first,
+  before more of any one (still 25 in all, from at most the 5000 oldest inboxes, and no more than 500 inboxes past the
+  point where it has 25 in hand), and still answers `503` only if none
   of them opens. One tenant whose secrets do not open, such as one whose key a key service has lost, no longer takes
   the server out of rotation for every tenant when it owns the oldest inboxes; it is logged with its tenant key and how
   many of its secrets did not open. The `503` reason and the log no longer assume the master key was changed, since a
   key service can fail too. A server whose secrets all belong to one tenant still answers `503`, as for a wrong key.
+  The start-up check's error names each inbox's tenant after its slug.
 
 **Go API**
 

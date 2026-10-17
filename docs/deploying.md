@@ -266,11 +266,11 @@ Send `SIGTERM` or `SIGINT`. With `HOOKINLET_DRAIN_DELAY` set, it first reports i
   (or the last write failed for lack of room), none of the verifier secrets it tries opens
   with the master key, or the server has been told to stop and is
   [draining](#stopping). Use it for readiness, and `/healthz` for liveness. It tries up to
-  25 secrets, looking at no more than the 5000 oldest inboxes, so the check costs the same
-  however many inboxes there are; it checks again after 30 seconds, or 5 while it is failing. An inbox whose
+  25 secrets, looking at no more than the 5000 oldest inboxes (and, once it has 25 in hand,
+  no more than 500 further ones), so the check costs the same however many inboxes there are; it checks again after 30 seconds, or 5 while it is failing. An inbox whose
   secret does not open is logged and fails its own deliveries, but does not take the server
   out of rotation. On a server that holds several [tenants'](extending.md#tenants) inboxes
-  the sample takes at most 5 secrets of each tenant before more of any one, so a tenant
+  the sample takes at most 3 secrets of each tenant before more of any one, so a tenant
   whose secrets do not open is logged, with its tenant key, and does not either.
 
 Neither needs a credential. The image has no `curl`, so it carries

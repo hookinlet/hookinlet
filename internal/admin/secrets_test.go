@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/hookinlet/hookinlet/internal/admin"
@@ -265,14 +266,14 @@ func TestSampleSecretsStopsAtItsBounds(t *testing.T) {
 		secrets, inboxes int
 		want             int
 	}{{2, 0, 2}, {0, 1, 1}, {0, 2, 2}, {100, 100, 3}, {0, 0, 3}} {
-		r, err := svc.SampleSecrets(t.Context(), c.secrets, 1, c.inboxes)
+		r, err := svc.SampleSecrets(t.Context(), admin.SampleBounds{Secrets: c.secrets, PerTenant: 1, Inboxes: c.inboxes})
 		if err != nil || r.Checked != c.want || !r.OK() {
 			t.Errorf("SampleSecrets(%d, %d) checked %d (%v, %v), want %d", c.secrets, c.inboxes, r.Checked, r.OK(), err, c.want)
 		}
 	}
 	// A wrong key shows in a sample just as it does in the whole.
 	wrong := &admin.Service{Store: svc.Store, Box: boxOf(t, 2)}
-	if r, _ := wrong.SampleSecrets(t.Context(), 1, 1, 0); !r.Systemic() {
+	if r, _ := wrong.SampleSecrets(t.Context(), admin.SampleBounds{Secrets: 1, PerTenant: 1}); !r.Systemic() {
 		t.Errorf("a sample under the wrong key: %+v", r)
 	}
 }
@@ -327,27 +328,34 @@ func TestSampleSecretsSpreadsOverTenants(t *testing.T) {
 	st, contexts := tenantStore(t, tenants)
 	svc := &admin.Service{Store: st, Box: boxOf(t, 1)}
 	for _, c := range []struct {
-		secrets, perTenant, inboxes int
-		want                        map[string]int
+		b    admin.SampleBounds
+		want map[string]int
 	}{
-		{6, 2, 0, map[string]int{"acme": 3, "": 2, "globex": 1}}, // two each, then the oldest passed over
-		{10, 2, 0, map[string]int{"acme": 7, "": 2, "globex": 1}},
-		{5, 5, 0, map[string]int{"acme": 5}},                      // acme's share fills it before the others are reached
-		{20, 3, 13, map[string]int{"acme": 12, "": 1}},            // globex is past the scan bound
-		{3, 1, 0, map[string]int{"acme": 1, "": 1, "globex": 1}},  // one each
-		{0, 1, 0, map[string]int{"acme": 12, "": 2, "globex": 1}}, // no bound: everything
+		{admin.SampleBounds{Secrets: 6, PerTenant: 2}, map[string]int{"acme": 3, "": 2, "globex": 1}}, // two each, then the oldest passed over
+		{admin.SampleBounds{Secrets: 10, PerTenant: 2}, map[string]int{"acme": 7, "": 2, "globex": 1}},
+		{admin.SampleBounds{Secrets: 5, PerTenant: 5}, map[string]int{"acme": 5}},                       // acme's share fills it before the others are reached
+		{admin.SampleBounds{Secrets: 20, PerTenant: 3, Inboxes: 13}, map[string]int{"acme": 12, "": 1}}, // globex is past the scan bound
+		{admin.SampleBounds{Secrets: 3, PerTenant: 1}, map[string]int{"acme": 1, "": 1, "globex": 1}},   // one each
+		{admin.SampleBounds{PerTenant: 1}, map[string]int{"acme": 12, "": 2, "globex": 1}},              // no bound: everything
+		// Five are held after the fifth inbox; it looks at only so many more.
+		{admin.SampleBounds{Secrets: 5, PerTenant: 2, AfterFull: 3}, map[string]int{"acme": 5}},
+		{admin.SampleBounds{Secrets: 5, PerTenant: 2, AfterFull: 9}, map[string]int{"acme": 3, "": 2}},
+		{admin.SampleBounds{Secrets: 5, PerTenant: 2, AfterFull: 10}, map[string]int{"acme": 2, "": 2, "globex": 1}},
 	} {
-		want := c.want
-		r, err := svc.SampleSecrets(t.Context(), c.secrets, c.perTenant, c.inboxes)
-		if got := checkedBy(r); err != nil || !r.OK() || fmt.Sprint(got) != fmt.Sprint(want) {
-			t.Errorf("SampleSecrets(%d, %d, %d) checked %v (%v, %v), want %v", c.secrets, c.perTenant, c.inboxes, got, r.OK(), err, want)
+		r, err := svc.SampleSecrets(t.Context(), c.b)
+		if got := checkedBy(r); err != nil || !r.OK() || fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("SampleSecrets(%+v) checked %v (%v, %v), want %v", c.b, got, r.OK(), err, c.want)
 		}
 	}
 
 	// A tenant whose secrets do not open is named, with how many, and the rest open.
-	r, _ := (&admin.Service{Store: svc.Store, Box: tenantBox{boxOf(t, 1), contexts["acme"]}}).SampleSecrets(t.Context(), 25, 5, 5000)
+	r, _ := (&admin.Service{Store: svc.Store, Box: tenantBox{boxOf(t, 1), contexts["acme"]}}).SampleSecrets(t.Context(), admin.SampleBounds{Secrets: 25, PerTenant: 5, Inboxes: 5000, AfterFull: 500})
 	if r.Systemic() || r.Checked != 15 {
 		t.Fatalf("with acme's key gone: %+v", r)
+	}
+	// The report names a tenant's inbox with its tenant, since a slug alone is not unique.
+	if err := r.Err(); err == nil || !strings.Contains(err.Error(), "hook-00 (tenant acme)") {
+		t.Errorf("the report does not name the tenant: %v", err)
 	}
 	for _, ts := range r.Tenants {
 		if want := map[string]int{"acme": 12}[ts.Tenant]; len(ts.Unreadable) != want {

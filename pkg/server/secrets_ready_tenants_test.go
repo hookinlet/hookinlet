@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -192,4 +193,37 @@ func TestReadyzFailsWhenTheOnlyTenantsSecretsFail(t *testing.T) {
 		t.Errorf("the line does not say that one tenant's key alone looks the same: %q", msg)
 	}
 	noSecretsLogged(t, e, sealed)
+}
+
+// rowCounter counts the inboxes the Store lists.
+type rowCounter struct {
+	inbox.Store
+	rows, calls int
+}
+
+func (c *rowCounter) ListInboxes(ctx context.Context, p inbox.ListParams) ([]*inbox.Inbox, error) {
+	page, err := c.Store.ListInboxes(ctx, p)
+	c.calls++
+	c.rows += len(page)
+	return page, err
+}
+
+// A store of one tenant, the usual case, is not read to the scan bound on every check
+// looking for a second tenant: once the sample could be filled, readiness reads only
+// so many more inboxes.
+func TestReadyzReadsLittleMoreThanItsSampleWithOneTenant(t *testing.T) {
+	e := newEnv(t)
+	total := readySecretSample + readySecretAfterFull + 200
+	box, _ := tenantSecrets(e, repeat("", total))
+	counter := &rowCounter{Store: e.store}
+	e.server.adm.Store = counter
+	if rec := e.do(req{method: http.MethodGet, path: "/readyz"}); rec.Code != http.StatusOK {
+		t.Fatalf("/readyz: %d %s", rec.Code, rec.Body)
+	}
+	if box.opens != readySecretSample {
+		t.Errorf("opened %d secrets, want %d", box.opens, readySecretSample)
+	}
+	if max := readySecretSample + readySecretAfterFull; counter.rows > max {
+		t.Errorf("read %d inboxes in %d listings of %d, want at most %d", counter.rows, counter.calls, total, max)
+	}
 }

@@ -89,13 +89,16 @@ var ErrUnreadableSecrets = admin.ErrUnreadableSecrets
 // that is right, which any few secrets show, not to check every inbox's. It takes at
 // most readySecretPerTenant of each tenant's secrets before more of any one, so that
 // one tenant whose secrets do not open (a SecretBox may keep a key per tenant, and
-// lose one) cannot fill the sample and take every tenant's server out of rotation.
-// The scan bound is for a store in which few inboxes have a secret, and for one with
-// many tenants.
+// lose one) cannot fill the sample and take every tenant's server out of rotation;
+// one secret that opens is enough. The scan bound is for a store in which few
+// inboxes have a secret. Once the sample could be filled, readiness looks at no more
+// than readySecretAfterFull further inboxes for other tenants, so that a store of one
+// tenant is not read to the scan bound on every check.
 const (
 	readySecretSample    = 25
-	readySecretPerTenant = 5
+	readySecretPerTenant = 3
 	readySecretScan      = 5000
+	readySecretAfterFull = 500
 )
 
 const (
@@ -127,7 +130,9 @@ func (s *Server) secretsOK(ctx context.Context) error {
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), secretsTimeout)
 	defer cancel()
-	r, err := s.adm.SampleSecrets(cctx, readySecretSample, readySecretPerTenant, readySecretScan)
+	r, err := s.adm.SampleSecrets(cctx, admin.SampleBounds{
+		Secrets: readySecretSample, PerTenant: readySecretPerTenant, Inboxes: readySecretScan, AfterFull: readySecretAfterFull,
+	})
 	if err != nil {
 		return err // could not look: say so, and look again next time
 	}
