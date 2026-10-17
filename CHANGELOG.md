@@ -4,7 +4,15 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.4.0 - 2026-10-17
+
+Changes for servers that hold more than one tenant's inboxes, and for anyone writing hooks: `/readyz` no longer lets
+one tenant's unreadable secrets fail the whole server, `RequireTenant` makes a principal without a tenant fail
+closed, hooks can say when to retry and which request they serve, and a `SecretBox` can use the request's context
+and see the inbox's tenant. There is nothing to migrate: upgrade by starting the new version on the same data
+directory. If you are coming from 0.1.x, read the 0.2.0 **Upgrading** notes below first, because 0.2.0 needs stored
+verifier secrets set again. Visible to MCP clients: `list_inboxes` can page, and a refusal's tool error now starts
+with its code. Visible to operators: `/readyz` samples secrets across tenants, and its `503` reasons changed.
 
 **Added**
 
