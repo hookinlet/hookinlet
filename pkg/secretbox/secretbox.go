@@ -9,6 +9,7 @@
 package secretbox
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -139,6 +140,16 @@ func (b *Box) Open(ciphertext, context []byte) ([]byte, error) {
 		return pt, nil
 	}
 	return nil, ErrOpen
+}
+
+// SealContext is Seal. The key is in memory, so there is nothing for ctx to cancel.
+func (b *Box) SealContext(_ context.Context, plaintext, binding []byte) ([]byte, error) {
+	return b.Seal(plaintext, binding)
+}
+
+// OpenContext is Open. The key is in memory, so there is nothing for ctx to cancel.
+func (b *Box) OpenContext(_ context.Context, ciphertext, binding []byte) ([]byte, error) {
+	return b.Open(ciphertext, binding)
 }
 
 // Legacy reports whether ciphertext is in the original layout, which names no key

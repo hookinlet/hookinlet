@@ -248,6 +248,10 @@ type Server struct {
 	retained   retentionRun   // the last retention run that finished
 	retention  sync.WaitGroup // the scheduled sweep, so Serve can wait for it
 
+	// secretsCheckTimeout is how long a check of the stored secrets may take:
+	// secretsTimeout, but shorter in tests.
+	secretsCheckTimeout time.Duration
+
 	streams      chan struct{}  // a slot per open SSE stream
 	admitter     inbox.Admitter // Hooks, if it also admits reads, streams and waits; else nil
 	streamMu     sync.Mutex
@@ -381,6 +385,7 @@ func New(opts Options) (*Server, error) {
 		closeCancel:  closeCancel,
 		closing:      closeCtx.Done(),
 	}
+	s.secretsCheckTimeout = secretsTimeout
 	s.limiter, _ = opts.Hooks.(inbox.UnverifiedLimiter)
 	s.observer, _ = opts.Hooks.(inbox.IngestObserver)
 	if uc, ok := opts.Store.(inbox.UnverifiedCounter); ok {

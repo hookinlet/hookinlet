@@ -180,8 +180,8 @@ scan:
 				if len(spare) < b.Secrets {
 					spare = append(spare, in)
 				}
-			} else {
-				s.openSecret(&r, tenants, in)
+			} else if err := s.openSecret(ctx, &r, tenants, in); err != nil {
+				return r, err
 			}
 			if heldAt < 0 && b.Secrets > 0 && r.Checked+len(spare) >= b.Secrets {
 				heldAt = scanned
@@ -195,7 +195,9 @@ scan:
 		if full() {
 			break
 		}
-		s.openSecret(&r, tenants, in)
+		if err := s.openSecret(ctx, &r, tenants, in); err != nil {
+			return r, err
+		}
 	}
 	return r, nil
 }
@@ -209,8 +211,11 @@ func inboxName(in *inbox.Inbox) string {
 	return fmt.Sprintf("%s (tenant %s)", in.Slug, in.Tenant)
 }
 
-// openSecret opens one inbox's verifier secret and counts what it found in r.
-func (s *Service) openSecret(r *SecretReport, tenants map[string]int, in *inbox.Inbox) {
+// openSecret opens one inbox's verifier secret and counts what it found in r. It
+// returns an error only when ctx ended while the secret was being opened: the check
+// did not find out whether it opens, and does not count it as unreadable. The box is
+// given ctx scoped to the inbox's tenant; the Store calls of the check are not.
+func (s *Service) openSecret(ctx context.Context, r *SecretReport, tenants map[string]int, in *inbox.Inbox) error {
 	i, ok := tenants[in.Tenant]
 	if !ok {
 		i = len(r.Tenants)
@@ -218,27 +223,33 @@ func (s *Service) openSecret(r *SecretReport, tenants map[string]int, in *inbox.
 		r.Tenants = append(r.Tenants, TenantSecrets{Tenant: in.Tenant})
 	}
 	t := &r.Tenants[i]
-	r.Checked++
-	t.Checked++
 	if s.Box == nil {
+		r.Checked++
+		t.Checked++
 		r.NoKey = true
 		t.Unreadable = append(t.Unreadable, in.Slug)
-		return
+		return nil
 	}
+	pt, err := inbox.OpenWith(inbox.WithTenant(ctx, in.Tenant), s.Box, in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
+	clear(pt)
+	if err != nil && ctx.Err() != nil {
+		return fmt.Errorf("checking the secret of inbox %q: %w", in.Slug, err)
+	}
+	r.Checked++
+	t.Checked++
 	if secretbox.Legacy(in.VerifierSecret) {
 		r.Legacy++
 	}
-	pt, err := s.Box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
-	clear(pt)
 	switch {
 	case err == nil:
-		return
+		return nil
 	case errors.Is(err, secretbox.ErrWrongKey):
 		r.WrongKey = append(r.WrongKey, inboxName(in))
 	default:
 		r.Damaged = append(r.Damaged, inboxName(in))
 	}
 	t.Unreadable = append(t.Unreadable, in.Slug)
+	return nil
 }
 
 // RekeyResult is what Rekey did.
@@ -285,23 +296,27 @@ func (s *Service) Rekey(ctx context.Context, old inbox.SecretBox) (RekeyResult, 
 				continue
 			}
 			ctxb := inbox.VerifierSecretContext(in.UID)
-			if pt, err := s.Box.Open(in.VerifierSecret, ctxb); err == nil {
+			bctx := inbox.WithTenant(ctx, in.Tenant) // for the box only: the Store calls stay unscoped
+			if pt, err := inbox.OpenWith(bctx, s.Box, in.VerifierSecret, ctxb); err == nil {
 				clear(pt)
 				if !secretbox.Legacy(in.VerifierSecret) {
 					res.Unchanged++
 					continue
 				}
 			}
-			pt, err := old.Open(in.VerifierSecret, ctxb)
+			pt, err := inbox.OpenWith(bctx, old, in.VerifierSecret, ctxb)
 			if err != nil {
-				if pt2, err2 := s.Box.Open(in.VerifierSecret, ctxb); err2 == nil { // a legacy value under the current key
+				if pt2, err2 := inbox.OpenWith(bctx, s.Box, in.VerifierSecret, ctxb); err2 == nil { // a legacy value under the current key
 					pt, err = pt2, nil
 				}
+			}
+			if err != nil && ctx.Err() != nil {
+				return res, fmt.Errorf("opening the secret of inbox %q: %w; nothing was changed", in.Slug, err)
 			}
 			if err != nil {
 				return res, fmt.Errorf("the secret of inbox %q opens with neither the old nor the new master key; nothing was changed", in.Slug)
 			}
-			sealed, err := s.Box.Seal(pt, ctxb)
+			sealed, err := inbox.SealWith(bctx, s.Box, pt, ctxb)
 			clear(pt)
 			if err != nil {
 				return res, err

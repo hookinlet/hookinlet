@@ -71,6 +71,9 @@ func (s *Server) notReady(ctx context.Context) string {
 	}
 	switch err := s.secretsOK(ctx); {
 	case err == nil:
+	case errors.Is(err, errSecretsCheckTimedOut):
+		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready: checking the stored secrets timed out; the key service may be slow or down", slog.String("err", err.Error()))
+		return "checking the stored secrets timed out (the key service may be slow or down); see the server log"
 	case errors.Is(err, ErrUnreadableSecrets):
 		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready", slog.String("err", err.Error()))
 		return "none of the stored verifier secrets tried can be opened: the master key, or the key service, may be wrong; see the server log"
@@ -84,6 +87,11 @@ func (s *Server) notReady(ctx context.Context) string {
 // ErrUnreadableSecrets is what CheckSecrets returns, wrapped, when a stored
 // verifier secret does not open with the server's master key.
 var ErrUnreadableSecrets = admin.ErrUnreadableSecrets
+
+// errSecretsCheckTimedOut is what the readiness check of the stored secrets returns,
+// wrapped, when it ran out of time, which with a SecretBox that asks a key service
+// means the service is slow or down. It says nothing about whether the secrets open.
+var errSecretsCheckTimedOut = errors.New("checking the stored secrets timed out")
 
 // What readiness opens: it needs to tell a master key that opens nothing from one
 // that is right, which any few secrets show, not to check every inbox's. It takes at
@@ -103,7 +111,7 @@ const (
 
 const (
 	secretsGood    = 30 * time.Second // how long a clean check is believed
-	secretsBad     = 5 * time.Second  // and one that found a wrong key: it may have been fixed
+	secretsBad     = 5 * time.Second  // and one that found a wrong key, or timed out: it may have been fixed
 	secretsTimeout = 20 * time.Second // how long the check may take, whatever the probe's patience
 )
 
@@ -111,7 +119,8 @@ const (
 // readiness is asked. The check belongs to the server and not to the probe that
 // happened to start it: a probe that gives up does not make the secrets look
 // unreadable, and only an answer about the secrets is remembered, never a failure
-// to ask.
+// to ask, except a check that ran out of time: that is remembered as briefly as a
+// failing one (secretsBad), so that probes do not each wait out the timeout.
 func (s *Server) secretsOK(ctx context.Context) error {
 	if s.opts.SkipReadinessSecretCheck {
 		return nil
@@ -128,11 +137,19 @@ func (s *Server) secretsOK(ctx context.Context) error {
 			return s.secretsErr
 		}
 	}
-	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), secretsTimeout)
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.secretsCheckTimeout)
 	defer cancel()
 	r, err := s.adm.SampleSecrets(cctx, admin.SampleBounds{
 		Secrets: readySecretSample, PerTenant: readySecretPerTenant, Inboxes: readySecretScan, AfterFull: readySecretAfterFull,
 	})
+	if err != nil && cctx.Err() != nil {
+		// Out of time, most likely waiting on a key service. That is remembered as
+		// briefly as a failing check, so that probes do not each wait for it in turn,
+		// and is not taken for secrets that do not open.
+		err = fmt.Errorf("%w after %v: %w", errSecretsCheckTimedOut, s.secretsCheckTimeout, err)
+		s.secretsErr, s.secretsAt = err, now
+		return err
+	}
 	if err != nil {
 		return err // could not look: say so, and look again next time
 	}

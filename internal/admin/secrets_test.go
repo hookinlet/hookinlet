@@ -377,3 +377,126 @@ func (b tenantBox) Open(ct, context []byte) ([]byte, error) {
 	}
 	return b.SecretBox.Open(ct, context)
 }
+
+// keyServiceBox stands for a box that asks a key service, which the caller gives up
+// on during the first open.
+type keyServiceBox struct {
+	*secretbox.Box
+	cancel context.CancelFunc
+}
+
+func (b keyServiceBox) OpenContext(ctx context.Context, _, _ []byte) ([]byte, error) {
+	b.cancel()
+	return nil, fmt.Errorf("key service: %w", ctx.Err())
+}
+
+func (b keyServiceBox) SealContext(ctx context.Context, pt, binding []byte) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return b.Seal(pt, binding)
+}
+
+// Rekey and CheckSecrets give the box the caller's context, and one that ends while
+// a secret is being opened is reported as that, not as a secret that does not open.
+func TestASecretCheckCutShortSaysSo(t *testing.T) {
+	_, st := secretService(t)
+	before := mustSecret(t, st, "alpha")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	svc := &admin.Service{Store: st, Box: boxOf(t, 2)}
+	_, err := svc.Rekey(ctx, keyServiceBox{boxOf(t, 1), cancel})
+	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "neither") {
+		t.Errorf("Rekey: %v, want context.Canceled", err)
+	}
+	if !bytes.Equal(before, mustSecret(t, st, "alpha")) {
+		t.Error("an interrupted rekey changed an inbox")
+	}
+
+	ctx, cancel = context.WithCancel(t.Context())
+	r, err := (&admin.Service{Store: st, Box: keyServiceBox{boxOf(t, 1), cancel}}).CheckSecrets(ctx)
+	if !errors.Is(err, context.Canceled) || errors.Is(err, admin.ErrUnreadableSecrets) {
+		t.Errorf("CheckSecrets: %v, want context.Canceled", err)
+	}
+	if r.Unreadable() != 0 {
+		t.Errorf("an open cut short was counted as unreadable: %+v", r)
+	}
+}
+
+// tenantRecBox records, per inbox UID, the tenant its context was scoped to on each
+// call ("-" when it was not scoped).
+type tenantRecBox struct {
+	*secretbox.Box
+	seen map[string][]string
+}
+
+func (b *tenantRecBox) note(ctx context.Context, binding []byte) {
+	t, ok := inbox.TenantFrom(ctx)
+	if !ok {
+		t = "-"
+	}
+	uid := strings.TrimPrefix(string(binding), string(inbox.VerifierSecretContext("")))
+	b.seen[uid] = append(b.seen[uid], t)
+}
+
+func (b *tenantRecBox) SealContext(ctx context.Context, pt, binding []byte) ([]byte, error) {
+	b.note(ctx, binding)
+	return b.Seal(pt, binding)
+}
+
+func (b *tenantRecBox) OpenContext(ctx context.Context, ct, binding []byte) ([]byte, error) {
+	b.note(ctx, binding)
+	return b.Open(ct, binding)
+}
+
+// Create, SetSecret, CheckSecrets and Rekey give the box the inbox's tenant: the one
+// the context is scoped to for Create and SetSecret, and the inbox's own for the
+// others, which run unscoped; the default tenant is "", not unscoped.
+func TestTheBoxIsGivenTheInboxsTenant(t *testing.T) {
+	st, err := sqlite.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	box := &tenantRecBox{Box: boxOf(t, 1), seen: map[string][]string{}}
+	svc := &admin.Service{Store: st, Box: box}
+	uids := map[string]string{} // tenant to the UID of its inbox
+	for _, tenant := range []string{"org-a", "org-b", ""} {
+		ctx := t.Context()
+		if tenant != "" {
+			ctx = inbox.WithTenant(ctx, tenant)
+		}
+		if _, err := svc.Create(ctx, admin.CreateParams{Slug: "same-slug", Verifier: "token", VerifierSecret: "s1"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.SetSecret(ctx, "same-slug", "s2"); err != nil {
+			t.Fatal(err)
+		}
+		in, err := st.GetInboxBySlug(inbox.WithTenant(t.Context(), tenant), "same-slug")
+		if err != nil {
+			t.Fatal(err)
+		}
+		uids[tenant] = in.UID
+	}
+	if r, err := svc.CheckSecrets(t.Context()); err != nil || !r.OK() {
+		t.Fatalf("CheckSecrets: %+v, %v", r, err)
+	}
+	newBox := &tenantRecBox{Box: boxOf(t, 2), seen: box.seen}
+	if _, err := (&admin.Service{Store: st, Box: newBox}).Rekey(t.Context(), box); err != nil {
+		t.Fatal(err)
+	}
+	for tenant, uid := range uids {
+		got := box.seen[uid]
+		// Create, SetSecret, CheckSecrets, then Rekey: an open under the new key (which
+		// fails), one under the old, and a seal.
+		if len(got) != 6 {
+			t.Errorf("tenant %q: %d calls, want 6: %v", tenant, len(got), got)
+		}
+		for _, g := range got {
+			if g != tenant {
+				t.Errorf("tenant %q: the box was given %v", tenant, got)
+				break
+			}
+		}
+	}
+}
