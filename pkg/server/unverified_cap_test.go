@@ -248,3 +248,49 @@ func TestAnEmbedderSetsTheUnverifiedCapPerInbox(t *testing.T) {
 		}
 	})
 }
+
+// countingStore forwards inbox.UnverifiedCounter, as a Store wrapper must for the
+// cap to hold (docs/extending.md, "Wrapping a Store").
+type countingStore struct{ inbox.Store }
+
+func (c countingStore) CountUnverified(ctx context.Context, id inbox.ID, limit int64) (int64, error) {
+	return c.Store.(inbox.UnverifiedCounter).CountUnverified(ctx, id, limit)
+}
+
+// The cap needs the Store to implement inbox.UnverifiedCounter, and the server finds
+// it by type assertion on the Store it is given. A wrapper that embeds inbox.Store
+// hides it, and the cap is off with nothing but a warning when the server starts.
+func TestAStoreWrapperThatHidesTheCounterTurnsTheCapOff(t *testing.T) {
+	const maxUnverified = 2
+	forgeAll := func(e *env) (accepted int) {
+		for range 2 * maxUnverified {
+			if e.post("/in/wrapped", `{"n":1}`, "X-Hub-Signature-256", githubSig("wrong", `{"n":1}`)).Code == http.StatusOK {
+				accepted++
+			}
+		}
+		return accepted
+	}
+	storing := func(in *inbox.Inbox) { in.OnVerifyFail = inbox.OnVerifyFailStore }
+
+	t.Run("embedding inbox.Store: every forged delivery is stored", func(t *testing.T) {
+		e := newEnv(t, func(o *Options) { o.MaxUnverified = maxUnverified; o.Store = storeOnly{o.Store} })
+		in := e.newInbox("wrapped", "github", "s", storing)
+		if got := forgeAll(e); got != 2*maxUnverified || e.count(in) != 2*maxUnverified {
+			t.Errorf("%d accepted and %d stored; the wrapper was expected to turn the cap off", got, e.count(in))
+		}
+		if !strings.Contains(e.logs.String(), "cannot count unverified messages") {
+			t.Error("the server did not warn that the cap is off")
+		}
+	})
+
+	t.Run("forwarding UnverifiedCounter keeps the cap", func(t *testing.T) {
+		e := newEnv(t, func(o *Options) { o.MaxUnverified = maxUnverified; o.Store = countingStore{o.Store} })
+		in := e.newInbox("wrapped", "github", "s", storing)
+		if got := forgeAll(e); got != maxUnverified || e.count(in) != maxUnverified {
+			t.Errorf("%d accepted and %d stored, want %d of each", got, e.count(in), maxUnverified)
+		}
+		if strings.Contains(e.logs.String(), "cannot count unverified messages") {
+			t.Error("the server warned that the cap is off")
+		}
+	})
+}

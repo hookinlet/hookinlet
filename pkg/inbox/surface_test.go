@@ -63,6 +63,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"IngestObserver":    {"ObserveIngest(context.Context, *inbox.IngestEvent)"},
 		"UnverifiedLimiter": {"MaxUnverified(context.Context, *inbox.Inbox) int"},
 		"UnverifiedCounter": {"CountUnverified(context.Context, inbox.ID, int64) (int64, error)"},
+		"StatusReporter":    {"Status(context.Context) (inbox.StoreStatus, error)"},
 		"ScopedPrincipal":   {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "InboxIDs(context.Context) ([]inbox.ID, error)"},
 		"TenantPrincipal":   {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "Tenant() string"},
 		"Verifier":          {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
@@ -80,6 +81,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"IngestObserver":    reflect.TypeFor[inbox.IngestObserver](),
 		"UnverifiedLimiter": reflect.TypeFor[inbox.UnverifiedLimiter](),
 		"UnverifiedCounter": reflect.TypeFor[inbox.UnverifiedCounter](),
+		"StatusReporter":    reflect.TypeFor[inbox.StatusReporter](),
 		"ScopedPrincipal":   reflect.TypeFor[inbox.ScopedPrincipal](),
 		"Verifier":          reflect.TypeFor[verify.Verifier](),
 	}
