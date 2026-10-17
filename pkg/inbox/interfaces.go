@@ -310,6 +310,19 @@ type Notifier interface {
 	// implementation that cannot subscribe (for example its backend is down)
 	// returns a channel that never signals and logs the failure, so callers
 	// degrade to periodic re-reads.
+	//
+	// Publish's rule makes the subscription exist from the moment Subscribe
+	// returns, so Subscribe returns only once a Publish that begins afterwards,
+	// on any node, will reach it. An in-process notifier registers it before
+	// returning. A distributed one waits until its backend has confirmed the
+	// subscription (for a pub/sub channel, the reply to the subscribe command),
+	// but only briefly: Subscribe must not block the caller for long (the suite
+	// fails one that takes 2 seconds). If it gives up waiting, or reuses a
+	// connection whose subscription is not yet confirmed, a signal published in
+	// the gap may be lost; that is the at-most-once delivery a distributed
+	// notifier is allowed, and the reader finds the message on its next re-read,
+	// which is why such a notifier must be deployed with a positive
+	// Options.SSERecheckInterval.
 	Subscribe(ctx context.Context, inboxID ID) (signal <-chan struct{}, cancel func())
 }
 

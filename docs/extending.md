@@ -461,6 +461,14 @@ An in-process notifier must not drop signals. One that crosses the network may
 stream and MCP wait re-read the Store on that interval regardless. `Publish` is
 called with a context that may already be cancelled and must still deliver.
 
+Readers subscribe first and read the Store second, so a subscription has to be live
+when `Subscribe` returns: every `Publish` that begins after that must reach it. A
+notifier that crosses the network waits for its backend to confirm the subscription
+(the reply to a pub/sub `SUBSCRIBE`, say) before returning, but only briefly, since
+`Subscribe` must not block the caller. If it returns before the confirmation, a signal
+published in between can be lost, which is the at-most-once delivery the recheck
+interval covers: the reader sees the message on its next re-read.
+
 ## Writing a SecretBox
 
 A `SecretBox` seals a verifier secret when an inbox is created or its secret is set,
