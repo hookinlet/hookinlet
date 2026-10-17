@@ -778,7 +778,10 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        McpListInboxesInput: Record<string, never>;
+        McpListInboxesInput: {
+            /** @description continue a list: the next_after from your previous list_inboxes result. Omit it, or pass an empty string, to start from the beginning */
+            after?: string;
+        };
         McpQueryMessagesInput: {
             /** @description slug of the inbox */
             inbox: string;
