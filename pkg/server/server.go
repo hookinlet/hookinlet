@@ -232,10 +232,10 @@ type Server struct {
 	draining     atomic.Bool // set when the server is told to stop: /readyz fails
 	ingestBudget byteBudget  // body bytes held by deliveries being received
 
-	unverified   inbox.UnverifiedCounter // nil when the Store cannot count
-	limiter      inbox.UnverifiedLimiter // nil unless the Hooks set the cap per inbox
-	observer     inbox.IngestObserver    // nil unless the Hooks observe how deliveries end
-	unverifiedMu sync.Mutex              // held from counting unverified messages to storing one
+	unverified      inbox.UnverifiedCounter // nil when the Store cannot count
+	limiter         inbox.UnverifiedLimiter // nil unless the Hooks set the cap per inbox
+	observer        inbox.IngestObserver    // nil unless the Hooks observe how deliveries end
+	unverifiedLocks inboxLocks              // an inbox's is held from counting its unverified messages to storing one
 
 	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
 	mux        *http.ServeMux
