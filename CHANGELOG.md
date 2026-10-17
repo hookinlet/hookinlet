@@ -36,6 +36,10 @@ This will be 0.2.0. It changes how a stored secret is bound to its inbox and cha
   damaged secret is still found at start-up, which checks them all. `Options.SkipReadinessSecretCheck` turns the check
   off for a `SecretBox` that has its own health check, such as one that calls a key service.
 
+- **`Server.MetricsHandler()`** serves the series of `GET /metrics` (GET and HEAD, no authentication) for an embedder
+  to mount on a listener of its own, so that metrics can be scraped without the admin API on the same address.
+  `GET /metrics` is unchanged.
+
 **Upgrading**
 
 - The migration gives each existing inbox a UID. A verifier secret that is already stored was sealed to the slug,
