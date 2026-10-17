@@ -27,6 +27,19 @@ const maxEventTypeLen = 256
 // take a delivery for now; metrics tell the two apart.
 const codeUnverifiedLimit = "unverified_limit"
 
+// inboxAttrs names an inbox in a log line: its slug, then its tenant when it has
+// one, then the rest. A slug is unique only within a tenant, so on a server that
+// holds several tenants' inboxes the slug alone does not say which inbox a line is
+// about; an installation without tenants has only the empty one and sees no change.
+func inboxAttrs(in *inbox.Inbox, more ...slog.Attr) []slog.Attr {
+	attrs := make([]slog.Attr, 0, len(more)+2)
+	attrs = append(attrs, slog.String("slug", in.Slug))
+	if in.Tenant != "" {
+		attrs = append(attrs, slog.String("tenant", in.Tenant))
+	}
+	return append(attrs, more...)
+}
+
 // ingestResult is how a delivery ended. ingestAPI turns it into one of the
 // responses the document lists for the operation.
 type ingestResult struct {
@@ -148,7 +161,7 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 			// name the header and scheme an inbox expects, which is not for
 			// whoever happens to hold the ingest key; it goes to the log.
 			s.log.LogAttrs(ctx, slog.LevelInfo, "delivery rejected",
-				slog.String("slug", in.Slug), slog.String("reason", reason), slog.Int("size", len(body)))
+				inboxAttrs(in, slog.String("reason", reason), slog.Int("size", len(body)))...)
 			return refuse(http.StatusUnauthorized, "verification_failed", "webhook verification failed")
 		}
 	}
@@ -191,11 +204,11 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		return refuse(http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, errUnverifiedFull):
 		s.log.LogAttrs(ctx, slog.LevelWarn, "delivery refused: too many unverified messages",
-			slog.String("slug", in.Slug), slog.Int("max_unverified", s.opts.MaxUnverified))
+			inboxAttrs(in, slog.Int("max_unverified", s.opts.MaxUnverified))...)
 		return refuse(http.StatusTooManyRequests, codeUnverifiedLimit, "this inbox holds as many unverified messages as it may; verified deliveries are still accepted")
 	case errors.Is(err, inbox.ErrStorageFull):
 		// Not stored, so not acknowledged: the sender keeps it and tries again.
-		s.log.LogAttrs(ctx, slog.LevelError, "delivery refused: no room to store it", slog.String("slug", in.Slug), slog.String("err", err.Error()))
+		s.log.LogAttrs(ctx, slog.LevelError, "delivery refused: no room to store it", inboxAttrs(in, slog.String("err", err.Error()))...)
 		return refuse(http.StatusServiceUnavailable, "storage_full", "the server has no room to store the delivery; retry later")
 	case err != nil:
 		return s.internalFailure(ctx, "append", err)
@@ -206,8 +219,8 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	// already hold.
 	s.afterCommit(ctx, in, msg, created)
 	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery",
-		slog.String("slug", in.Slug), slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
-		slog.Bool("verified", verified), slog.Bool("duplicate", !created))
+		inboxAttrs(in, slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
+			slog.Bool("verified", verified), slog.Bool("duplicate", !created))...)
 	return ingestResult{status: http.StatusOK, seq: msg.Seq, duplicate: !created}
 }
 
@@ -270,10 +283,10 @@ func (s *Server) rejected(ctx context.Context, in *inbox.Inbox, err error) inges
 	case errors.Is(err, inbox.ErrForbidden):
 		res = refuse(http.StatusForbidden, "forbidden", "this delivery is not allowed")
 	default:
-		return s.internalFailure(ctx, "before-ingest hook", err, slog.String("slug", in.Slug))
+		return s.internalFailure(ctx, "before-ingest hook", err, inboxAttrs(in)...)
 	}
 	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery refused by hook",
-		slog.String("slug", in.Slug), slog.String("reason", err.Error()))
+		inboxAttrs(in, slog.String("reason", err.Error()))...)
 	return res
 }
 
@@ -283,7 +296,7 @@ func (s *Server) afterCommit(ctx context.Context, in *inbox.Inbox, msg *inbox.Me
 	defer func() {
 		if rec := recover(); rec != nil {
 			s.log.LogAttrs(ctx, slog.LevelError, "panic after commit",
-				slog.String("slug", in.Slug), slog.Int64("seq", msg.Seq), slog.String("panic", fmt.Sprint(rec)))
+				inboxAttrs(in, slog.Int64("seq", msg.Seq), slog.String("panic", fmt.Sprint(rec)))...)
 		}
 	}()
 	if created {
