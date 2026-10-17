@@ -33,6 +33,11 @@ applies.
   many of its secrets did not open. The `503` reason and the log no longer assume the master key was changed, since a
   key service can fail too. A server whose secrets all belong to one tenant still answers `503`, as for a wrong key.
   The start-up check's error names each inbox's tenant after its slug.
+- **Hook refusals can carry `Retry-After`.** A `429`, `402` or `403` from an embedder's `BeforeIngest` or `Admit`
+  (ingest, reads, `HEAD`s and streams) has `Retry-After` when the hook says when to retry, in whole seconds rounded
+  up, from 1 to 86400; the document lists it as optional on those responses. Over MCP such a refusal's tool error now
+  starts with the condition's code and ends with the wait when there is one, as
+  `rate_limited: too many requests; retry after 90 s` (it was the message alone).
 
 **Go API**
 
@@ -50,6 +55,13 @@ applies.
   checking the secrets timed out (the key service may be slow or down), with a warning in the log, checked again
   after 5 seconds. See
   [Writing a SecretBox](docs/extending.md#writing-a-secretbox).
+- **Added `inbox.RetryAfterer`, `inbox.RefuseAfter(err, d)`, `inbox.AccessInfo`, `inbox.AccessFrom(ctx)` and
+  `inbox.WithAccess(ctx, a)`.** A refusal wrapped with `RefuseAfter` (or any error with `RetryAfter() time.Duration`)
+  sets the `Retry-After` above. `AccessFrom` tells `Admit`, `BeforeIngest`, `AfterIngest`, `ObserveIngest` and
+  `MaxUnverified` which operation they are called for (the OpenAPI `operationId`, or `mcp.<tool>` for an MCP tool
+  call) and the request id of the access log line, so an embedder can audit admissions without wrapping
+  `Handler()`. No interface changes. See [Saying when to retry](docs/extending.md#saying-when-to-retry).
+
 - **Added `inboxtest.AssertStoreWrapperForwards(t, wrapper, inner)`**, which fails, naming each one and what the
   server does without it, when a Store wrapper lacks an optional Store interface (`inbox.UnverifiedCounter`,
   `inbox.Backupper`, `inbox.StatusReporter`) that the store it wraps implements. A wrapper that embeds `inbox.Store`

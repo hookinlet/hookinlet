@@ -206,8 +206,10 @@ free slot is told "too many waits are in progress" and should retry shortly. A
 
 A deployment that embeds hookinlet can also limit reads and waits itself (an
 [`Admitter`](extending.md#admitting-reads-streams-and-waits)). A tool call it refuses
-fails with a message saying so (such as "too many requests"), and the agent should
-retry shortly. The open-source build never refuses this way.
+fails with a message that starts with the condition, as the HTTP API's error code names
+it (`rate_limited`, `quota_exceeded` or `forbidden`), and ends with the time to wait when
+the deployment gives one (such as `rate_limited: too many requests; retry after 90 s`).
+The open-source build never refuses this way.
 
 ## Large bodies
 

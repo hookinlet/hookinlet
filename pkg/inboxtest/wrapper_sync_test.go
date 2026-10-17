@@ -22,7 +22,7 @@ import (
 // optionalStoreInterfaces, and AssertStoreWrapperForwards then checks it.
 var notStoreCapabilities = []string{
 	"Store", "Notifier", "Authenticator", "Principal", "ScopedPrincipal", "TenantPrincipal",
-	"Hooks", "Admitter", "UnverifiedLimiter", "IngestObserver", "SecretBox", "ContextSecretBox",
+	"Hooks", "Admitter", "UnverifiedLimiter", "IngestObserver", "SecretBox", "ContextSecretBox", "RetryAfterer",
 }
 
 func optionalStoreNames() []string {

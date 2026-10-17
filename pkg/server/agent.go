@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -102,9 +103,45 @@ func admitterOf(h inbox.Hooks) inbox.Admitter {
 type admitRefusal struct {
 	status    int
 	code, msg string
+	// retryAfter is the Retry-After to send, in seconds, or "" for none (see retryAfterOf).
+	retryAfter string
 }
 
 func (e *admitRefusal) Error() string { return e.code + ": " + e.msg }
+
+// toolText is the refusal as an MCP tool error: the code, which names the condition
+// as the HTTP API's error code does, the message, and when to retry if that is known.
+// Nothing of the Admitter's own error is in it: it may give reasons that are not the
+// caller's to read.
+func (e *admitRefusal) toolText() string {
+	text := e.code + ": " + e.msg
+	if e.retryAfter != "" {
+		text += "; retry after " + e.retryAfter + " s"
+	}
+	return text
+}
+
+// maxRetryAfter caps the Retry-After the server sends for a hook's refusal. A client
+// told to come back in a month is better off asking again tomorrow, and a bound keeps
+// a nonsensical duration from becoming a nonsensical header.
+const maxRetryAfter = 24 * time.Hour
+
+// retryAfterOf is the Retry-After for a refusal err from a hook, if err says when to
+// try again (inbox.RetryAfterer): whole seconds, rounded up, at least 1 and at most
+// maxRetryAfter. It is "" when err does not say, or says a duration that is not
+// positive.
+func retryAfterOf(err error) string {
+	var ra inbox.RetryAfterer
+	if !errors.As(err, &ra) {
+		return ""
+	}
+	d := ra.RetryAfter()
+	if d <= 0 {
+		return ""
+	}
+	d = min(d, maxRetryAfter)
+	return strconv.FormatInt(int64((d+time.Second-1)/time.Second), 10)
+}
 
 // admit asks the Admitter, if there is one, whether the caller may make an access of
 // this kind, before it takes a slot. It returns what to call when the access ends,
@@ -119,16 +156,17 @@ func (s *Server) admit(ctx context.Context, p inbox.Principal, in *inbox.Inbox, 
 		var ref *admitRefusal
 		switch {
 		case errors.Is(err, inbox.ErrRateLimited):
-			ref = &admitRefusal{http.StatusTooManyRequests, "rate_limited", "too many requests"}
+			ref = &admitRefusal{status: http.StatusTooManyRequests, code: "rate_limited", msg: "too many requests"}
 		case errors.Is(err, inbox.ErrQuotaExceeded):
-			ref = &admitRefusal{http.StatusPaymentRequired, "quota_exceeded", "a limit on this access has been reached"}
+			ref = &admitRefusal{status: http.StatusPaymentRequired, code: "quota_exceeded", msg: "a limit on this access has been reached"}
 		case errors.Is(err, inbox.ErrForbidden):
-			ref = &admitRefusal{http.StatusForbidden, "forbidden", "this access is not allowed"}
+			ref = &admitRefusal{status: http.StatusForbidden, code: "forbidden", msg: "this access is not allowed"}
 		default:
 			s.log.LogAttrs(ctx, slog.LevelError, "admit hook failed",
 				slog.String("kind", string(kind)), slog.String("err", err.Error()))
 			return nil, err
 		}
+		ref.retryAfter = retryAfterOf(err)
 		s.log.LogAttrs(ctx, slog.LevelInfo, "access refused by hook",
 			slog.String("kind", string(kind)), slog.String("reason", err.Error()))
 		return nil, ref

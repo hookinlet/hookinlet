@@ -344,6 +344,11 @@ func (c *contract) record(opID string, status int, hdr http.Header, body []byte,
 			c.t.Errorf("%s %d: header %s is %q, the document says %q", opID, status, name, got, k)
 		}
 	}
+	// A Retry-After is a promise to the client, so one the server sends must be one the
+	// document lists for that response.
+	if hdr.Get("Retry-After") != "" && get(resp, "headers", "Retry-After") == nil {
+		c.t.Errorf("%s %d: the server sent Retry-After, which the document does not list for this response", opID, status)
+	}
 
 	// Body.
 	content, _ := resp["content"].(map[string]any)

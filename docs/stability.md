@@ -32,7 +32,9 @@ would be `/v2`, served beside it.
 **Breaking** (a CHANGELOG entry, and while the version is below 1.0, a minor version):
 removing or renaming a path, field, parameter, code, tool or argument; changing a
 type or what a value means; making an optional request field required; a status that
-meant success meaning failure.
+meant success meaning failure. An operation's `operationId` in `openapi.json`, and the
+`mcp.<tool>` name of an MCP tool, are what a hook sees as `inbox.AccessInfo.Operation`, and an
+embedder may record them (in an audit log, say): renaming one is a breaking change too.
 
 ### What the server is strict about
 

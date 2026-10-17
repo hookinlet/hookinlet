@@ -180,6 +180,38 @@ answer has been written (or, for a read that is not held that long, when the han
 returns); for a stream or wait, when it ends. The server's own limits apply after
 `Admit` whatever it answers. `inboxtest.AdmitterSuite` checks an implementation.
 
+### Saying when to retry
+
+A refusal from `BeforeIngest` or `Admit` can say when to come back: wrap it with
+`inbox.RefuseAfter(err, d)`, or return your own error type with a
+`RetryAfter() time.Duration` method (`inbox.RetryAfterer`, found with `errors.As`).
+
+```go
+return nil, inbox.RefuseAfter(fmt.Errorf("%w: plan limit", inbox.ErrRateLimited), 90*time.Second)
+```
+
+The `429`, `402` or `403` then carries `Retry-After` in whole seconds, rounded up, at
+least 1 and at most 86400 (a day); a duration that is not positive sends none, and so
+does an error that is not one of the three refusals. Over MCP the tool error says it
+instead, as `rate_limited: too many requests; retry after 90 s`. Neither the HTTP
+answer nor the tool error carries your error's text.
+
+### Which request a hook is called for
+
+`inbox.AccessFrom(ctx)` tells `Admit`, `BeforeIngest`, `AfterIngest`, `ObserveIngest`
+and `MaxUnverified` which request they are called for, for an audit trail:
+
+- `Operation` is the operation's `operationId` in [the OpenAPI document](openapi.json)
+  (`getInbox`, `headGetInbox`, `listMessages`, `headListMessages`, `getMessage`,
+  `headGetMessage`, `getMessageRaw`, `headGetMessageRaw`, `streamMessages`, `ingest`,
+  `ingestPut`, `ingestWithPath`, `ingestPutWithPath`), or `mcp.` and the tool's name for
+  an MCP tool call (`mcp.list_inboxes`, `mcp.query_messages`, `mcp.get_message`,
+  `mcp.wait_for_messages`). It is a fixed name, never a path.
+- `RequestID` is the request's `X-Request-Id`, the `request_id` of its access log line.
+
+It is false outside a request. `inbox.WithAccess` makes a context that carries one, for
+testing a hook.
+
 ### Observing how deliveries end
 
 `AfterIngest` sees only deliveries that were stored or recognised as duplicates, and

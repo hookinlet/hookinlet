@@ -2662,6 +2662,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 }
 
 type AccessForbiddenResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 type AccessForbiddenJSONResponse struct {
@@ -2671,6 +2672,7 @@ type AccessForbiddenJSONResponse struct {
 }
 
 type AccessQuotaExceededResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 type AccessQuotaExceededJSONResponse struct {
@@ -2680,6 +2682,7 @@ type AccessQuotaExceededJSONResponse struct {
 }
 
 type AccessRateLimitedResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 type AccessRateLimitedJSONResponse struct {
@@ -3067,6 +3070,7 @@ func (response Ingest401JSONResponse) VisitIngestResponse(w http.ResponseWriter)
 }
 
 type Ingest402ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3082,6 +3086,9 @@ func (response Ingest402JSONResponse) VisitIngestResponse(w http.ResponseWriter)
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -3090,6 +3097,7 @@ func (response Ingest402JSONResponse) VisitIngestResponse(w http.ResponseWriter)
 }
 
 type Ingest403ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3105,6 +3113,9 @@ func (response Ingest403JSONResponse) VisitIngestResponse(w http.ResponseWriter)
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -3162,6 +3173,7 @@ func (response Ingest413JSONResponse) VisitIngestResponse(w http.ResponseWriter)
 }
 
 type Ingest429ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3177,6 +3189,9 @@ func (response Ingest429JSONResponse) VisitIngestResponse(w http.ResponseWriter)
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -3356,6 +3371,7 @@ func (response IngestPut401JSONResponse) VisitIngestPutResponse(w http.ResponseW
 }
 
 type IngestPut402ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3371,6 +3387,9 @@ func (response IngestPut402JSONResponse) VisitIngestPutResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -3379,6 +3398,7 @@ func (response IngestPut402JSONResponse) VisitIngestPutResponse(w http.ResponseW
 }
 
 type IngestPut403ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3394,6 +3414,9 @@ func (response IngestPut403JSONResponse) VisitIngestPutResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -3451,6 +3474,7 @@ func (response IngestPut413JSONResponse) VisitIngestPutResponse(w http.ResponseW
 }
 
 type IngestPut429ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3466,6 +3490,9 @@ func (response IngestPut429JSONResponse) VisitIngestPutResponse(w http.ResponseW
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -3646,6 +3673,7 @@ func (response IngestWithPath401JSONResponse) VisitIngestWithPathResponse(w http
 }
 
 type IngestWithPath402ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3661,6 +3689,9 @@ func (response IngestWithPath402JSONResponse) VisitIngestWithPathResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -3669,6 +3700,7 @@ func (response IngestWithPath402JSONResponse) VisitIngestWithPathResponse(w http
 }
 
 type IngestWithPath403ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3684,6 +3716,9 @@ func (response IngestWithPath403JSONResponse) VisitIngestWithPathResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -3741,6 +3776,7 @@ func (response IngestWithPath413JSONResponse) VisitIngestWithPathResponse(w http
 }
 
 type IngestWithPath429ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3756,6 +3792,9 @@ func (response IngestWithPath429JSONResponse) VisitIngestWithPathResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -3936,6 +3975,7 @@ func (response IngestPutWithPath401JSONResponse) VisitIngestPutWithPathResponse(
 }
 
 type IngestPutWithPath402ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3951,6 +3991,9 @@ func (response IngestPutWithPath402JSONResponse) VisitIngestPutWithPathResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -3959,6 +4002,7 @@ func (response IngestPutWithPath402JSONResponse) VisitIngestPutWithPathResponse(
 }
 
 type IngestPutWithPath403ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -3974,6 +4018,9 @@ func (response IngestPutWithPath403JSONResponse) VisitIngestPutWithPathResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -4031,6 +4078,7 @@ func (response IngestPutWithPath413JSONResponse) VisitIngestPutWithPathResponse(
 }
 
 type IngestPutWithPath429ResponseHeaders struct {
+	RetryAfter *string
 	XRequestId string
 }
 
@@ -4046,6 +4094,9 @@ func (response IngestPutWithPath429JSONResponse) VisitIngestPutWithPathResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -7179,6 +7230,9 @@ func (response GetInbox402JSONResponse) VisitGetInboxResponse(w http.ResponseWri
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -7195,6 +7249,9 @@ func (response GetInbox403JSONResponse) VisitGetInboxResponse(w http.ResponseWri
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -7244,6 +7301,9 @@ func (response GetInbox429JSONResponse) VisitGetInboxResponse(w http.ResponseWri
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -7391,6 +7451,9 @@ func (response HeadGetInbox402JSONResponse) VisitHeadGetInboxResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -7407,6 +7470,9 @@ func (response HeadGetInbox403JSONResponse) VisitHeadGetInboxResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -7453,6 +7519,9 @@ func (response HeadGetInbox429JSONResponse) VisitHeadGetInboxResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -7610,6 +7679,9 @@ func (response ListMessages402JSONResponse) VisitListMessagesResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -7626,6 +7698,9 @@ func (response ListMessages403JSONResponse) VisitListMessagesResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -7691,6 +7766,9 @@ func (response ListMessages429JSONResponse) VisitListMessagesResponse(w http.Res
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -7839,6 +7917,9 @@ func (response HeadListMessages402JSONResponse) VisitHeadListMessagesResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -7855,6 +7936,9 @@ func (response HeadListMessages403JSONResponse) VisitHeadListMessagesResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -7915,6 +7999,9 @@ func (response HeadListMessages429JSONResponse) VisitHeadListMessagesResponse(w 
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -8073,6 +8160,9 @@ func (response GetMessage402JSONResponse) VisitGetMessageResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -8089,6 +8179,9 @@ func (response GetMessage403JSONResponse) VisitGetMessageResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -8154,6 +8247,9 @@ func (response GetMessage429JSONResponse) VisitGetMessageResponse(w http.Respons
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -8303,6 +8399,9 @@ func (response HeadGetMessage402JSONResponse) VisitHeadGetMessageResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -8319,6 +8418,9 @@ func (response HeadGetMessage403JSONResponse) VisitHeadGetMessageResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -8379,6 +8481,9 @@ func (response HeadGetMessage429JSONResponse) VisitHeadGetMessageResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -8551,6 +8656,9 @@ func (response GetMessageRaw402JSONResponse) VisitGetMessageRawResponse(w http.R
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -8567,6 +8675,9 @@ func (response GetMessageRaw403JSONResponse) VisitGetMessageRawResponse(w http.R
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -8632,6 +8743,9 @@ func (response GetMessageRaw429JSONResponse) VisitGetMessageRawResponse(w http.R
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -8791,6 +8905,9 @@ func (response HeadGetMessageRaw402JSONResponse) VisitHeadGetMessageRawResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -8807,6 +8924,9 @@ func (response HeadGetMessageRaw403JSONResponse) VisitHeadGetMessageRawResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -8867,6 +8987,9 @@ func (response HeadGetMessageRaw429JSONResponse) VisitHeadGetMessageRawResponse(
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)
@@ -9050,6 +9173,9 @@ func (response StreamMessages402JSONResponse) VisitStreamMessagesResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(402)
@@ -9066,6 +9192,9 @@ func (response StreamMessages403JSONResponse) VisitStreamMessagesResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
@@ -9131,6 +9260,9 @@ func (response StreamMessages429JSONResponse) VisitStreamMessagesResponse(w http
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(429)

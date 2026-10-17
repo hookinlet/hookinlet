@@ -1132,6 +1132,8 @@ export interface components {
         /** @description Refused by an embedder's hook (rate limit). The server itself never answers this; it is for a deployment that limits what a caller may read, stream or wait for. */
         AccessRateLimited: {
             headers: {
+                /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                "Retry-After"?: string;
                 /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                 "X-Request-Id": string;
                 [name: string]: unknown;
@@ -1151,6 +1153,8 @@ export interface components {
         /** @description Refused by an embedder's hook (quota). The server itself never answers this. */
         AccessQuotaExceeded: {
             headers: {
+                /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                "Retry-After"?: string;
                 /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                 "X-Request-Id": string;
                 [name: string]: unknown;
@@ -1170,6 +1174,8 @@ export interface components {
         /** @description Refused by an embedder's hook. The server itself never answers this. */
         AccessForbidden: {
             headers: {
+                /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                "Retry-After"?: string;
                 /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                 "X-Request-Id": string;
                 [name: string]: unknown;
@@ -1446,6 +1452,8 @@ export interface operations {
             /** @description Refused by an embedder's hook (quota). */
             402: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1465,6 +1473,8 @@ export interface operations {
             /** @description Refused by an embedder's hook. */
             403: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1487,6 +1497,8 @@ export interface operations {
             /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1590,6 +1602,8 @@ export interface operations {
             /** @description Refused by an embedder's hook (quota). */
             402: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1609,6 +1623,8 @@ export interface operations {
             /** @description Refused by an embedder's hook. */
             403: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1631,6 +1647,8 @@ export interface operations {
             /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1735,6 +1753,8 @@ export interface operations {
             /** @description Refused by an embedder's hook (quota). */
             402: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1754,6 +1774,8 @@ export interface operations {
             /** @description Refused by an embedder's hook. */
             403: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1776,6 +1798,8 @@ export interface operations {
             /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1880,6 +1904,8 @@ export interface operations {
             /** @description Refused by an embedder's hook (quota). */
             402: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1899,6 +1925,8 @@ export interface operations {
             /** @description Refused by an embedder's hook. */
             403: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -1921,6 +1949,8 @@ export interface operations {
             /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
+                    /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
+                    "Retry-After"?: string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;

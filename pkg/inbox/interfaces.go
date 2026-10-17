@@ -366,8 +366,9 @@ type Hooks interface {
 	// BeforeIngest may reject a delivery before it is verified or stored by
 	// returning an error wrapping ErrRateLimited (429), ErrQuotaExceeded (402),
 	// or ErrForbidden (403). Any other error is treated as an internal failure.
-	// The request is what is known of the delivery at that point; it grows by
-	// adding fields, which is why it is a struct.
+	// A refusal may say when to retry (RefuseAfter, RetryAfterer). The request is
+	// what is known of the delivery at that point; it grows by adding fields, which
+	// is why it is a struct. AccessFrom(ctx) says which operation it is for.
 	BeforeIngest(ctx context.Context, req *IngestRequest) error
 
 	// AfterIngest runs after a delivery is committed or recognized as a
@@ -413,6 +414,8 @@ type Admitter interface {
 	// ends (when the answer has been written, or the stream or wait has finished),
 	// including when the access fails later. in is nil only where AccessKind says
 	// so. Admit must not block for long: a read waits on it before any slot is held.
+	// A refusal may say when to retry (RefuseAfter, RetryAfterer), and AccessFrom(ctx)
+	// says which operation or MCP tool is asking and the request's id.
 	Admit(ctx context.Context, p Principal, in *Inbox, kind AccessKind) (release func(), err error)
 }
 
