@@ -1137,3 +1137,39 @@ type trusted struct{}
 func (trusted) Verify(*http.Request, []byte, []byte, time.Time) (verify.Result, error) {
 	return verify.Result{}, nil
 }
+
+// A slug is unique only within a tenant, so a delivery's log lines name the tenant of
+// an inbox that has one, and leave the field out for the default tenant.
+func TestIngestLogsNameTheTenant(t *testing.T) {
+	e := newEnv(t)
+	e.newInbox("alerts", "trusted", "", func(in *inbox.Inbox) { in.Tenant = "acme" })
+	e.newInbox("plain", "trusted", "")
+	if rec := e.post("/in/alerts", `{"a":1}`); rec.Code != http.StatusOK {
+		t.Fatalf("tenant inbox: status %d, %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.post("/in/plain", `{"a":1}`); rec.Code != http.StatusOK {
+		t.Fatalf("default inbox: status %d, %s", rec.Code, rec.Body.String())
+	}
+	var tenantLine, plainLine map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
+		var m map[string]any
+		if json.Unmarshal([]byte(line), &m) != nil || m["msg"] != "delivery" {
+			continue
+		}
+		switch m["slug"] {
+		case "alerts":
+			tenantLine = m
+		case "plain":
+			plainLine = m
+		}
+	}
+	if tenantLine == nil || tenantLine["tenant"] != "acme" {
+		t.Errorf("the delivery log line of a tenant's inbox does not carry the tenant: %v", tenantLine)
+	}
+	if plainLine == nil {
+		t.Fatal("no delivery log line for the default tenant's inbox")
+	}
+	if _, has := plainLine["tenant"]; has {
+		t.Errorf("a default-tenant delivery logged a tenant field: %v", plainLine)
+	}
+}

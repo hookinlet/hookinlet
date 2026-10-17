@@ -4,6 +4,16 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+**Changed**
+
+- **A delivery's log lines name the inbox's tenant.** The lines `delivery`, `delivery rejected`, `delivery refused by hook`,
+  `delivery refused: too many unverified messages`, `delivery refused: no room to store it` and `panic after commit` carry a
+  `tenant` attribute next to `slug` when the inbox belongs to a tenant. A slug is unique only within a tenant, so on a
+  server that holds several tenants' inboxes the slug alone did not say which inbox a line was about. An inbox in the
+  default (empty) tenant logs exactly what it did before.
+
 ## 0.2.0 - 2026-10-16
 
 The first release that changes how data is stored and what the Go interfaces under `pkg/` look like, made now
