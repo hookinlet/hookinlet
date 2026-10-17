@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1329,6 +1330,132 @@ func TestListInboxesDoesNotRevealHowManyInboxesExist(t *testing.T) {
 	}
 	if len(l.Inboxes) != 1 || l.Inboxes[0].Slug != "inbox-02" {
 		t.Errorf("list_inboxes = %+v", l.Inboxes)
+	}
+}
+
+// A principal limited to a list of inboxes, which may name more than
+// mcpMaxInboxes, and which may name some it cannot read.
+type scopedListAuth struct {
+	inner  inbox.Authenticator
+	scopes map[string]scopedListPrincipal // by bearer token
+}
+
+type scopedListPrincipal struct {
+	ids      []inbox.ID
+	readable map[inbox.ID]bool
+}
+
+func (p scopedListPrincipal) CanReadInbox(in *inbox.Inbox) bool {
+	return in != nil && p.readable[in.ID]
+}
+func (scopedListPrincipal) CanAdmin() bool { return false }
+func (p scopedListPrincipal) InboxIDs(context.Context) ([]inbox.ID, error) {
+	return p.ids, nil
+}
+
+func (a *scopedListAuth) Authenticate(r *http.Request) (inbox.Principal, error) {
+	if p, ok := a.scopes[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]; ok {
+		return p, nil
+	}
+	return a.inner.Authenticate(r)
+}
+
+// lookupCounter counts the per-inbox lookups list_inboxes makes.
+type lookupCounter struct {
+	inbox.Store
+	gets, latest atomic.Int64
+}
+
+func (l *lookupCounter) GetInbox(ctx context.Context, id inbox.ID) (*inbox.Inbox, error) {
+	l.gets.Add(1)
+	return l.Store.GetInbox(ctx, id)
+}
+
+func (l *lookupCounter) LatestSeq(ctx context.Context, id inbox.ID) (int64, error) {
+	l.latest.Add(1)
+	return l.Store.LatestSeq(ctx, id)
+}
+
+// A principal limited to many inboxes gets at most mcpMaxInboxes of them, and
+// truncated when it could read more, as a principal that is not limited does.
+// Inboxes past the limit are not looked up.
+func TestListInboxesForAScopedPrincipalIsCapped(t *testing.T) {
+	lc := &lookupCounter{}
+	sa := &scopedListAuth{scopes: map[string]scopedListPrincipal{}}
+	ae, base, _ := mcpEnv(t, func(o *Options) {
+		lc.Store = o.Store
+		o.Store = lc
+		sa.inner = o.Authenticator
+		o.Authenticator = sa
+	})
+	var ids []inbox.ID
+	var slugs []string
+	for i := range mcpMaxInboxes + 10 {
+		in := ae.newInbox(fmt.Sprintf("scoped-%03d", i), "trusted", "")
+		ids = append(ids, in.ID)
+		slugs = append(slugs, in.Slug)
+	}
+	gone := ae.newInbox("scoped-gone", "trusted", "")
+	if err := ae.store.DeleteInbox(t.Context(), gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := ae.newInbox("scoped-unreadable", "trusted", "")
+
+	scope := func(ids ...inbox.ID) scopedListPrincipal {
+		p := scopedListPrincipal{ids: ids, readable: map[inbox.ID]bool{}}
+		for _, id := range ids {
+			if id != unreadable.ID {
+				p.readable[id] = true
+			}
+		}
+		return p
+	}
+	cases := []struct {
+		name      string
+		p         scopedListPrincipal
+		want      []string
+		truncated bool
+	}{
+		{"fewer", scope(ids[:3]...), slugs[:3], false},
+		{"exactly the limit", scope(ids[:mcpMaxInboxes]...), slugs[:mcpMaxInboxes], false},
+		{"one more than the limit", scope(ids[:mcpMaxInboxes+1]...), slugs[:mcpMaxInboxes], true},
+		{"many more", scope(ids...), slugs[:mcpMaxInboxes], true},
+		// A deleted inbox and one the principal cannot read do not count.
+		{"deleted and unreadable do not count", scope(append([]inbox.ID{gone.ID, unreadable.ID}, ids[:mcpMaxInboxes]...)...), slugs[:mcpMaxInboxes], false},
+		{"deleted and unreadable past the limit", scope(append(slices.Clone(ids[:mcpMaxInboxes]), gone.ID, unreadable.ID)...), slugs[:mcpMaxInboxes], false},
+	}
+	// Every token is known before the server is asked anything.
+	for i, c := range cases {
+		sa.scopes[fmt.Sprintf("scoped-list-%d", i)] = c.p
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tok := fmt.Sprintf("scoped-list-%d", i)
+			cs := connectMCP(t, base, tok)
+			gets, latest := lc.gets.Load(), lc.latest.Load()
+			o := callTool(t, cs, "list_inboxes", nil)
+			gets, latest = lc.gets.Load()-gets, lc.latest.Load()-latest
+			var l listInboxesOutput
+			if err := json.Unmarshal(o.raw, &l); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, s := range l.Inboxes {
+				got = append(got, s.Slug)
+			}
+			if !slices.Equal(got, c.want) || l.Truncated != c.truncated {
+				t.Errorf("list_inboxes returned %d inboxes (%v...), truncated=%v; want %d, truncated=%v",
+					len(got), got[:min(3, len(got))], l.Truncated, len(c.want), c.truncated)
+			}
+			// It looks up no more than one inbox past the limit, and reads the
+			// latest_seq of only those it returns.
+			if gets > int64(len(c.p.ids)) || gets > mcpMaxInboxes+3 {
+				t.Errorf("looked up %d inboxes", gets)
+			}
+			if latest != int64(len(c.want)) {
+				t.Errorf("read latest_seq %d times for %d inboxes", latest, len(c.want))
+			}
+		})
 	}
 }
 
