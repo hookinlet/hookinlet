@@ -18,6 +18,19 @@ applies.
   operation in `docs/openapi.json` now says which kind it is (`x-admin-scope`: `tenant` or `store`), and the server
   refuses a document whose admin operation does not say. See [Tenants](docs/extending.md#tenants).
 
+**Go API**
+
+- **Contract clarifications and new suite cases for `Store` and `Notifier`.** No method changes and no change in
+  behaviour. The `Store` documentation now says that the token methods are not scoped by tenant (`GetTokenByHash`,
+  `ListTokens` and `DeleteToken` act on every token whatever the context's tenant, and an `AllInboxes` token reads
+  every inbox), that `Ping` reports the Store as a whole and must not fail for one tenant's or inbox's quota, and
+  what monotonic `ReceivedAt` lets a Store do; `Notifier.Subscribe` says when a subscription must be live, and what
+  a distributed notifier does about it. `StoreSuite` has three new cases, `TokensAreNotScopedByTenant`,
+  `DeleteInboxRacingAppendsAndTokens` and `PruneCancelledPartway`, which a Store that passed before may now fail.
+  Added `inboxtest.NotifierSuiteWith` and `inboxtest.NotifierOptions` with `Settle`, so that a notifier whose
+  signals cross a network can pass the coalescing check; `NotifierSuite` is unchanged. See
+  [Writing a Store](docs/extending.md#writing-a-store) and [Writing a Notifier](docs/extending.md#writing-a-notifier).
+
 ## 0.4.0 - 2026-10-17
 
 Changes for servers that hold more than one tenant's inboxes, and for anyone writing hooks: `/readyz` no longer lets
