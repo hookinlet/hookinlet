@@ -16,6 +16,15 @@ applies.
   principal's type. An admin in no tenant is still served, as the operator's view. Off by default: nothing changes
   unless it is set. See [Tenants](docs/extending.md#tenants).
 
+**Changed**
+
+- **`/readyz` samples the stored secrets across tenants.** It takes at most 5 secrets of each tenant, oldest first,
+  before more of any one (still 25 in all, from at most the 5000 oldest inboxes), and still answers `503` only if none
+  of them opens. One tenant whose secrets do not open, such as one whose key a key service has lost, no longer takes
+  the server out of rotation for every tenant when it owns the oldest inboxes; it is logged with its tenant key and how
+  many of its secrets did not open. The `503` reason and the log no longer assume the master key was changed, since a
+  key service can fail too. A server whose secrets all belong to one tenant still answers `503`, as for a wrong key.
+
 **Go API**
 
 - **Added `inboxtest.AssertStoreWrapperForwards(t, wrapper, inner)`**, which fails, naming each one and what the

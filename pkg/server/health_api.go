@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -54,8 +55,8 @@ func (a *healthAPI) HeadReadyz(ctx context.Context, _ api.HeadReadyzRequestObjec
 }
 
 // notReady says why the server is not ready, or returns "". The Store has to
-// answer, and a sample of the stored verifier secrets has to open with the master
-// key: a server whose key is not the one its data was sealed under accepts every
+// answer, and at least one of a sample of the stored verifier secrets has to open: a
+// server whose master key is not the one its data was sealed under accepts every
 // delivery and fails every one that needs a secret.
 func (s *Server) notReady(ctx context.Context) string {
 	if s.draining.Load() {
@@ -72,7 +73,7 @@ func (s *Server) notReady(ctx context.Context) string {
 	case err == nil:
 	case errors.Is(err, ErrUnreadableSecrets):
 		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready", slog.String("err", err.Error()))
-		return "stored verifier secrets cannot be opened with the master key; see the server log"
+		return "none of the stored verifier secrets tried can be opened: the master key, or the key service, may be wrong; see the server log"
 	default:
 		s.log.LogAttrs(ctx, slog.LevelWarn, "not ready: could not check the stored secrets", slog.String("err", err.Error()))
 		return "the store is not reachable"
@@ -85,11 +86,16 @@ func (s *Server) notReady(ctx context.Context) string {
 var ErrUnreadableSecrets = admin.ErrUnreadableSecrets
 
 // What readiness opens: it needs to tell a master key that opens nothing from one
-// that is right, which any few secrets show, not to check every inbox's. The scan
-// bound is for a store in which few inboxes have a secret.
+// that is right, which any few secrets show, not to check every inbox's. It takes at
+// most readySecretPerTenant of each tenant's secrets before more of any one, so that
+// one tenant whose secrets do not open (a SecretBox may keep a key per tenant, and
+// lose one) cannot fill the sample and take every tenant's server out of rotation.
+// The scan bound is for a store in which few inboxes have a secret, and for one with
+// many tenants.
 const (
-	readySecretSample = 25
-	readySecretScan   = 5000
+	readySecretSample    = 25
+	readySecretPerTenant = 5
+	readySecretScan      = 5000
 )
 
 const (
@@ -121,22 +127,51 @@ func (s *Server) secretsOK(ctx context.Context) error {
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), secretsTimeout)
 	defer cancel()
-	r, err := s.adm.SampleSecrets(cctx, readySecretSample, readySecretScan)
+	r, err := s.adm.SampleSecrets(cctx, readySecretSample, readySecretPerTenant, readySecretScan)
 	if err != nil {
 		return err // could not look: say so, and look again next time
 	}
-	// Only a master key that opens nothing takes the server out of rotation. One inbox
-	// whose secret does not open fails its own deliveries, and an operator is told which;
-	// the other inboxes still work, and a load balancer should keep sending to them.
+	// Only a sample in which nothing opens takes the server out of rotation. An inbox,
+	// or a tenant, whose secrets do not open fails its own deliveries, and an operator is
+	// told which; the others still work, and a load balancer should keep sending to them.
 	err = nil
-	if r.Systemic() {
+	switch {
+	case r.Systemic():
 		err = r.Err()
-	} else if !r.OK() {
-		s.log.LogAttrs(cctx, slog.LevelWarn, "some inboxes have a verifier secret that does not open; their deliveries will fail until it is set again",
-			slog.String("detail", r.Err().Error()))
+		if !r.NoKey { // the slugs, and their tenants, are in the lines below
+			err = fmt.Errorf("%w: none of the %d tried opens, in %d tenant(s)", ErrUnreadableSecrets, r.Checked, len(r.Tenants))
+		}
+		msg := "no verifier secret in the readiness sample opens: the master key may not be the one they were sealed under, or the key service may be failing"
+		if len(r.Tenants) == 1 && r.Tenants[0].Tenant != "" {
+			msg += "; the sample held one tenant's secrets only, so that tenant's key alone being gone looks the same"
+		}
+		s.logUnreadable(cctx, msg, r)
+	case !r.OK():
+		s.logUnreadable(cctx, "some verifier secrets in the readiness sample do not open; deliveries to those inboxes fail until the master key or that tenant's key in the key service is put right, or the secret is set again", r)
 	}
 	s.secretsErr, s.secretsAt = err, now
 	return err
+}
+
+// logUnreadable logs, for each tenant in r with a secret that did not open, how many
+// did not of how many were tried, and a few of the inboxes' slugs. The default
+// tenant's line has no tenant field. Secrets are never logged.
+func (s *Server) logUnreadable(ctx context.Context, msg string, r admin.SecretReport) {
+	for _, t := range r.Tenants {
+		if len(t.Unreadable) == 0 {
+			continue
+		}
+		slugs := t.Unreadable
+		if len(slugs) > 5 {
+			slugs = slugs[:5]
+		}
+		attrs := make([]slog.Attr, 0, 4)
+		if t.Tenant != "" {
+			attrs = append(attrs, slog.String("tenant", t.Tenant))
+		}
+		attrs = append(attrs, slog.Int("unreadable", len(t.Unreadable)), slog.Int("tried", t.Checked), slog.Any("slugs", slugs))
+		s.log.LogAttrs(ctx, slog.LevelWarn, msg, attrs...)
+	}
 }
 
 // LegacySecrets counts the stored verifier secrets that are still in the original
@@ -150,9 +185,12 @@ func (s *Server) LegacySecrets(ctx context.Context) int {
 	return r.Legacy
 }
 
-// CheckSecrets opens every stored verifier secret with the server's master key and
-// returns an error that wraps ErrUnreadableSecrets, naming some of the inboxes, if
-// any does not open. cmd/hookinlet serve runs it before listening.
+// CheckSecrets opens every stored verifier secret, of every tenant, with the
+// server's SecretBox and returns an error that wraps ErrUnreadableSecrets, naming some
+// of the inboxes, if any does not open. Unlike /readyz it fails for one inbox, or one
+// tenant whose key is gone, as well as for a wrong master key; and it opens every
+// secret, which with a SecretBox that asks a key service is one request each.
+// cmd/hookinlet serve runs it before listening.
 func (s *Server) CheckSecrets(ctx context.Context) error {
 	r, err := s.adm.CheckSecrets(ctx)
 	if err != nil {

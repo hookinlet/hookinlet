@@ -34,6 +34,19 @@ type SecretReport struct {
 	// does not name another: it was changed, was sealed for another inbox, or is in
 	// the original layout, which names no key, so a wrong key looks like damage.
 	Damaged []string
+	// Tenants breaks the secrets checked down by tenant (Inbox.Tenant), in the order
+	// each tenant was first met. A slug names an inbox only within its tenant.
+	Tenants []TenantSecrets
+}
+
+// TenantSecrets is what CheckSecrets found for one tenant's inboxes.
+type TenantSecrets struct {
+	// Tenant is the tenant key, empty for the default tenant.
+	Tenant string
+	// Checked is how many of the tenant's secrets were opened, and Unreadable the
+	// slugs of those that did not open (with the wrong key, damaged, or no key).
+	Checked    int
+	Unreadable []string
 }
 
 // OK reports whether every secret can be opened.
@@ -77,7 +90,7 @@ func sample(slugs []string) string {
 // CheckSecrets opens every stored verifier secret, to find out before a delivery
 // does whether the master key is the one they were sealed under.
 func (s *Service) CheckSecrets(ctx context.Context) (SecretReport, error) {
-	return s.checkSecrets(ctx, 0, 0)
+	return s.checkSecrets(ctx, 0, 0, 0)
 }
 
 // SampleSecrets is CheckSecrets for a question asked often: it opens at most
@@ -85,15 +98,29 @@ func (s *Service) CheckSecrets(ctx context.Context) (SecretReport, error) {
 // first), so its cost does not grow with the size of the store. A master key that
 // opens nothing shows in any sample of secrets; one inbox whose secret is damaged
 // may not, and CheckSecrets is what finds it.
-func (s *Service) SampleSecrets(ctx context.Context, maxSecrets, maxInboxes int) (SecretReport, error) {
-	return s.checkSecrets(ctx, maxSecrets, maxInboxes)
+//
+// The sample is spread over the tenants: it first takes at most perTenant secrets of
+// each tenant, the oldest of each, in the order the tenants' first inboxes come; if
+// that leaves room, it fills the rest with the oldest secrets it passed over. So a
+// tenant whose secrets do not open (its key is gone from a key service, say) cannot
+// fill the sample by itself while another tenant has secrets among the inboxes
+// looked at. perTenant applies only when maxSecrets is set.
+func (s *Service) SampleSecrets(ctx context.Context, maxSecrets, perTenant, maxInboxes int) (SecretReport, error) {
+	return s.checkSecrets(ctx, maxSecrets, perTenant, maxInboxes)
 }
 
 // checkSecrets is CheckSecrets with bounds, where zero means no bound.
-func (s *Service) checkSecrets(ctx context.Context, maxSecrets, maxInboxes int) (SecretReport, error) {
+func (s *Service) checkSecrets(ctx context.Context, maxSecrets, perTenant, maxInboxes int) (SecretReport, error) {
 	var r SecretReport
+	if maxSecrets <= 0 {
+		perTenant = 0 // everything is opened, so there is no share to keep
+	}
+	tenants := map[string]int{} // tenant to its index in r.Tenants
+	full := func() bool { return maxSecrets > 0 && r.Checked >= maxSecrets }
+	var spare []*inbox.Inbox // passed over for its tenant's share, oldest first; at most maxSecrets
 	var after inbox.ID
 	scanned := 0
+scan:
 	for {
 		limit := inbox.MaxListLimit // a page never takes more than the sample may look at
 		if maxInboxes > 0 && maxInboxes-scanned < limit {
@@ -104,36 +131,65 @@ func (s *Service) checkSecrets(ctx context.Context, maxSecrets, maxInboxes int) 
 			return r, err
 		}
 		for _, in := range page {
-			if maxSecrets > 0 && r.Checked >= maxSecrets {
-				return r, nil
+			if full() {
+				break scan
 			}
 			scanned++
 			after = in.ID
 			if len(in.VerifierSecret) == 0 {
 				continue
 			}
-			r.Checked++
-			if s.Box == nil {
-				r.NoKey = true
+			if i, ok := tenants[in.Tenant]; ok && perTenant > 0 && r.Tenants[i].Checked >= perTenant {
+				if len(spare) < maxSecrets {
+					spare = append(spare, in)
+				}
 				continue
 			}
-			if secretbox.Legacy(in.VerifierSecret) {
-				r.Legacy++
-			}
-			pt, err := s.Box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
-			clear(pt)
-			switch {
-			case err == nil:
-			case errors.Is(err, secretbox.ErrWrongKey):
-				r.WrongKey = append(r.WrongKey, in.Slug)
-			default:
-				r.Damaged = append(r.Damaged, in.Slug)
-			}
+			s.openSecret(&r, tenants, in)
 		}
-		if len(page) < limit || (maxSecrets > 0 && r.Checked >= maxSecrets) || (maxInboxes > 0 && scanned >= maxInboxes) {
-			return r, nil
+		if len(page) < limit || full() || (maxInboxes > 0 && scanned >= maxInboxes) {
+			break
 		}
 	}
+	for _, in := range spare {
+		if full() {
+			break
+		}
+		s.openSecret(&r, tenants, in)
+	}
+	return r, nil
+}
+
+// openSecret opens one inbox's verifier secret and counts what it found in r.
+func (s *Service) openSecret(r *SecretReport, tenants map[string]int, in *inbox.Inbox) {
+	i, ok := tenants[in.Tenant]
+	if !ok {
+		i = len(r.Tenants)
+		tenants[in.Tenant] = i
+		r.Tenants = append(r.Tenants, TenantSecrets{Tenant: in.Tenant})
+	}
+	t := &r.Tenants[i]
+	r.Checked++
+	t.Checked++
+	if s.Box == nil {
+		r.NoKey = true
+		t.Unreadable = append(t.Unreadable, in.Slug)
+		return
+	}
+	if secretbox.Legacy(in.VerifierSecret) {
+		r.Legacy++
+	}
+	pt, err := s.Box.Open(in.VerifierSecret, inbox.VerifierSecretContext(in.UID))
+	clear(pt)
+	switch {
+	case err == nil:
+		return
+	case errors.Is(err, secretbox.ErrWrongKey):
+		r.WrongKey = append(r.WrongKey, in.Slug)
+	default:
+		r.Damaged = append(r.Damaged, in.Slug)
+	}
+	t.Unreadable = append(t.Unreadable, in.Slug)
 }
 
 // RekeyResult is what Rekey did.

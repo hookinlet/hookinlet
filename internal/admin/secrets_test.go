@@ -9,6 +9,8 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"errors"
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/hookinlet/hookinlet/internal/admin"
@@ -263,14 +265,107 @@ func TestSampleSecretsStopsAtItsBounds(t *testing.T) {
 		secrets, inboxes int
 		want             int
 	}{{2, 0, 2}, {0, 1, 1}, {0, 2, 2}, {100, 100, 3}, {0, 0, 3}} {
-		r, err := svc.SampleSecrets(t.Context(), c.secrets, c.inboxes)
+		r, err := svc.SampleSecrets(t.Context(), c.secrets, 1, c.inboxes)
 		if err != nil || r.Checked != c.want || !r.OK() {
 			t.Errorf("SampleSecrets(%d, %d) checked %d (%v, %v), want %d", c.secrets, c.inboxes, r.Checked, r.OK(), err, c.want)
 		}
 	}
 	// A wrong key shows in a sample just as it does in the whole.
 	wrong := &admin.Service{Store: svc.Store, Box: boxOf(t, 2)}
-	if r, _ := wrong.SampleSecrets(t.Context(), 1, 0); !r.Systemic() {
+	if r, _ := wrong.SampleSecrets(t.Context(), 1, 1, 0); !r.Systemic() {
 		t.Errorf("a sample under the wrong key: %+v", r)
 	}
+}
+
+// tenantStore is a fresh store with inboxes made in the order given, each with a
+// secret sealed under key 1 and in the tenant named for it. It returns the sealing
+// contexts of each tenant's secrets too.
+func tenantStore(t *testing.T, tenants []string) (*sqlite.Store, map[string][]string) {
+	t.Helper()
+	st, err := sqlite.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	box := boxOf(t, 1)
+	contexts := map[string][]string{}
+	for i, tenant := range tenants {
+		uid, err := inbox.NewUID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := box.Seal([]byte("s"), inbox.VerifierSecretContext(uid))
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[tenant] = append(contexts[tenant], string(inbox.VerifierSecretContext(uid)))
+		slug := fmt.Sprintf("hook-%02d", i)
+		if err := st.CreateInbox(t.Context(), &inbox.Inbox{Slug: slug, UID: uid, IngestKey: slug, Name: slug, Verifier: "token", Tenant: tenant, VerifierSecret: sealed}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return st, contexts
+}
+
+func checkedBy(r admin.SecretReport) map[string]int {
+	m := map[string]int{}
+	for _, t := range r.Tenants {
+		m[t.Tenant] = t.Checked
+	}
+	return m
+}
+
+// The sample takes a few of each tenant's secrets before more of any one, so the
+// tenant with the oldest inboxes does not fill it; what is left is filled with the
+// oldest secrets passed over; and it still looks at no more inboxes than it may.
+func TestSampleSecretsSpreadsOverTenants(t *testing.T) {
+	var tenants []string
+	for range 12 {
+		tenants = append(tenants, "acme")
+	}
+	tenants = append(tenants, "", "", "globex")
+	st, contexts := tenantStore(t, tenants)
+	svc := &admin.Service{Store: st, Box: boxOf(t, 1)}
+	for _, c := range []struct {
+		secrets, perTenant, inboxes int
+		want                        map[string]int
+	}{
+		{6, 2, 0, map[string]int{"acme": 3, "": 2, "globex": 1}}, // two each, then the oldest passed over
+		{10, 2, 0, map[string]int{"acme": 7, "": 2, "globex": 1}},
+		{5, 5, 0, map[string]int{"acme": 5}},                      // acme's share fills it before the others are reached
+		{20, 3, 13, map[string]int{"acme": 12, "": 1}},            // globex is past the scan bound
+		{3, 1, 0, map[string]int{"acme": 1, "": 1, "globex": 1}},  // one each
+		{0, 1, 0, map[string]int{"acme": 12, "": 2, "globex": 1}}, // no bound: everything
+	} {
+		want := c.want
+		r, err := svc.SampleSecrets(t.Context(), c.secrets, c.perTenant, c.inboxes)
+		if got := checkedBy(r); err != nil || !r.OK() || fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("SampleSecrets(%d, %d, %d) checked %v (%v, %v), want %v", c.secrets, c.perTenant, c.inboxes, got, r.OK(), err, want)
+		}
+	}
+
+	// A tenant whose secrets do not open is named, with how many, and the rest open.
+	r, _ := (&admin.Service{Store: svc.Store, Box: tenantBox{boxOf(t, 1), contexts["acme"]}}).SampleSecrets(t.Context(), 25, 5, 5000)
+	if r.Systemic() || r.Checked != 15 {
+		t.Fatalf("with acme's key gone: %+v", r)
+	}
+	for _, ts := range r.Tenants {
+		if want := map[string]int{"acme": 12}[ts.Tenant]; len(ts.Unreadable) != want {
+			t.Errorf("tenant %q: %d unreadable, want %d", ts.Tenant, len(ts.Unreadable), want)
+		}
+	}
+}
+
+// tenantBox fails Open for the secrets sealed with the contexts in down: one
+// tenant's, as when a key service has lost that tenant's key.
+type tenantBox struct {
+	inbox.SecretBox
+	down []string
+}
+
+func (b tenantBox) Open(ct, context []byte) ([]byte, error) {
+	if slices.Contains(b.down, string(context)) {
+		return nil, errors.New("key service: no key for this tenant")
+	}
+	return b.SecretBox.Open(ct, context)
 }
