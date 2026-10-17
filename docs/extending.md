@@ -469,6 +469,13 @@ notifier that crosses the network waits for its backend to confirm the subscript
 published in between can be lost, which is the at-most-once delivery the recheck
 interval covers: the reader sees the message on its next re-read.
 
+Signals coalesce when they arrive before the subscriber reads. A notifier that crosses
+the network delivers a burst of publishes spread over time, so a subscriber that reads
+the first at once sees the later ones as new signals, as it should. Run such a
+notifier with `inboxtest.NotifierSuiteWith(t, newNotifier, inboxtest.NotifierOptions{Settle: d})`,
+where `d` is how long a burst of a thousand publishes takes to arrive: the coalescing
+check then waits that long before it reads, and still requires one signal.
+
 ## Writing a SecretBox
 
 A `SecretBox` seals a verifier secret when an inbox is created or its secret is set,
