@@ -332,6 +332,15 @@ func (o *Operation) AnyQuery() bool {
 	return v
 }
 
+// TenantScoped reports whether an admin operation acts only on the caller's tenant
+// (`x-admin-scope: "tenant"`), so that a tenant's administrator may call it. Anything
+// else is an operation on the whole store, for the operator only: an operation that
+// does not say is taken to be one (Load refuses an admin operation that does not say).
+func (o *Operation) TenantScoped() bool {
+	v, _ := o.raw["x-admin-scope"].(string)
+	return v == "tenant"
+}
+
 // HasTag reports whether the operation carries the tag.
 func (o *Operation) HasTag(tag string) bool {
 	for _, t := range asList(o.raw["tags"]) {
@@ -822,6 +831,13 @@ func (d *Document) checkOperations() error {
 			problems = append(problems, where+": the operations of one path must ask for the same credential")
 		}
 		security[op.Path] = op.Security()
+		scope, hasScope := op.raw["x-admin-scope"]
+		switch {
+		case op.Security() == Admin && scope != "tenant" && scope != "store":
+			problems = append(problems, where+`: an admin operation must say whose data it acts on: x-admin-scope "tenant" or "store"`)
+		case op.Security() != Admin && hasScope:
+			problems = append(problems, where+": x-admin-scope is for admin operations only")
+		}
 		if op.TakesBody() && op.MaxBodyBytes() <= 0 {
 			problems = append(problems, where+": a JSON request body needs an x-max-bytes, the most the server will read")
 		}

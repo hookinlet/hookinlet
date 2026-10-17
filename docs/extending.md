@@ -55,6 +55,18 @@ that never uses it has one tenant, the empty one, and sees no difference.
   returns implements `TenantPrincipal`, every Store call made for that request (the
   read API, the admin API, streams, MCP) runs in its tenant. Your `Principal` is still
   what decides which of those inboxes the caller may read (`CanReadInbox`).
+- **A tenant's admin manages its tenant's inboxes and nothing else.** A
+  `TenantPrincipal` whose `CanAdmin` is true may create, list, show, change and
+  delete its tenant's inboxes, set their verifier secrets and rotate their ingest
+  keys; another tenant's inbox is `404`, as if it did not exist. The admin operations
+  that act on the whole store are the operator's (an admin that is not a
+  `TenantPrincipal`): tokens (a token has no tenant), backups, running retention,
+  `/v1/admin/status` and `/metrics`. A tenant's admin gets `403` with code
+  `forbidden` and nothing is done; the log gets a warning naming the operation and
+  the principal's Go type. Each admin operation's `x-admin-scope` in
+  `docs/openapi.json` says which kind it is. A hosted service should give its
+  customers principals whose `CanAdmin` is false, and keep admin to its own
+  operator principal.
 - **A principal that is not a `TenantPrincipal` is not scoped**, so one belonging to a
   tenant must implement it. The shipped token authenticator does not: it is for one
   tenant, and its all-inboxes tokens read every inbox in the Store.

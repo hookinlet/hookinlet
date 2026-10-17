@@ -18,6 +18,13 @@ environment, never in a flag, and use TLS in front of the server. The server
 will not start with one shorter than 32 characters or one that is mostly
 repetition; `openssl rand -base64 32` makes a good one.
 
+A program that embeds hookinlet with its own `Authenticator` can also have a
+tenant's admin ([Tenants](extending.md#tenants)). It may use the operations on its
+tenant's inboxes: create, list, show, change, delete, the verifier secret, and
+rotating the ingest key. Tokens, backups, retention runs, `/v1/admin/status` and
+`/metrics` act on the whole store, so they answer it `403` and are for the operator
+only. The admin token is the operator.
+
 Every admin action is logged (`"msg":"admin"`) with what was done and the
 caller's address (`client_ip`; behind a proxy, set `--trusted-proxies` so that
 it is the caller and not the proxy). Tokens and secrets are never logged.

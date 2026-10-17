@@ -4,6 +4,20 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+**Changed**
+
+- **A tenant's admin can no longer use the admin operations that act on the whole store.** For an
+  `inbox.TenantPrincipal` whose `CanAdmin` is true, `/v1/admin/tokens` (list, issue, revoke), `/v1/admin/backup`,
+  `/v1/admin/retention/run`, `/v1/admin/status` and `/metrics` now answer `403` with code `forbidden`, do nothing,
+  and log a warning naming the operation and the principal's Go type. Before, such an admin could list other tenants'
+  `all_inboxes` tokens, revoke any token by id, issue an `all_inboxes` token that read every tenant's inboxes, and
+  download a backup of every tenant's data. Its operations on its own tenant's inboxes are unchanged, and the
+  operator (an admin that is not a `TenantPrincipal`, such as the admin token) keeps every operation. Each admin
+  operation in `docs/openapi.json` now says which kind it is (`x-admin-scope`: `tenant` or `store`), and the server
+  refuses a document whose admin operation does not say. See [Tenants](docs/extending.md#tenants).
+
 ## 0.4.0 - 2026-10-17
 
 Changes for servers that hold more than one tenant's inboxes, and for anyone writing hooks: `/readyz` no longer lets

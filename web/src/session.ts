@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { ApiError, getStatus } from './api/client'
+import { ApiError, request } from './api/client'
 
 // The admin token is held here, in memory, and nowhere else: not in a URL, not in
 // storage. Reloading the page signs out.
@@ -18,7 +18,10 @@ export function currentToken(): string {
 }
 
 export async function signIn(candidate: string): Promise<void> {
-  await getStatus(candidate) // a 401 says the token is wrong
+  // A 401 says the token is wrong, a 403 that it cannot use the admin API. Listing
+  // inboxes is an operation every admin may call, including a tenant's admin, which
+  // the store-wide ones (status, tokens, backups) refuse.
+  await request(candidate, '/v1/admin/inboxes?limit=1')
   token.value = candidate
   signedIn.value = true
 }

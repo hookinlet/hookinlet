@@ -916,7 +916,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorUnauthenticated"];
             };
         };
-        /** @description The credential is valid but cannot use the admin API. */
+        /** @description The credential is valid but cannot use the admin API; or the operation acts on the whole store (`x-admin-scope: store`) and the credential is a tenant's administrator, which may use only the operations that act on its own tenant's inboxes (`x-admin-scope: tenant`). */
         Forbidden: {
             headers: {
                 /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
