@@ -79,5 +79,6 @@ an inbox: a crash between forwarding a message and saving the position repeats t
 ## Embedding the server: `custom-hooks`
 
 [`custom-hooks`](custom-hooks) is hookinlet inside your own program, with a per-inbox rate limit added through
-the `Hooks` interface. It is the template for anything that goes between the sender and the store; see
+the `Hooks` interface, and a count of how deliveries ended per inbox (`inbox.IngestObserver`), served as text on
+`EXAMPLE_COUNTS_ADDR` when that is set. It is the template for anything that goes between the sender and the store; see
 [Extending](../docs/extending.md).

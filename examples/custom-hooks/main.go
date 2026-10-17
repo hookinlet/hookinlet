@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Pat Ramsey
 
-// Command custom-hooks is hookinlet with a rate limit added, written the way an
-// application that embeds the server would: it builds the same pieces the stock
-// binary does, using only the public packages under pkg/, and passes its own
-// inbox.Hooks to server.New.
+// Command custom-hooks is hookinlet with a rate limit and per-inbox delivery
+// counts added, written the way an application that embeds the server would: it
+// builds the same pieces the stock binary does, using only the public packages
+// under pkg/, and passes its own inbox.Hooks to server.New.
 //
-// Run it with the same settings as hookinlet itself, plus two of its own:
+// Run it with the same settings as hookinlet itself, plus three of its own:
 //
 //	HOOKINLET_ADMIN_TOKEN=...        at least 32 characters
 //	HOOKINLET_MASTER_KEY=...         32 bytes, base64 (openssl rand -base64 32)
@@ -14,6 +14,8 @@
 //	HOOKINLET_LISTEN_ADDR=:8080      (default)
 //	EXAMPLE_RATE=5                   deliveries a second to each inbox (default)
 //	EXAMPLE_BURST=20                 how many may arrive at once (default)
+//	EXAMPLE_COUNTS_ADDR=             where to serve the delivery counts, such as
+//	                                 127.0.0.1:9091 (default: not served)
 package main
 
 import (
@@ -23,10 +25,13 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
@@ -78,6 +83,9 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 	}
 	defer func() { _ = store.Close() }()
 
+	// The rate limiter refuses deliveries; the counter, wrapped around it, sees how
+	// every delivery ended.
+	hooks := NewOutcomeCounter(NewRateLimiter(rate, int(burst)))
 	srv, err := server.New(server.Options{
 		Addr:          orDefault(getenv("HOOKINLET_LISTEN_ADDR"), ":8080"),
 		Logger:        log,
@@ -85,12 +93,31 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 		SecretBox:     box,
 		Notifier:      local.New(),
 		Authenticator: token.NewAuthenticator(store, adminToken),
-		Hooks:         NewRateLimiter(rate, int(burst)), // the one line that makes this different
+		Hooks:         hooks, // what makes this different
 	})
 	if err != nil {
 		return err
 	}
+	if addr := getenv("EXAMPLE_COUNTS_ADDR"); addr != "" {
+		stopCounts, err := serveCounts(ctx, addr, hooks)
+		if err != nil {
+			return fmt.Errorf("EXAMPLE_COUNTS_ADDR: %w", err)
+		}
+		defer stopCounts()
+	}
 	return srv.Run(ctx)
+}
+
+// serveCounts serves h on addr until the returned function is called.
+func serveCounts(ctx context.Context, addr string, h http.Handler) (stop func(), err error) {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	hs := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = hs.Serve(ln) }()
+	return func() { _ = hs.Close() }, nil
 }
 
 func orDefault(v, def string) string {

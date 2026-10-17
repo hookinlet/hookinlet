@@ -131,6 +131,12 @@ func TestTheProgramAnswers429WhenTheLimitIsReached(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	_ = ln.Close()
+	cl, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	countsAddr := cl.Addr().String()
+	_ = cl.Close()
 
 	env := map[string]string{
 		"HOOKINLET_ADMIN_TOKEN": strings.Repeat("a", 40),
@@ -139,6 +145,7 @@ func TestTheProgramAnswers429WhenTheLimitIsReached(t *testing.T) {
 		"HOOKINLET_LISTEN_ADDR": addr,
 		"EXAMPLE_RATE":          "0.001",
 		"EXAMPLE_BURST":         "2",
+		"EXAMPLE_COUNTS_ADDR":   countsAddr,
 	}
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -178,6 +185,28 @@ func TestTheProgramAnswers429WhenTheLimitIsReached(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("statuses = %v, want %v", got, want)
 		}
+	}
+	call("POST", "/in/no-such-inbox", `{}`, false) // no inbox, so not counted
+
+	// The counter saw every delivery to the inbox, the refused ones too.
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+countsAddr+"/", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var counts bytes.Buffer
+	_, _ = counts.ReadFrom(resp.Body)
+	for _, line := range []string{
+		`example_deliveries_total{tenant="",inbox="limited-inbox",outcome="stored"} 2`,
+		`example_deliveries_total{tenant="",inbox="limited-inbox",outcome="rate_limited"} 2`,
+	} {
+		if !strings.Contains(counts.String(), line+"\n") {
+			t.Errorf("the counts do not say %s:\n%s", line, counts.String())
+		}
+	}
+	if strings.Contains(counts.String(), "no-such-inbox") {
+		t.Errorf("a delivery to no inbox was counted:\n%s", counts.String())
 	}
 }
 

@@ -221,6 +221,7 @@ type Server struct {
 
 	unverified   inbox.UnverifiedCounter // nil when the Store cannot count
 	limiter      inbox.UnverifiedLimiter // nil unless the Hooks set the cap per inbox
+	observer     inbox.IngestObserver    // nil unless the Hooks observe how deliveries end
 	unverifiedMu sync.Mutex              // held from counting unverified messages to storing one
 
 	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
@@ -368,6 +369,7 @@ func New(opts Options) (*Server, error) {
 		closing:      closeCtx.Done(),
 	}
 	s.limiter, _ = opts.Hooks.(inbox.UnverifiedLimiter)
+	s.observer, _ = opts.Hooks.(inbox.IngestObserver)
 	if uc, ok := opts.Store.(inbox.UnverifiedCounter); ok {
 		s.unverified = uc
 	} else if opts.MaxUnverified > 0 || s.limiter != nil {

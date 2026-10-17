@@ -60,6 +60,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		// The optional interfaces are part of the surface too.
 		"Admitter":          {"Admit(context.Context, inbox.Principal, *inbox.Inbox, inbox.AccessKind) (func(), error)"},
 		"Backupper":         {"Backup(context.Context) (io.ReadCloser, int64, error)"},
+		"IngestObserver":    {"ObserveIngest(context.Context, *inbox.IngestEvent)"},
 		"UnverifiedLimiter": {"MaxUnverified(context.Context, *inbox.Inbox) int"},
 		"UnverifiedCounter": {"CountUnverified(context.Context, inbox.ID, int64) (int64, error)"},
 		"ScopedPrincipal":   {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "InboxIDs(context.Context) ([]inbox.ID, error)"},
@@ -76,6 +77,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"Admitter":          reflect.TypeFor[inbox.Admitter](),
 		"TenantPrincipal":   reflect.TypeFor[inbox.TenantPrincipal](),
 		"Backupper":         reflect.TypeFor[inbox.Backupper](),
+		"IngestObserver":    reflect.TypeFor[inbox.IngestObserver](),
 		"UnverifiedLimiter": reflect.TypeFor[inbox.UnverifiedLimiter](),
 		"UnverifiedCounter": reflect.TypeFor[inbox.UnverifiedCounter](),
 		"ScopedPrincipal":   reflect.TypeFor[inbox.ScopedPrincipal](),

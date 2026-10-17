@@ -95,7 +95,7 @@ applies. Anything under `internal/` is not.
 **How the interfaces grow.** `inbox.Store`, `inbox.Hooks`, `inbox.SecretBox`,
 `inbox.Authenticator`, `inbox.Principal` and `inbox.Notifier` do not gain methods once
 they are 1.0: a new capability is a new, small interface that an implementation may
-also satisfy, found by a type assertion (as `Admitter`, `Backupper` and `ScopedPrincipal` are), with
+also satisfy, found by a type assertion (as `Admitter`, `Backupper`, `IngestObserver` and `ScopedPrincipal` are), with
 the server falling back to what it did before. A test fails when the methods of one of those
 interfaces, their names or their signatures, change, so the change cannot be an accident. A conformance suite for a new
 interface ships with it, and a behaviour that is in no suite is not part of the

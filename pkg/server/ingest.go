@@ -48,6 +48,8 @@ type ingestResult struct {
 	seq       int64
 	challenge []byte // set for a handshake answered instead of stored
 	duplicate bool   // a repeat of a delivery already stored
+	verified  bool   // the stored message (or the one it repeats) is verified
+	size      int64  // body bytes read
 }
 
 func refuse(status int, code, msg string) ingestResult {
@@ -87,9 +89,23 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 		return refuse(http.StatusNotFound, "not_found", "not found")
 	case err != nil:
 		return s.internalFailure(ctx, "resolve ingest key", err)
-	case in.Disabled:
+	}
+	// From here the delivery has an inbox to be counted against, so an observer
+	// hears how it ends; before here it has none, and is not observed.
+	res := s.deliver(ctx, w, r, in)
+	if s.observer != nil {
+		s.observe(ctx, in, r, res)
+	}
+	return res
+}
+
+// deliver takes a delivery to a known inbox, from reading its body to storing it.
+func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Request, in *inbox.Inbox) (out ingestResult) {
+	if in.Disabled {
 		return refuse(http.StatusNotFound, "not_found", "not found")
 	}
+	var body []byte
+	defer func() { out.size = int64(len(body)) }()
 
 	// 2. Read the body, never more than the inbox allows.
 	if r.ContentLength > in.MaxBodyBytes {
@@ -221,7 +237,63 @@ func (s *Server) ingest(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery",
 		inboxAttrs(in, slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
 			slog.Bool("verified", verified), slog.Bool("duplicate", !created))...)
-	return ingestResult{status: http.StatusOK, seq: msg.Seq, duplicate: !created}
+	return ingestResult{status: http.StatusOK, seq: msg.Seq, duplicate: !created, verified: msg.Verified}
+}
+
+// observe tells the Hooks' IngestObserver how a delivery to in ended. A panic in it
+// is logged and swallowed: the outcome, and the response, are already decided.
+func (s *Server) observe(ctx context.Context, in *inbox.Inbox, r *http.Request, res ingestResult) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.log.LogAttrs(ctx, slog.LevelError, "panic in ingest observer",
+				inboxAttrs(in, slog.String("panic", fmt.Sprint(rec)))...)
+		}
+	}()
+	s.observer.ObserveIngest(ctx, &inbox.IngestEvent{
+		Inbox:    in,
+		Outcome:  ingestOutcome(res),
+		Status:   res.status,
+		Size:     res.size,
+		SourceIP: clientIP(r, s.opts.TrustedProxies),
+		Seq:      res.seq,
+		Verified: res.verified,
+	})
+}
+
+// ingestOutcome names how a delivery ended for an IngestObserver.
+func ingestOutcome(res ingestResult) inbox.IngestOutcome {
+	if res.status == http.StatusOK {
+		switch {
+		case res.challenge != nil:
+			return inbox.IngestHandshake
+		case res.duplicate:
+			return inbox.IngestDuplicate
+		}
+		return inbox.IngestStored
+	}
+	switch res.code {
+	case "verification_failed":
+		return inbox.IngestVerificationFailed
+	case "rate_limited":
+		return inbox.IngestRateLimited
+	case "quota_exceeded":
+		return inbox.IngestQuotaExceeded
+	case "forbidden":
+		return inbox.IngestForbidden
+	case codeUnverifiedLimit:
+		return inbox.IngestUnverifiedLimit
+	case "storage_full":
+		return inbox.IngestStorageFull
+	case "overloaded":
+		return inbox.IngestOverloaded
+	case "payload_too_large":
+		return inbox.IngestTooLarge
+	case "bad_request":
+		return inbox.IngestBadRequest
+	case "not_found":
+		return inbox.IngestNotFound
+	}
+	return inbox.IngestError
 }
 
 // errUnverifiedFull is append's answer for an unverified message the inbox has no

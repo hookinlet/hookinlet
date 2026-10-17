@@ -21,13 +21,14 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
 | `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | the server's tests |
+| `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, and for a stored message its `Seq` and whether it is verified), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | the server's tests |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. `InboxIDs(ctx)` may look the list up, and may fail. | the agent principal | checked by `AuthenticatorSuite` |
 | `TenantPrincipal` (optional) | A `Principal` that belongs to one tenant. After authenticating, the server scopes the request's context to it (`inbox.WithTenant`), so slugs are looked up in that tenant and nothing outside it is reachable. See [Tenants](#tenants). | none: the shipped principals are not in a tenant | `StoreSuite` (the `Tenants` case) and the server's tests |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they
-are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, and `Hooks` without `Admitter` admits every read, stream and wait. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
+are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, `Hooks` without `Admitter` admits every read, stream and wait, and `Hooks` without `IngestObserver` is told nothing more than `AfterIngest` says. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
 
 `/readyz` opens a sample of the stored verifier secrets (up to 25, at most every 30 seconds) to catch a master key that is not the one the data was sealed under. A `SecretBox` whose opens are expensive, such as one that asks a key service, can turn that off with `Options.SkipReadinessSecretCheck` and report its own health. `Server.CheckSecrets`, which the `hookinlet` program runs before it listens, always opens every secret.
 
@@ -82,7 +83,8 @@ err = srv.Run(ctx)                              // returns after a clean shutdow
 ```
 
 `examples/custom-hooks` is a complete program built exactly this way, with a
-per-inbox rate limit as the hook. It is compiled and tested in CI; copy it as a
+per-inbox rate limit as the hook and an `IngestObserver` that counts how deliveries
+ended, per inbox. It is compiled and tested in CI; copy it as a
 starting point. `Options` has the rest (limits, timeouts, `TrustedProxies`,
 `PublicBaseURL`, a `Verifiers` registry); each field says what it does and what
 its default is.
@@ -162,6 +164,38 @@ function, which may be nil, is called once when the access ends: for a read, whe
 answer has been written (or, for a read that is not held that long, when the handler
 returns); for a stream or wait, when it ends. The server's own limits apply after
 `Admit` whatever it answers. `inboxtest.AdmitterSuite` checks an implementation.
+
+### Observing how deliveries end
+
+`AfterIngest` sees only deliveries that were stored or recognised as duplicates, and
+`/metrics` counts outcomes only in total. To see every outcome per inbox (for your own
+metrics, an audit trail or logs), also implement `inbox.IngestObserver` on the same
+value:
+
+```go
+func (c *counter) ObserveIngest(ctx context.Context, ev *inbox.IngestEvent) {
+	c.add(ev.Inbox.Tenant, ev.Inbox.Slug, ev.Outcome) // take a lock, add one; nothing slow
+}
+```
+
+It is called once per delivery to a known inbox, after the outcome is decided (and
+after `AfterIngest`, for a message that was stored or a duplicate), before the
+response is written, on the request's goroutine: it must not block, since the sender
+waits for it. Its context may be cancelled already, so work that outlives the call
+needs `context.WithoutCancel`. A panic in it is logged and swallowed, and the response
+does not change.
+
+`ev.Outcome` is one of the `inbox.Ingest*` constants: `stored`, `duplicate`,
+`handshake`, `verification_failed`, `rate_limited`, `quota_exceeded` and `forbidden`
+(refused by `BeforeIngest`), `unverified_limit`, `storage_full`, `overloaded`,
+`too_large`, `bad_request`, `not_found` (the inbox is disabled or was deleted while the
+delivery was received) and `error`. More may be added, so treat one you do not know
+as a refusal. The event never carries headers, the body, or why a signature failed
+(the server logs that), so whatever you do with it cannot leak them.
+
+A delivery whose ingest key names no inbox is not observed, nor is one with the wrong
+method: there is no inbox to count it against, and an observer would otherwise see
+every guess anyone makes at a key.
 
 ## Writing a Store
 
