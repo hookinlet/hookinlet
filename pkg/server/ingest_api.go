@@ -52,11 +52,11 @@ func (a *ingestAPI) Ingest(ctx context.Context, _ api.IngestRequestObject) (api.
 	case http.StatusPaymentRequired:
 		var b api.ErrorQuotaExceeded
 		b.Error.Code, b.Error.Message = api.QuotaExceeded, res.msg
-		return api.Ingest402JSONResponse{Body: b, Headers: api.Ingest402ResponseHeaders{XRequestId: id}}, nil
+		return api.Ingest402JSONResponse{Body: b, Headers: api.Ingest402ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusForbidden:
 		var b api.ErrorForbidden
 		b.Error.Code, b.Error.Message = api.ErrorForbiddenErrorCodeForbidden, res.msg
-		return api.Ingest403JSONResponse{Body: b, Headers: api.Ingest403ResponseHeaders{XRequestId: id}}, nil
+		return api.Ingest403JSONResponse{Body: b, Headers: api.Ingest403ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusNotFound:
 		return api.Ingest404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, fail{status: res.status, code: res.code, msg: res.msg})}, nil
 	case http.StatusMethodNotAllowed:
@@ -66,7 +66,7 @@ func (a *ingestAPI) Ingest(ctx context.Context, _ api.IngestRequestObject) (api.
 	case http.StatusTooManyRequests:
 		var b api.ErrorRateLimited
 		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
-		return api.Ingest429JSONResponse{Body: b, Headers: api.Ingest429ResponseHeaders{XRequestId: id}}, nil
+		return api.Ingest429JSONResponse{Body: b, Headers: api.Ingest429ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusServiceUnavailable:
 		return api.Ingest503JSONResponse{OverloadedJSONResponse: overloadedResp(ctx, res)}, nil
 	}
@@ -94,11 +94,11 @@ func (a *ingestAPI) IngestWithPath(ctx context.Context, _ api.IngestWithPathRequ
 	case http.StatusPaymentRequired:
 		var b api.ErrorQuotaExceeded
 		b.Error.Code, b.Error.Message = api.QuotaExceeded, res.msg
-		return api.IngestWithPath402JSONResponse{Body: b, Headers: api.IngestWithPath402ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestWithPath402JSONResponse{Body: b, Headers: api.IngestWithPath402ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusForbidden:
 		var b api.ErrorForbidden
 		b.Error.Code, b.Error.Message = api.ErrorForbiddenErrorCodeForbidden, res.msg
-		return api.IngestWithPath403JSONResponse{Body: b, Headers: api.IngestWithPath403ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestWithPath403JSONResponse{Body: b, Headers: api.IngestWithPath403ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusNotFound:
 		return api.IngestWithPath404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, fail{status: res.status, code: res.code, msg: res.msg})}, nil
 	case http.StatusMethodNotAllowed:
@@ -108,7 +108,7 @@ func (a *ingestAPI) IngestWithPath(ctx context.Context, _ api.IngestWithPathRequ
 	case http.StatusTooManyRequests:
 		var b api.ErrorRateLimited
 		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
-		return api.IngestWithPath429JSONResponse{Body: b, Headers: api.IngestWithPath429ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestWithPath429JSONResponse{Body: b, Headers: api.IngestWithPath429ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusServiceUnavailable:
 		return api.IngestWithPath503JSONResponse{OverloadedJSONResponse: overloadedResp(ctx, res)}, nil
 	}
@@ -136,11 +136,11 @@ func (a *ingestAPI) IngestPut(ctx context.Context, _ api.IngestPutRequestObject)
 	case http.StatusPaymentRequired:
 		var b api.ErrorQuotaExceeded
 		b.Error.Code, b.Error.Message = api.QuotaExceeded, res.msg
-		return api.IngestPut402JSONResponse{Body: b, Headers: api.IngestPut402ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestPut402JSONResponse{Body: b, Headers: api.IngestPut402ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusForbidden:
 		var b api.ErrorForbidden
 		b.Error.Code, b.Error.Message = api.ErrorForbiddenErrorCodeForbidden, res.msg
-		return api.IngestPut403JSONResponse{Body: b, Headers: api.IngestPut403ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestPut403JSONResponse{Body: b, Headers: api.IngestPut403ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusNotFound:
 		return api.IngestPut404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, fail{status: res.status, code: res.code, msg: res.msg})}, nil
 	case http.StatusMethodNotAllowed:
@@ -150,7 +150,7 @@ func (a *ingestAPI) IngestPut(ctx context.Context, _ api.IngestPutRequestObject)
 	case http.StatusTooManyRequests:
 		var b api.ErrorRateLimited
 		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
-		return api.IngestPut429JSONResponse{Body: b, Headers: api.IngestPut429ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestPut429JSONResponse{Body: b, Headers: api.IngestPut429ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusServiceUnavailable:
 		return api.IngestPut503JSONResponse{OverloadedJSONResponse: overloadedResp(ctx, res)}, nil
 	}
@@ -178,11 +178,11 @@ func (a *ingestAPI) IngestPutWithPath(ctx context.Context, _ api.IngestPutWithPa
 	case http.StatusPaymentRequired:
 		var b api.ErrorQuotaExceeded
 		b.Error.Code, b.Error.Message = api.QuotaExceeded, res.msg
-		return api.IngestPutWithPath402JSONResponse{Body: b, Headers: api.IngestPutWithPath402ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestPutWithPath402JSONResponse{Body: b, Headers: api.IngestPutWithPath402ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusForbidden:
 		var b api.ErrorForbidden
 		b.Error.Code, b.Error.Message = api.ErrorForbiddenErrorCodeForbidden, res.msg
-		return api.IngestPutWithPath403JSONResponse{Body: b, Headers: api.IngestPutWithPath403ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestPutWithPath403JSONResponse{Body: b, Headers: api.IngestPutWithPath403ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusNotFound:
 		return api.IngestPutWithPath404JSONResponse{NotFoundJSONResponse: notFoundResp(ctx, fail{status: res.status, code: res.code, msg: res.msg})}, nil
 	case http.StatusMethodNotAllowed:
@@ -192,11 +192,19 @@ func (a *ingestAPI) IngestPutWithPath(ctx context.Context, _ api.IngestPutWithPa
 	case http.StatusTooManyRequests:
 		var b api.ErrorRateLimited
 		b.Error.Code, b.Error.Message = api.RateLimited, res.msg
-		return api.IngestPutWithPath429JSONResponse{Body: b, Headers: api.IngestPutWithPath429ResponseHeaders{XRequestId: id}}, nil
+		return api.IngestPutWithPath429JSONResponse{Body: b, Headers: api.IngestPutWithPath429ResponseHeaders{RetryAfter: res.retryAfterHeader(), XRequestId: id}}, nil
 	case http.StatusServiceUnavailable:
 		return api.IngestPutWithPath503JSONResponse{OverloadedJSONResponse: overloadedResp(ctx, res)}, nil
 	}
 	return api.IngestPutWithPath500JSONResponse{InternalJSONResponse: internal(ctx)}, nil
+}
+
+// retryAfterHeader is the optional Retry-After of a refusal: nil when there is none.
+func (res ingestResult) retryAfterHeader() *string {
+	if res.retryAfter == "" {
+		return nil
+	}
+	return &res.retryAfter
 }
 
 // setNosniff marks the handshake answer, which echoes what the sender asked for,

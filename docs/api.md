@@ -374,12 +374,12 @@ but do not treat it as an identity.
 |---|---|---|
 | `400` | `invalid_parameter` | A query parameter is unknown, repeated, or malformed. The message names it. |
 | `401` | `unauthenticated` | Missing or invalid credentials. The response has `WWW-Authenticate: Bearer`. |
-| `402` | `quota_exceeded` | Refused by an embedder's [`Admitter`](extending.md#admitting-reads-streams-and-waits) (the open-source build never returns this). |
-| `403` | `forbidden` | Refused by an embedder's `Admitter` (the open-source build never returns this). |
+| `402` | `quota_exceeded` | Refused by an embedder's [`Admitter`](extending.md#admitting-reads-streams-and-waits) (the open-source build never returns this). `Retry-After` is set when the embedder says when to retry. |
+| `403` | `forbidden` | Refused by an embedder's `Admitter` (the open-source build never returns this). `Retry-After` as for `402`. |
 | `404` | `not_found` | No such inbox, message, or route, **or** the token may not read that inbox. |
 | `409` | `epoch_changed` | `epoch=` is not the inbox's current epoch (it was deleted and made again, or the server was restored from a backup). |
 | `405` | `method_not_allowed` | Not `GET` or `HEAD`. `Allow: GET, HEAD`. |
-| `429` | `rate_limited` | Refused by an embedder's `Admitter` (the open-source build never returns this). |
+| `429` | `rate_limited` | Refused by an embedder's `Admitter` (the open-source build never returns this). `Retry-After` as for `402`. |
 | `500` | `internal` | A server-side problem. Details are in the server log. |
 | `503` | `overloaded` | Too many reads are in progress (16 by default) and none finished within 10 seconds, or (for a stream) too many streams are open. `Retry-After` is set. Authentication happens first, so unauthenticated traffic cannot cause this. |
 
@@ -406,12 +406,12 @@ beyond the inbox's [verifier](verifiers.md).
 | `200` | | The delivery was stored (or was a duplicate of one already stored). Body: `{"seq": 42}`. A Slack `url_verification` handshake also gets `200`, with the challenge as plain text. |
 | `400` | `bad_request` | The request body could not be read, including when it does not arrive within 60 seconds. |
 | `401` | `verification_failed` | The signature or token did not verify and the inbox's `on_verify_fail` is `reject`. The message is always `webhook verification failed`; the specific reason is in the server log. |
-| `402` | `quota_exceeded` | Refused by an embedder's hook (the open-source build never returns this). |
-| `403` | `forbidden` | Refused by an embedder's hook. |
+| `402` | `quota_exceeded` | Refused by an embedder's hook (the open-source build never returns this). `Retry-After` is set when the hook says when to retry. |
+| `403` | `forbidden` | Refused by an embedder's hook. `Retry-After` as for `402`. |
 | `404` | `not_found` | No such inbox, or the inbox is disabled. The two are indistinguishable. |
 | `405` | `method_not_allowed` | Any method other than POST and PUT. The `Allow` header is `POST, PUT`. Checked before the inbox is looked up. |
 | `413` | `payload_too_large` | The body exceeds the inbox's `max_body_bytes` (default 1 MiB, at most 10 MiB). |
-| `429` | `rate_limited` | Not stored, and not acknowledged. Either an embedder's hook refused it, or the inbox already holds as many **unverified** messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default; see [Unverified messages](verifiers.md#unverified-messages-are-capped)) and this delivery is unverified. A verified delivery is never refused for that reason. |
+| `429` | `rate_limited` | Not stored, and not acknowledged. Either an embedder's hook refused it (with `Retry-After` when the hook says when to retry), or the inbox already holds as many **unverified** messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default; see [Unverified messages](verifiers.md#unverified-messages-are-capped)) and this delivery is unverified. A verified delivery is never refused for that reason. |
 | `431` | | The request line and headers exceed 64 KiB (plus a few KiB of slack). Headers are stored with the message and returned to agents, so their size is bounded at the door. |
 | `500` | `internal` | A server-side problem, including a misconfigured verifier. Details are in the server log, never in the response. |
 | `503` | `overloaded` or `storage_full` | Not stored, and not acknowledged: retry after `Retry-After`. `overloaded`: too many deliveries are being received at once for the server's memory (`HOOKINLET_INGEST_MEMORY_BUDGET`, 256 MiB by default; counted as bodies arrive, and the delivery is refused as soon as its bytes would go over). `storage_full`: there is no room to store it. Webhook senders retry a 503, which is what is wanted. |

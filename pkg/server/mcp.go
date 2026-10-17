@@ -163,8 +163,11 @@ type mcpTools struct {
 
 // bind ties a tool call to the HTTP request that carries it. The SDK detaches a
 // call's context from its request, so without this a client that hangs up would
-// leave a long wait running, and holding its subscription, until it timed out.
-func (t *mcpTools) bind(ctx context.Context) (context.Context, context.CancelFunc) {
+// leave a long wait running, and holding its subscription, until it timed out. It
+// also tells the hooks which tool this is ("mcp." and its name) and the request's id
+// (inbox.AccessFrom).
+func (t *mcpTools) bind(ctx context.Context, tool string) (context.Context, context.CancelFunc) {
+	ctx = inbox.WithAccess(ctx, inbox.AccessInfo{Operation: "mcp." + tool, RequestID: RequestID(t.caller.req.Context())})
 	ctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(t.caller.req.Context(), cancel)
 	return ctx, func() { stop(); cancel() }
@@ -191,7 +194,7 @@ func (t *mcpTools) fail(ctx context.Context, what string, err error) error {
 	case errors.Is(err, errBusy):
 		return toolError("the server is busy; retry shortly")
 	case errors.As(err, &ref):
-		return toolError(ref.msg)
+		return toolError(ref.toolText())
 	case errors.Is(err, inbox.ErrInvalid):
 		return toolError(err.Error())
 	case errors.Is(err, inbox.ErrNotFound):
@@ -351,7 +354,7 @@ func (t *mcpTools) listResume(ctx context.Context, after, kind string) (*inbox.I
 }
 
 func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, args api.McpListInboxesInput) (*mcp.CallToolResult, any, error) {
-	ctx, done := t.bind(ctx)
+	ctx, done := t.bind(ctx, "list_inboxes")
 	defer done()
 	out := listInboxesOutput{Inboxes: []inboxSummary{}}
 	release, err := t.s.holdSlot(ctx, t.caller.principal, nil)
@@ -576,7 +579,7 @@ func (t *mcpTools) fetch(ctx context.Context, in *inbox.Inbox, req wire.PageRequ
 }
 
 func (t *mcpTools) queryMessages(ctx context.Context, _ *mcp.CallToolRequest, args api.McpQueryMessagesInput) (*mcp.CallToolResult, any, error) {
-	ctx, done := t.bind(ctx)
+	ctx, done := t.bind(ctx, "query_messages")
 	defer done()
 	in, err := t.inbox(ctx, args.Inbox)
 	if err != nil {
@@ -641,7 +644,7 @@ func (t *mcpTools) output(req wire.PageRequest, page *wire.Page) queryOutput {
 // ---- get_message ----
 
 func (t *mcpTools) getMessage(ctx context.Context, _ *mcp.CallToolRequest, args api.McpGetMessageInput) (*mcp.CallToolResult, any, error) {
-	ctx, done := t.bind(ctx)
+	ctx, done := t.bind(ctx, "get_message")
 	defer done()
 	in, err := t.inbox(ctx, args.Inbox)
 	if err != nil {
@@ -678,7 +681,7 @@ func (t *mcpTools) getMessage(ctx context.Context, _ *mcp.CallToolRequest, args 
 // ---- wait_for_messages ----
 
 func (t *mcpTools) waitForMessages(ctx context.Context, _ *mcp.CallToolRequest, args api.McpWaitForMessagesInput) (*mcp.CallToolResult, any, error) {
-	ctx, done := t.bind(ctx)
+	ctx, done := t.bind(ctx, "wait_for_messages")
 	defer done()
 	in, err := t.inbox(ctx, args.Inbox)
 	if err != nil {

@@ -50,6 +50,9 @@ type ingestResult struct {
 	duplicate bool   // a repeat of a delivery already stored
 	verified  bool   // the stored message (or the one it repeats) is verified
 	size      int64  // body bytes read
+	// retryAfter is the Retry-After for a refusal by BeforeIngest that said when to
+	// retry (see retryAfterOf), or "".
+	retryAfter string
 }
 
 func refuse(status int, code, msg string) ingestResult {
@@ -357,6 +360,7 @@ func (s *Server) rejected(ctx context.Context, in *inbox.Inbox, err error) inges
 	default:
 		return s.internalFailure(ctx, "before-ingest hook", err, inboxAttrs(in)...)
 	}
+	res.retryAfter = retryAfterOf(err)
 	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery refused by hook",
 		inboxAttrs(in, slog.String("reason", err.Error()))...)
 	return res

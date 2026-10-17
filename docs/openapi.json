@@ -400,6 +400,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -425,6 +431,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -459,6 +471,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -625,6 +643,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -650,6 +674,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -684,6 +714,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -852,6 +888,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -877,6 +919,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -911,6 +959,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -1086,6 +1140,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -1111,6 +1171,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -1145,6 +1211,12 @@
               }
             },
             "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+              },
               "X-Request-Id": {
                 "required": true,
                 "schema": {
@@ -5905,6 +5977,12 @@
           }
         },
         "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "string"
+            },
+            "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+          },
           "X-Request-Id": {
             "required": true,
             "schema": {
@@ -5930,6 +6008,12 @@
           }
         },
         "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "string"
+            },
+            "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+          },
           "X-Request-Id": {
             "required": true,
             "schema": {
@@ -5955,6 +6039,12 @@
           }
         },
         "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "string"
+            },
+            "description": "Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise."
+          },
           "X-Request-Id": {
             "required": true,
             "schema": {

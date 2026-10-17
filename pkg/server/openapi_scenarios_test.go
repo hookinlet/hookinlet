@@ -274,7 +274,10 @@ func hooksRefuse(t *testing.T, c *contract) {
 	cl := c.on(a.base)
 	for _, refusal := range []error{inbox.ErrQuotaExceeded, inbox.ErrForbidden, inbox.ErrRateLimited} {
 		a.hooks.mu.Lock()
-		a.hooks.before = func(*inbox.Inbox, int64) error { return fmt.Errorf("%w: test", refusal) }
+		// With a time to retry, so that the Retry-After it sends is checked against the document.
+		a.hooks.before = func(*inbox.Inbox, int64) error {
+			return inbox.RefuseAfter(fmt.Errorf("%w: test", refusal), 30*time.Second)
+		}
 		a.hooks.mu.Unlock()
 		cl.call("ingest", "POST", "/in/agent-a", "x", "")
 		cl.call("ingestPut", "PUT", "/in/agent-a", "x", "")
@@ -283,7 +286,7 @@ func hooksRefuse(t *testing.T, c *contract) {
 
 		// The same refusals, from an Admitter, on reads and streams.
 		a.hooks.mu.Lock()
-		a.hooks.admitErr = fmt.Errorf("%w: test", refusal)
+		a.hooks.admitErr = inbox.RefuseAfter(fmt.Errorf("%w: test", refusal), 30*time.Second)
 		a.hooks.mu.Unlock()
 		for _, m := range []string{"GET", "HEAD"} {
 			pre := ""

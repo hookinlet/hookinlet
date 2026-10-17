@@ -338,7 +338,10 @@ func (s *Server) enforce(next http.Handler) http.Handler {
 				rr.hold()
 			}
 		}()
-		next.ServeHTTP(w, r.WithContext(rr.context(r.Context())))
+		// The hooks are told which operation this is and the id the access log has for
+		// it (inbox.AccessFrom). An MCP tool call names its tool instead (mcpTools.bind).
+		ctx := inbox.WithAccess(r.Context(), inbox.AccessInfo{Operation: op.ID, RequestID: RequestID(r.Context())})
+		next.ServeHTTP(w, r.WithContext(rr.context(ctx)))
 	})
 }
 

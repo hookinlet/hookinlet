@@ -6,6 +6,7 @@ package inbox
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Sentinel errors. Implementations wrap them with detail (fmt.Errorf with %w);
@@ -42,6 +43,36 @@ var (
 	// ErrForbidden rejects with HTTP 403.
 	ErrForbidden = errors.New("forbidden")
 )
+
+// RetryAfterer is an optional capability of an error a hook refuses with (from
+// Hooks.BeforeIngest or Admitter.Admit, wrapping ErrRateLimited, ErrQuotaExceeded or
+// ErrForbidden), found with errors.As: it says when the caller may try again. The
+// server then sends Retry-After with the 429, 402 or 403, in whole seconds rounded up,
+// at least 1 and at most a day; a duration that is not positive sends none. Over MCP,
+// where the answer is a tool error, the text says "retry after N s". RefuseAfter makes
+// such an error.
+type RetryAfterer interface {
+	RetryAfter() time.Duration
+}
+
+// RefuseAfter returns err carrying retryAfter, so that the caller is told when to try
+// again (see RetryAfterer). err is a refusal, such as ErrRateLimited or an error that
+// wraps it: what errors.Is and Error report is err's own. RefuseAfter(nil, d) is nil.
+func RefuseAfter(err error, retryAfter time.Duration) error {
+	if err == nil {
+		return nil
+	}
+	return &retryAfterError{err: err, after: retryAfter}
+}
+
+type retryAfterError struct {
+	err   error
+	after time.Duration
+}
+
+func (e *retryAfterError) Error() string             { return e.err.Error() }
+func (e *retryAfterError) Unwrap() error             { return e.err }
+func (e *retryAfterError) RetryAfter() time.Duration { return e.after }
 
 // Invalidf returns an error that wraps ErrInvalid with a formatted reason.
 func Invalidf(format string, args ...any) error {

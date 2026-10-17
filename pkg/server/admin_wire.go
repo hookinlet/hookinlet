@@ -29,6 +29,9 @@ func (s *Server) strictServer(impl api.StrictServerInterface) api.ServerInterfac
 			}
 			var ref *admitRefusal
 			if errors.As(err, &ref) {
+				if ref.retryAfter != "" {
+					w.Header().Set("Retry-After", ref.retryAfter)
+				}
 				writeError(w, ref.status, ref.code, ref.msg)
 				return
 			}
