@@ -17,6 +17,13 @@ applies.
   operator (an admin that is not a `TenantPrincipal`, such as the admin token) keeps every operation. Each admin
   operation in `docs/openapi.json` now says which kind it is (`x-admin-scope`: `tenant` or `store`), and the server
   refuses a document whose admin operation does not say. See [Tenants](docs/extending.md#tenants).
+- **The unverified-message cap locks each inbox on its own.** The count and the append that keep an inbox within
+  `Options.MaxUnverified` (or its `UnverifiedLimiter` cap) were made under one lock for the whole server, so every
+  unverified delivery on a node, to any inbox of any tenant, waited for the one before it, including its Store round
+  trips. They are now made under a lock for that inbox alone: deliveries to one inbox still cannot overshoot its cap
+  on one server, and deliveries to other inboxes no longer wait for them. A delivery whose request ends while it waits
+  for the lock gives up. Across several servers on one database the cap is still approximate. Nothing in the Go API
+  changes.
 
 ## 0.4.0 - 2026-10-17
 

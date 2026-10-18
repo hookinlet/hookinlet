@@ -307,9 +307,12 @@ var errUnverifiedFull = errors.New("too many unverified messages")
 // them: a leaked ingest key must not be able to fill it, or under count-based
 // retention push the genuine messages out. A message over the cap is refused with
 // errUnverifiedFull, so it is not acknowledged, and nothing already stored is
-// evicted to make room for it. Verified messages are never counted or refused. The
-// count and the append happen under one lock, so concurrent deliveries cannot
-// overshoot the cap (across several servers on one database it is approximate).
+// evicted to make room for it. Verified messages are never counted or refused, and
+// take no lock. The count and the append happen under the inbox's own lock, so
+// concurrent deliveries to it cannot overshoot the cap (across several servers on
+// one database it is approximate), while deliveries to other inboxes go on. The
+// lock covers only the two Store calls: the limiter is asked before it is taken,
+// and the hooks run after it is given back.
 func (s *Server) append(ctx context.Context, in *inbox.Inbox, m *inbox.NewMessage) (*inbox.Message, bool, error) {
 	if m.Verified || s.unverified == nil {
 		return s.opts.Store.Append(ctx, in.ID, m)
@@ -323,8 +326,11 @@ func (s *Server) append(ctx context.Context, in *inbox.Inbox, m *inbox.NewMessag
 	if max <= 0 {
 		return s.opts.Store.Append(ctx, in.ID, m)
 	}
-	s.unverifiedMu.Lock()
-	defer s.unverifiedMu.Unlock()
+	unlock, err := s.unverifiedLocks.lock(ctx, in.ID)
+	if err != nil {
+		return nil, false, err // the request ended while it waited
+	}
+	defer unlock()
 	if n, err := s.unverified.CountUnverified(ctx, in.ID, max); err != nil {
 		return nil, false, err
 	} else if n >= max {

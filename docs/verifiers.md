@@ -208,9 +208,10 @@ verified messages out.
 - Under `retention_max_count` N, unverified messages still take slots among the
   newest N, but never more than the cap, so at least N minus the cap of them are
   verified (when the inbox is full). Keep N well above the cap.
-- The count and the append are made under one lock, so concurrent deliveries
-  cannot overshoot the cap in one server. With several servers on one shared
-  database it is approximate.
+- The count and the append are made under a lock held for that inbox alone, so
+  concurrent deliveries to it cannot overshoot the cap in one server, and
+  deliveries to other inboxes do not wait for them. With several servers on one
+  shared database it is approximate.
 - An embedder can set the cap per inbox (for instance by plan) with Hooks that
   implement the optional `inbox.UnverifiedLimiter` ([extending](extending.md)).
 - The built-in SQLite store supports the cap. A Store from elsewhere has to
