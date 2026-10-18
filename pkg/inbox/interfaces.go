@@ -207,6 +207,17 @@ type Store interface {
 	// Prune works in bounded batches. It returns the number of messages
 	// deleted, and if ctx is cancelled partway, the count so far together
 	// with the error. Pruning is idempotent.
+	//
+	// Prune is safe to call at the same time, from several goroutines and from
+	// several Store values on one backend (every server of a deployment may run
+	// the retention sweep). The deletes are per inbox and idempotent, so a message
+	// that another call has removed first is not an error and is not deleted
+	// twice; two calls that select the same messages may each count them, so the
+	// counts of concurrent calls do not add up. Prune racing an Append or a
+	// DeleteInbox never leaves a gap in what an inbox holds. Prune racing an
+	// UpdateInbox that changes RetentionDays or RetentionMaxCount applies the old
+	// limit or the new one and deletes nothing that both would keep; the next
+	// Prune applies the new one.
 	Prune(ctx context.Context, now time.Time) (deleted int64, err error)
 
 	// Ping verifies the Store is reachable and usable, for readiness checks. It
@@ -264,7 +275,37 @@ type Backupper interface {
 	//
 	// The snapshot is in the Store's own format. For secrets it holds only what
 	// the Store holds: verifier secrets still sealed, and token hashes.
+	//
+	// A snapshot holds every tenant's data, so it is the operator's, not a
+	// tenant's. A Store that holds the inboxes of several tenants refuses a context
+	// scoped to one with WithTenant, returning an error that wraps ErrForbidden
+	// (or hands back a snapshot of that tenant's inboxes alone, if it can). It
+	// never gives a scoped caller the other tenants' data. The server does not
+	// call Backup for a tenant's principal. A Store that holds one tenant's data
+	// only has nothing to refuse.
 	Backup(ctx context.Context) (snapshot io.ReadCloser, size int64, err error)
+}
+
+// EpochRenewer is an optional capability of a Store: giving every inbox a new
+// epoch (Inbox.Epoch) without any other change. A Store restored by a means that
+// is not part of this interface, such as a copy of its database file or a
+// point-in-time recovery of its backend, holds sequence numbers that the server
+// which wrote them may since have handed out differently, so the restore must
+// renew the epochs before the Store serves again: a client holding a cursor from
+// the old epoch is then told to start again (409 epoch_changed) and does not
+// quietly skip or repeat messages. A snapshot taken by Backupper has new epochs
+// already. Callers find this with a type assertion; the server does not call it,
+// and an operator's restore procedure or an embedder's tooling does.
+type EpochRenewer interface {
+	// RenewEpochs gives every inbox of the Store, in every tenant, a new epoch,
+	// whatever tenant the context is scoped to. Every call renews every epoch, so
+	// calling it twice is safe, and no epoch it hands out was one the inbox had
+	// before. It changes nothing else an inbox, message or token holds: the
+	// messages, their sequence numbers (the next Append continues the count), the
+	// tokens and the inboxes' settings are as they were. A Store may count the
+	// change as an update of each inbox (increase its Version, as the SQLite
+	// store does), so that an admin holding an older copy has to read it again.
+	RenewEpochs(ctx context.Context) error
 }
 
 // UnverifiedCounter is an optional capability of a Store: how many unverified

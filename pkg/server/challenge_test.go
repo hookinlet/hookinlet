@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
+	"github.com/hookinlet/hookinlet/pkg/inboxtest"
 )
 
 // challengingError is an Authenticator error that chooses the 401 challenge.
@@ -41,6 +42,10 @@ func TestValidChallenge(t *testing.T) {
 		if !validChallenge(v) {
 			t.Errorf("%q refused", v)
 		}
+		// inboxtest.ChallengerSuite applies the same rules for an embedder's own test.
+		t.Run("ChallengerSuite/"+v[:min(len(v), 20)], func(t *testing.T) {
+			inboxtest.ChallengerSuite(t, func(*testing.T) inbox.Challenger { return challengingError{v} })
+		})
 	}
 	bad := map[string]string{
 		"empty":               "",

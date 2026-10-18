@@ -371,11 +371,14 @@ func (s *Store) unfinishedDeletes(ctx context.Context) ([]inbox.ID, error) {
 	return ids, s.ctxErr(ctx, rows.Err())
 }
 
-// RenewEpochs gives every inbox a new epoch. Do it after restoring a database
-// from a copy of the data directory, or after restoring one snapshot more than
-// once: the sequence numbers the restored server hands out may not be the ones
-// its predecessor handed out, and a new epoch is how a client holding an old
-// cursor finds out. (A snapshot taken by Backup already has new epochs.)
+var _ inbox.EpochRenewer = (*Store)(nil)
+
+// RenewEpochs implements inbox.EpochRenewer: it gives every inbox a new epoch. Do
+// it after restoring a database from a copy of the data directory, or after
+// restoring one snapshot more than once: the sequence numbers the restored server
+// hands out may not be the ones its predecessor handed out, and a new epoch is how
+// a client holding an old cursor finds out. (A snapshot taken by Backup already
+// has new epochs.) It adds one to each inbox's Version.
 func (s *Store) RenewEpochs(ctx context.Context) error {
 	return s.writeTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE inboxes SET epoch = lower(hex(randomblob(16))), version = version + 1`)

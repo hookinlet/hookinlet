@@ -82,6 +82,36 @@ func TestACursorFromAnotherEpochIsRefused(t *testing.T) {
 	}
 }
 
+// A store whose epochs are renewed after a restore by other means (a copied data
+// directory, say) refuses the cursors that were handed out before it, and the
+// messages and tokens are as they were.
+func TestACursorFromBeforeRenewEpochsIsRefused(t *testing.T) {
+	e := newAgentEnv(t)
+	e.post("/in/agent-a", "one")
+	e.post("/in/agent-a", "two")
+	old := e.a.Epoch
+	cursor := "/v1/inboxes/agent-a/messages?after=1&epoch=" + old
+	if rec := e.get(cursor, e.tokenA); rec.Code != http.StatusOK {
+		t.Fatalf("before: %d %s", rec.Code, rec.Body)
+	}
+	var renewer inbox.EpochRenewer = e.store
+	if err := renewer.RenewEpochs(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.get(cursor, e.tokenA)
+	if rec.Code != http.StatusConflict || errorCode(t, rec) != "epoch_changed" {
+		t.Fatalf("the old cursor after RenewEpochs: %d %s", rec.Code, rec.Body)
+	}
+	// Starting again works, with the same token and the same messages.
+	pg := decode[epochPage](t, e.get("/v1/inboxes/agent-a/messages?after=0", e.tokenA))
+	if pg.Epoch == old || pg.Epoch == "" || len(pg.Messages) != 2 {
+		t.Errorf("after starting again: epoch %q (was %q), %d messages; want a new epoch and both messages", pg.Epoch, old, len(pg.Messages))
+	}
+	if rec := e.get("/v1/inboxes/agent-a/messages?after=1&epoch="+pg.Epoch, e.tokenA); rec.Code != http.StatusOK {
+		t.Errorf("a cursor of the new epoch: %d %s", rec.Code, rec.Body)
+	}
+}
+
 // An inbox made again under the same slug is a new life: the old cursor says so.
 func TestARecreatedInboxHasANewEpoch(t *testing.T) {
 	e := newAgentEnv(t)

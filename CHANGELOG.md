@@ -6,7 +6,75 @@ applies.
 
 ## Unreleased
 
+More of the contract is written down and checked by the conformance suites: what `Prune` does when several `Store`
+values share a backend, what a full `Store` answers, what `Backup` does for a tenant, how an inbox's epochs are
+renewed after a restore by other means, and how a notifier with several instances behaves. Nothing to migrate: upgrade
+by starting the new version on the same data directory. If you wrote your own `Store` or `Notifier`, run the
+conformance suites again: the new cases may fail it (see **Go API**). One behaviour of the SQLite store changes,
+and it is not reachable through the server (see **Changed**).
+
+**Changed**
+
+- **The SQLite store's `Backup` refuses a context scoped to a tenant.** A snapshot holds every tenant's inboxes,
+  messages and tokens, and `Backup` with a context scoped by `inbox.WithTenant` used to return all of it. It now returns an
+  error that wraps `inbox.ErrForbidden`. The server never reached this: it answers `403` to a tenant's admin before it
+  calls the store (see 0.5.0), and `hookinlet backup` and an operator's call are not scoped. It matters to an embedder
+  whose own wrapper scopes the context and then forwards `Backup`; take the backup with an unscoped context.
+
+**Go API**
+
+- **`inbox.EpochRenewer` is an optional interface of a `Store`**: `RenewEpochs(ctx) error` gives every inbox, in every tenant, a new
+  epoch and changes nothing else. A `Store` restored by means that are not part of the interface (a copied database
+  file, a point-in-time recovery) must renew its epochs before it serves again, or a client holding a cursor from
+  before the restore is not told to start again, and can skip or repeat messages. The server does not call it; a restore
+  procedure does. `sqlite.Store` already had the method (`hookinlet renew-epochs` runs it) and now declares the
+  interface. `inboxtest.EpochRenewerSuite` checks an implementation: after a call every inbox has a different epoch, the
+  messages, sequence numbers, tokens and settings are as they were, an empty `Store` and a second call are fine, and a
+  cancelled context changes nothing. The server's tests check that a cursor from before the renewal gets `409
+  epoch_changed`. Because `EpochRenewer` is an optional interface of a `Store`, `inboxtest.AssertStoreWrapperForwards`
+  now also fails a wrapper that hides it from a store that has it.
+- **`inboxtest.StoreSuiteWith` and `inboxtest.StoreOptions`** add two checks that need something only the `Store`'s own test
+  can do. `StoreOptions.MakeFull` makes the `Store` full and returns a function that gives it room again; the suite then
+  expects `Append` to return an error that wraps `inbox.ErrStorageFull`, with no message stored and no sequence number
+  used (new case `AppendToAFullStoreIsErrStorageFull`, skipped when `MakeFull` is nil). `StoreOptions.Peer` returns a
+  second `Store` value on the same backend, which the concurrent `Prune` case also calls. `StoreSuite` is
+  `StoreSuiteWith` with the zero options. The SQLite store's test uses both (it is made full by giving the database no room to grow).
+- **`inboxtest.NotifierOptions.Peer`** returns a second `Notifier` on the same backend as the first. With it
+  `NotifierSuiteWith` also checks that a `Publish` on either instance wakes the subscribers of both, that another inbox's
+  subscribers are not woken, and that cancelling a subscription on one instance leaves the other's. A notifier whose
+  instances reach each other could lose a wake-up between them and pass a suite that ran only one. Left nil,
+  `NotifierSuite` and `NotifierSuiteWith` run exactly as before.
+- **`inboxtest.UnverifiedLimiterSuite`, `inboxtest.IngestObserverSuite` and `inboxtest.ChallengerSuite`** check an
+  implementation of those optional interfaces for what holds without a server. A limiter and an observer must return at
+  once (they run on the request's goroutine) with an ordinary context, one that carries `inbox.AccessFrom` and one that
+  is already cancelled, must not change the inbox or event they are given, and must survive concurrent calls; the
+  observer is called with every `inbox.Ingest*` outcome and one that does not exist yet. A `Challenger`'s value must be one
+  the server sends (one line of printable ASCII, at most 4096 bytes, starting with an authentication scheme), the same on
+  every call, on an error that wraps `inbox.ErrUnauthenticated`. What the server does with their answers stays with the
+  server's own tests. `docs/extending.md` has a section on checking a hook, and the `custom-hooks` example runs
+  `IngestObserverSuite` on its counter.
+- **Contract clarifications and new `StoreSuite` and `BackupperSuite` cases.** `Store.Prune` says that it is safe to call
+  from several goroutines and from several `Store` values on one backend, that deletes are per inbox and idempotent,
+  that concurrent calls may each count the same messages, and that when a retention limit is changed while it runs, it
+  applies the old limit or the new one and deletes nothing that both would keep. `StoreSuite` has two new cases:
+  `ConcurrentPrune` (no error, no gap, appends carry on, one more call leaves exactly the newest messages and the next
+  deletes nothing) and `PruneRacingARetentionChange`. `Backupper` says that a `Store` holding several tenants refuses
+  a tenant-scoped context with an error that wraps `ErrForbidden`, or returns a snapshot of that tenant alone, and
+  `BackupperSuite` has a new case, `ATenantScopedContextIsNotGivenOtherTenantsData`, that skips itself for a `Store` that
+  does not keep inboxes under tenants. No method changes.
+- **Who can fail what.** *May fail an existing `Store`:* `ConcurrentPrune` and `PruneRacingARetentionChange` (a `Store` whose
+  `Prune` is not safe to call concurrently, or leaves a gap); `ATenantScopedContextIsNotGivenOtherTenantsData` (a
+  multi-tenant `Store` that gives a scoped caller a snapshot of every tenant); and `AssertStoreWrapperForwards` for a
+  wrapper around a `Store` that has `RenewEpochs`. The SQLite store passes all of them. *May fail an existing `Notifier`:*
+  nothing, unless you set `NotifierOptions.Peer`. *Additive only, fails nothing unless you opt in:* `EpochRenewerSuite`,
+  `StoreOptions.MakeFull` and `Peer`, `NotifierOptions.Peer`, and the three hook suites.
+
 **Documentation**
+
+- `docs/extending.md` and `docs/stability.md` cover the points above: concurrent `Prune`, a refused write that leaves
+  nothing behind, renewing epochs after a restore by other means, the multi-tenant `Backup`, the peer settings, and how to check a hook.
+  The Notifier section also says that `CancellingReleasesEverythingItHeld` counts goroutines, so a notifier that opens
+  its connection when first used must open it before the check or close it when the notifier is closed.
 
 - The deploying guide's memory sizing now covers more than the ingest budget. Its table is the deliveries alone; a
   35-minute test at the default budget that also ran 250 streams, reads, backups and restarts peaked at 650 MB, so it

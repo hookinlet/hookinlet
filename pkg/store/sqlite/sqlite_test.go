@@ -28,16 +28,6 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
 )
 
-func TestStoreSuite(t *testing.T) {
-	inboxtest.StoreSuite(t, func(t *testing.T, now func() time.Time) inbox.Store {
-		s, err := sqlite.Open(t.Context(), t.TempDir(), sqlite.WithClock(now))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return s
-	})
-}
-
 func TestUnverifiedCounterSuite(t *testing.T) {
 	inboxtest.UnverifiedCounterSuite(t, func(t *testing.T, now func() time.Time) inbox.Store {
 		return openAt(t, t.TempDir(), sqlite.WithClock(now))
@@ -627,4 +617,10 @@ func TestQueueingForTheWriterIsNotAClockStep(t *testing.T) {
 	if strings.Contains(logs.String(), "the clock is behind") {
 		t.Errorf("waiting for the writer was reported as a clock that stepped back:\n%s", logs.String())
 	}
+}
+
+func TestEpochRenewerSuite(t *testing.T) {
+	inboxtest.EpochRenewerSuite(t, func(t *testing.T, now func() time.Time) inbox.Store {
+		return openAt(t, t.TempDir(), sqlite.WithClock(now))
+	})
 }

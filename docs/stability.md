@@ -100,10 +100,15 @@ they are 1.0: a new capability is a new, small interface that an implementation 
 also satisfy, found by a type assertion (as `Admitter`, `Backupper`, `IngestObserver` and `ScopedPrincipal` are), with
 the server falling back to what it did before. A test fails when the methods of one of those
 interfaces, their names or their signatures, change, so the change cannot be an accident. A conformance suite ships with a new
-interface whose implementations have a behaviour to check (`Admitter` and `Backupper` have
-one). An interface that only the server calls and that has nothing to conform to beyond not
-blocking, such as `IngestObserver`, is covered by the server's own tests instead. A behaviour
-that is in neither a suite nor a test is not part of the contract.
+interface whose implementations have a behaviour to check (`Admitter`, `Backupper` and
+`EpochRenewer` have one). An interface that only the server calls and that has little to
+conform to beyond not blocking, such as `IngestObserver`, `UnverifiedLimiter` and
+`Challenger`, has a short suite for that (it returns at once, leaves what it is given
+alone, is safe to call concurrently, and for a challenge is a value the server sends),
+and what the server does with their answers is covered by the server's own tests. A
+behaviour that is in neither a suite nor a test is not part of the contract. A suite may
+grow cases; the new cases of an existing suite are listed in `CHANGELOG.md`, with whether
+an implementation that passed before can fail them.
 
 **Options.** `server.Options` follows one rule: a zero value means the documented
 default; a negative number turns off a bound or a schedule where that makes sense (and

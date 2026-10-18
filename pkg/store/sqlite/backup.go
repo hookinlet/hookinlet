@@ -40,6 +40,10 @@ func (s *Store) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
+	if tenant, scoped := inbox.TenantFrom(ctx); scoped {
+		// The snapshot holds every tenant's inboxes, messages and tokens.
+		return nil, 0, fmt.Errorf("%w: a backup holds every tenant's data, so it cannot be taken for tenant %q", inbox.ErrForbidden, tenant)
+	}
 	if s.closed.Load() {
 		return nil, 0, errors.New("sqlite: backup: the store is closed")
 	}
