@@ -4,11 +4,13 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.9.0 - 2026-10-18
 
-Two log lines made quieter, and a lower default ingest memory budget with the memory use it implies written down.
-Nothing to migrate. One change can answer differently: with the default budget halved, a burst of large deliveries
-is refused with `503` sooner (see **Changed**).
+A lower default ingest memory budget, with the memory it implies written down, and two log lines made quieter.
+Nothing to migrate: upgrade by starting the new version on the same data directory. One change can answer
+differently: with the default budget halved, a burst of large deliveries is refused with `503` sooner (see
+**Changed**). If you are coming from 0.1.x, read the 0.2.0 **Upgrading** notes below first, because 0.2.0 needs
+stored verifier secrets set again.
 
 **Changed**
 
