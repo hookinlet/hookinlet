@@ -31,9 +31,10 @@ import (
 //     path its net/http spelling and leaves out what this server is not
 //     configured to serve.
 //   - enforce runs before every operation: the credential the operation's
-//     `security` asks for, the path parameters, the query string, and the JSON body,
-//     in that order. An anonymous caller learns nothing, because the credential is
-//     checked before anything else is looked at.
+//     `security` asks for (and, for an admin operation, its `x-admin-scope`, which
+//     says whether a tenant's administrator may call it), the path parameters, the
+//     query string, and the JSON body, in that order. An anonymous caller learns
+//     nothing, because the credential is checked before anything else is looked at.
 //   - A method a path does not take is answered by a handler made from the same
 //     list of operations (405 and an Allow header that names the methods the
 //     document gives the path).
@@ -164,7 +165,11 @@ func (s *Server) methodNotAllowed(sec specvalidate.Security, methods []string) h
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if sec != specvalidate.Open {
-			if _, ok := s.authenticate(w, r, sec == specvalidate.Admin); !ok {
+			need := needCredential
+			if sec == specvalidate.Admin {
+				need = needAdmin // a 405 does nothing, so any admin may be told it
+			}
+			if _, ok := s.authenticate(w, r, need, ""); !ok {
 				return
 			}
 		}
@@ -220,9 +225,36 @@ func (rr *readRequest) context(ctx context.Context) context.Context {
 	return context.WithValue(ctx, readKey, rr)
 }
 
-// authenticate checks the credential and, for the admin API, that it is the
-// admin's. It reports false after answering.
-func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, adminOnly bool) (inbox.Principal, bool) {
+// need is what an operation asks of the caller besides a valid credential.
+type need int
+
+const (
+	needCredential need = iota // any principal
+	needAdmin                  // a principal that can admin, in a tenant or not
+	needOperator               // a principal that can admin and is in no tenant
+)
+
+// needOf is what op asks of its caller. An admin operation is the operator's unless
+// the document marks it as acting only on the caller's tenant (x-admin-scope "tenant"):
+// one that forgets to say is refused to a tenant's administrator, not served to it.
+func needOf(op *specvalidate.Operation) need {
+	switch {
+	case op.Security() != specvalidate.Admin:
+		return needCredential
+	case op.TenantScoped():
+		return needAdmin
+	}
+	return needOperator
+}
+
+// msgOperatorOnly is the refusal of a store-wide operation to a tenant's administrator.
+const msgOperatorOnly = "this operation acts on the whole store and is not available to a tenant-scoped administrator"
+
+// authenticate checks the credential and that it may do what need asks: for the admin
+// API, that it is an admin's, and for an operation on the whole store, that it is the
+// operator's (an admin in no tenant). opID names the operation in the log. It reports
+// false after answering.
+func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, need need, opID string) (inbox.Principal, bool) {
 	principal, err := s.opts.Authenticator.Authenticate(r)
 	switch {
 	case errors.Is(err, inbox.ErrUnauthenticated):
@@ -235,11 +267,24 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, adminOnly 
 	case s.refusesUntenanted(r.Context(), principal):
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return nil, false
-	case adminOnly && !principal.CanAdmin():
+	case need != needCredential && !principal.CanAdmin():
 		writeError(w, http.StatusForbidden, "forbidden", "this credential cannot use the admin API")
+		return nil, false
+	case need == needOperator && isTenantPrincipal(principal):
+		// The Store scopes a tenant's admin to its tenant, but these operations act on
+		// what is not any one tenant's: every token, the whole database, process-wide
+		// figures. So they are not done at all.
+		s.log.LogAttrs(r.Context(), slog.LevelWarn, "refused a tenant-scoped administrator an operation on the whole store",
+			slog.String("op", opID), slog.String("principal", fmt.Sprintf("%T", principal)))
+		writeError(w, http.StatusForbidden, "forbidden", msgOperatorOnly)
 		return nil, false
 	}
 	return principal, true
+}
+
+func isTenantPrincipal(p inbox.Principal) bool {
+	_, ok := p.(inbox.TenantPrincipal)
+	return ok
 }
 
 // refusesUntenanted reports whether Options.RequireTenant refuses p: a principal that is
@@ -269,7 +314,7 @@ func (s *Server) secure(w http.ResponseWriter, r *http.Request, op *specvalidate
 	if sec == specvalidate.Open {
 		return true
 	}
-	principal, ok := s.authenticate(w, r, sec == specvalidate.Admin)
+	principal, ok := s.authenticate(w, r, needOf(op), op.ID)
 	if !ok {
 		return false
 	}

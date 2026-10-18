@@ -385,6 +385,34 @@ func TestLoadRefusesOperationsThatLeaveWhatTheServerWouldDecideByDefault(t *test
 	}
 }
 
+// An admin operation says whether a tenant's administrator may call it; one that does
+// not is refused, and so is the marker on an operation that is not an admin one.
+func TestAdminOperationsSayWhoseDataTheyActOn(t *testing.T) {
+	const from = `"operationId": "getThing",`
+	adminOp := func(extra string) string {
+		return strings.Replace(doc, from, from+` "security": [{"adminToken": []}],`+extra, 1)
+	}
+	for name, s := range map[string]string{
+		"unclassified":         adminOp(""),
+		"neither of the two":   adminOp(` "x-admin-scope": "everyone",`),
+		"not a string":         adminOp(` "x-admin-scope": true,`),
+		"on an open operation": strings.Replace(doc, from, from+` "x-admin-scope": "tenant",`, 1),
+	} {
+		if _, err := Load([]byte(s)); err == nil || !strings.Contains(err.Error(), "x-admin-scope") {
+			t.Errorf("%s: Load = %v, want an error naming x-admin-scope", name, err)
+		}
+	}
+	if !load(t, adminOp(` "x-admin-scope": "tenant",`)).Operation("getThing").TenantScoped() {
+		t.Error(`"tenant" is not tenant-scoped`)
+	}
+	if load(t, adminOp(` "x-admin-scope": "store",`)).Operation("getThing").TenantScoped() {
+		t.Error(`"store" is tenant-scoped`)
+	}
+	if load(t, doc).Operation("getThing").TenantScoped() {
+		t.Error("an operation that does not say is tenant-scoped")
+	}
+}
+
 func TestSecurityPathsAndRoutes(t *testing.T) {
 	s := strings.Replace(doc, `"operationId": "getThing",`, `"operationId": "getThing", "security": [{"agentToken": []}, {"adminToken": []}],`, 1)
 	s = strings.Replace(s, `{"name": "id", "in": "path", "required": true,`, `{"name": "id", "in": "path", "required": true, "x-inbox": true,`, 1)
