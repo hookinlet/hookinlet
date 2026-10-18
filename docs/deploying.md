@@ -382,8 +382,8 @@ memory (16 MiB at most, 16 reads at a time), and each open stream costs a little
 test at the default 128 MiB that ran all of it together (250 open streams, about 300
 deliveries a second, backups, restarts, a burst of large deliveries that filled the budget,
 and a burst of large reads) peaked at 650 MB, so at the default, give the process about 1 GB
-if it must never be killed. Lower the budget on a small host: with 64 MiB the same figures are
-roughly half. Ordinary traffic is far below this (the same test used about 170 MB most of the
+if it must never be killed. Lower the budget on a small host: the table shows what it saves on the deliveries' side (380 MB
+becomes 229 MB at 64 MiB). Ordinary traffic is far below this (the same test used about 170 MB most of the
 time), and only a burst of large deliveries, or a sender holding many bodies open, reaches the
 budget. Setting `GOMEMLIMIT` makes the
 runtime collect sooner but only trimmed the peak by a fifth to a quarter in the same test, so
