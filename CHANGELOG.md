@@ -4,7 +4,7 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.6.0 - 2026-10-18
 
 Two additions, both optional and found by type assertion: an ingest observer can tell why a signature failed, and a
 reader can tell which stored header carries an `hmac` inbox's signature. Nothing to migrate.
