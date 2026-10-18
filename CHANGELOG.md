@@ -4,7 +4,7 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.8.0 - 2026-10-18
 
 Two additions to the ingest hooks, both optional, and a corrected log line. Nothing to migrate.
 
