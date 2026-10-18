@@ -6,10 +6,23 @@ applies.
 
 ## Unreleased
 
-Two log lines made quieter. Nothing to migrate and no change in what is stored or answered.
+Two log lines made quieter, and a lower default ingest memory budget with the memory use it implies written down.
+Nothing to migrate. One change can answer differently: with the default budget halved, a burst of large deliveries
+is refused with `503` sooner (see **Changed**).
 
 **Changed**
 
+- **The ingest memory budget defaults to 128 MiB, not 256 MiB, and the memory it implies is documented.** A test that
+  held as many 9 MiB bodies in flight as the budget allowed (most abandoned part way) took the process to about 750 MB
+  resident at the default, and a 35-minute soak with an ingest storm in it peaked near 1 GB. The memory is about three
+  times the bytes the budget counts plus 50 MB (Go lets its heap grow to twice what is live, and a body is read into a
+  buffer with spare room); measured peaks were 139, 229, 380 and 750 MB for budgets of 32, 64, 128 and 256 MiB. The
+  deploying guide's Resources section now says to size memory for three times the budget and has that table.
+  `HOOKINLET_INGEST_MEMORY_BUDGET` and `server.Options.IngestMemoryBudget` still set it; one set explicitly is unchanged.
+  What changes with the default: a burst of large deliveries is refused with `503 overloaded` (which senders retry) at
+  half the bytes, and an inbox's share of the budget, an eighth of it, is 16 MiB, so an inbox that takes 10 MiB bodies
+  receives one at a time. Ordinary traffic never comes near it. If you size for the old default, set the variable to
+  `268435456` to keep it.
 - **An inbox at its unverified-message cap logs its refusal once a minute, not once per delivery.** An inbox at its cap
   refuses every unverified delivery, so a sender holding its ingest key could fill the log with one WARN line per
   request (a 35-minute test wrote 170,901 of them). The line `delivery refused: too many unverified messages` is now

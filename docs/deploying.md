@@ -208,7 +208,7 @@ lists them all.
 | `HOOKINLET_MCP_ENABLED` | `true` | Serve `/mcp`. |
 | `HOOKINLET_ADMIN_UI` | `true` | Serve the admin console at `/admin`, on the same listener as the admin API. It needs the admin API on (`HOOKINLET_ADMIN_ENABLED`). |
 | `HOOKINLET_MCP_INLINE_BODY_BYTES` | `16384` | Largest body MCP tools return inline (at most 65536). |
-| `HOOKINLET_INGEST_MEMORY_BUDGET` | `268435456` | Most bytes of request bodies held in memory at once by deliveries being received; more get 503. `0` turns the bound off. |
+| `HOOKINLET_INGEST_MEMORY_BUDGET` | `134217728` | Most bytes of request bodies held in memory at once by deliveries being received; more get 503. The process may use about three times this, plus 50 MB, when it is full (see [Resources](#resources)). `0` turns the bound off. |
 | `HOOKINLET_MAX_UNVERIFIED` | `1000` | Most unverified messages one inbox keeps (`on_verify_fail=store`, or the verifier `none`). A delivery over it gets `429` and is not stored; verified deliveries are never refused for it. `0` turns the cap off. See [verifiers](verifiers.md#unverified-messages-are-capped). |
 | `HOOKINLET_DRAIN_DELAY` | `0` | After being told to stop, keep serving for this long with `/readyz` at 503, so a load balancer takes the instance out of rotation first. |
 | `HOOKINLET_RETENTION_INTERVAL` | `1h` | How often retention runs; `off` for never. |
@@ -351,19 +351,39 @@ reads cannot pin more than 16 pages. One credential may hold only a quarter of t
 (4 of 16), so that a client that never reads cannot hold them all and turn every other inbox's
 readers away; the admin token is not limited. In the same way one credential may hold only a
 tenth of the stream slots (100 of 1000) and one inbox's deliveries only an eighth of the
-budget below (32 MiB of 256; never less than its largest body), so that a token or an ingest key cannot take what everyone
+budget below (16 MiB of 128; never less than its largest body, so an inbox that takes 10 MiB bodies receives one at a time), so that a token or an ingest key cannot take what everyone
 shares. The first two are settings (`HOOKINLET_MAX_READS_PER_CREDENTIAL`,
 `HOOKINLET_MAX_STREAMS_PER_CREDENTIAL`). Deliveries are not limited in number: each one
 is held in memory while it is read and checked, up to the inbox's body limit
 (1 MiB by default, at most 10 MiB), so a burst of large deliveries uses that much
 each. The total is bounded: deliveries being received hold at most
-`HOOKINLET_INGEST_MEMORY_BUDGET` bytes of bodies between them (256 MiB by default; at
+`HOOKINLET_INGEST_MEMORY_BUDGET` bytes of bodies between them (128 MiB by default; at
 least 10 MiB, the largest body an inbox may take). The bytes are counted as they
 arrive, so a connection that has promised a large body and sent none costs nothing,
 and a delivery whose bytes would take the total over is answered `503` with
-`Retry-After` and not stored. The memory the process uses is a small multiple of the
-bytes counted (buffers grow, and the body is copied into the database). Put a
-rate limit in front, or in a hook (see [extending](extending.md)). Disk is
+`Retry-After` and not stored.
+
+**Size the memory for three times the budget.** The process uses more than the bytes
+counted: a Go program lets its heap grow to twice what is live before it collects, and
+a body is read into a buffer with some spare room. Measured with the heaviest load the
+budget allows (dozens of 9 MiB bodies arriving at once, most abandoned part way), the
+resident memory at the busiest was:
+
+| `HOOKINLET_INGEST_MEMORY_BUDGET` | Peak resident memory |
+|---|---|
+| 32 MiB | 139 MB |
+| 64 MiB | 229 MB |
+| 128 MiB (the default) | 380 MB |
+| 256 MiB | 750 MB |
+
+So plan for about three times the budget plus 50 MB, and lower the budget on a small
+host: for a 512 MB container, 64 MiB leaves room for streams and reads on top. Ordinary
+traffic is far below this (a 35-minute test with 250 open streams and about 300 deliveries
+a second used about 160 MB most of the time), and only a burst of large deliveries, or a
+sender holding many bodies open, reaches the budget. Setting `GOMEMLIMIT` makes the
+runtime collect sooner but only trimmed the peak by a fifth to a quarter in the same test, so
+the budget is the setting that matters. A lower budget means more `503`s to a burst of large
+deliveries, which a sender retries. Put a rate limit in front, or in a hook (see [extending](extending.md)). Disk is
 what grows: size the volume for the messages you keep, and set retention on
 inboxes that receive a lot. A backup needs free space in the data directory for a
 second copy of the database while it runs. Each stream or wait holds a file
