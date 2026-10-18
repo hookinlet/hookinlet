@@ -96,13 +96,12 @@ that never uses it has one tenant, the empty one, and sees no difference.
   `AllInboxes` token is not limited to the tenant and reads every inbox in the Store.
   The `TokensAreNotScopedByTenant` case of `StoreSuite` checks this. So the agent
   tokens of `pkg/auth/token`, and the admin API's `/v1/admin/tokens`, which works
-  through these methods, are for the operator: a tenant's admin (a `TenantPrincipal`
-  whose `CanAdmin` is true) that calls `/v1/admin/tokens` lists tokens of other
-  tenants that read every inbox, can revoke any token by its `id`, and can issue an
+  through these methods, are for the operator: the server refuses a tenant's admin (a `TenantPrincipal`
+  whose `CanAdmin` is true) on `/v1/admin/tokens`, because through these methods it
+  could list tokens of other tenants, revoke any token by its `id`, or issue an
   `all_inboxes` token that reads every tenant's inboxes. An embedder that gives each
   tenant's callers credentials of their own keeps them in its own `Authenticator`,
-  whose principals are `TenantPrincipal`s, and does not let a tenant's admin reach
-  the token endpoints.
+  whose principals are `TenantPrincipal`s.
 
 ## Putting them together
 
