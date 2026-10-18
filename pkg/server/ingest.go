@@ -229,8 +229,6 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 	case errors.Is(err, inbox.ErrNotFound): // deleted while we were verifying
 		return refuse(http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, errUnverifiedFull):
-		s.log.LogAttrs(ctx, slog.LevelWarn, "delivery refused: too many unverified messages",
-			inboxAttrs(in, slog.Int("max_unverified", s.opts.MaxUnverified))...)
 		return refuse(http.StatusTooManyRequests, codeUnverifiedLimit, "this inbox holds as many unverified messages as it may; verified deliveries are still accepted")
 	case errors.Is(err, inbox.ErrStorageFull):
 		// Not stored, so not acknowledged: the sender keeps it and tries again.
@@ -373,6 +371,9 @@ func (s *Server) append(ctx context.Context, in *inbox.Inbox, m *inbox.NewMessag
 	if n, err := s.unverified.CountUnverified(ctx, in.ID, max); err != nil {
 		return nil, false, err
 	} else if n >= max {
+		// The cap that applied, which is the limiter's when it gave one.
+		s.log.LogAttrs(ctx, slog.LevelWarn, "delivery refused: too many unverified messages",
+			inboxAttrs(in, slog.Int64("max_unverified", max))...)
 		return nil, false, errUnverifiedFull
 	}
 	return s.opts.Store.Append(ctx, in.ID, m)

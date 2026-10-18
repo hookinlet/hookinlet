@@ -6,7 +6,7 @@ applies.
 
 ## Unreleased
 
-Two additions to the ingest hooks, both optional. Nothing to migrate.
+Two additions to the ingest hooks, both optional, and a corrected log line. Nothing to migrate.
 
 **Added**
 
@@ -21,6 +21,11 @@ Two additions to the ingest hooks, both optional. Nothing to migrate.
   answer `404` for an inbox that exists but is not served there. Until now such an error was a `500`. The other
   refusals (`429`, `402`, `403`, and `Retry-After`) and every other error (`500`) are unchanged. See
   [Which host a delivery arrived on](docs/extending.md#which-host-a-delivery-arrived-on).
+
+**Fixed**
+
+- The warning "delivery refused: too many unverified messages" now names the cap that applied, including one from an
+  `UnverifiedLimiter`, where it named `Options.MaxUnverified` whichever applied.
 
 ## 0.7.0 - 2026-10-18
 
