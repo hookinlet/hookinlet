@@ -4,6 +4,21 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+Two log lines made quieter. Nothing to migrate and no change in what is stored or answered.
+
+**Changed**
+
+- **An inbox at its unverified-message cap logs its refusal once a minute, not once per delivery.** An inbox at its cap
+  refuses every unverified delivery, so a sender holding its ingest key could fill the log with one WARN line per
+  request (a 35-minute test wrote 170,901 of them). The line `delivery refused: too many unverified messages` is now
+  written for the first refusal and then at most once a minute for each inbox, with `refusals_not_logged` saying how many
+  it left out since the last one. `hookinlet_deliveries_total{result="unverified_limit"}` still counts every refusal.
+- **A client that hangs up while its answer is written is logged at DEBUG.** `response failed` with a broken pipe or a
+  reset connection was an ERROR line for each such client (a read storm wrote eight); any other failure to write an answer is
+  still an ERROR.
+
 ## 0.8.0 - 2026-10-18
 
 Two additions to the ingest hooks, both optional, and a corrected log line. Nothing to migrate.

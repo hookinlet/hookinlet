@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"syscall"
 
 	"github.com/hookinlet/hookinlet/internal/api"
 )
@@ -35,7 +37,13 @@ func (s *Server) strictServer(impl api.StrictServerInterface) api.ServerInterfac
 				writeError(w, ref.status, ref.code, ref.msg)
 				return
 			}
-			s.log.LogAttrs(r.Context(), slog.LevelError, "response failed", slog.String("err", err.Error()))
+			// A client that hung up while its answer was being written is not a fault of the
+			// server's, and a read storm of them is not worth an ERROR line each.
+			level := slog.LevelError
+			if clientWentAway(err) {
+				level = slog.LevelDebug
+			}
+			s.log.LogAttrs(r.Context(), level, "response failed", slog.String("err", err.Error()))
 			// If the status is already sent (a download that broke part way), the body
 			// is not whole and the client must be able to tell. A length that was
 			// promised and not met breaks the connection by itself; a body of unknown
@@ -48,4 +56,10 @@ func (s *Server) strictServer(impl api.StrictServerInterface) api.ServerInterfac
 		},
 	}
 	return api.NewStrictHandlerWithOptions(impl, nil, opts)
+}
+
+// clientWentAway reports whether err is the peer closing or resetting the connection
+// while it was written to.
+func clientWentAway(err error) bool {
+	return errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, net.ErrClosed)
 }

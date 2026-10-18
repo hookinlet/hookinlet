@@ -371,9 +371,16 @@ func (s *Server) append(ctx context.Context, in *inbox.Inbox, m *inbox.NewMessag
 	if n, err := s.unverified.CountUnverified(ctx, in.ID, max); err != nil {
 		return nil, false, err
 	} else if n >= max {
-		// The cap that applied, which is the limiter's when it gave one.
-		s.log.LogAttrs(ctx, slog.LevelWarn, "delivery refused: too many unverified messages",
-			inboxAttrs(in, slog.Int64("max_unverified", max))...)
+		// The cap that applied, which is the limiter's when it gave one. An inbox at its
+		// cap refuses every unverified delivery, so the line is written once a minute per
+		// inbox, with how many it left out; /metrics counts every one.
+		if write, skipped := s.capLog.allow(in.ID); write {
+			attrs := inboxAttrs(in, slog.Int64("max_unverified", max))
+			if skipped > 0 {
+				attrs = append(attrs, slog.Int64("refusals_not_logged", skipped))
+			}
+			s.log.LogAttrs(ctx, slog.LevelWarn, "delivery refused: too many unverified messages", attrs...)
+		}
 		return nil, false, errUnverifiedFull
 	}
 	return s.opts.Store.Append(ctx, in.ID, m)
