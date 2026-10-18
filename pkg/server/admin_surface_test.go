@@ -239,7 +239,12 @@ func TestTheConsoleFollowsTheAdminListener(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- e.server.ServeAdmin(ctx, pub, adm) }()
-	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("ServeAdmin returned %v after it was stopped", err)
+		}
+	})
 	if code, _ := do2(t, "GET", "http://"+adm.Addr().String()+"/admin/", nil, ""); code != 200 {
 		t.Errorf("the admin listener: %d", code)
 	}
@@ -267,7 +272,12 @@ func TestTheAdminListenerWithoutTheConsoleHasNoReadAPI(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- e.server.ServeAdmin(ctx, pub, adm) }()
-	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("ServeAdmin returned %v after it was stopped", err)
+		}
+	})
 	admURL := "http://" + adm.Addr().String()
 	if status, _ := do2(t, "GET", admURL+"/v1/admin/inboxes", adminAuth(), ""); status != 200 {
 		t.Errorf("the admin API: %d", status)

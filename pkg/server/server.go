@@ -662,7 +662,10 @@ func (s *Server) serve(ctx context.Context, ln, adminLn net.Listener) error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	for ; pending > 0; pending-- {
-		<-errCh // each returns http.ErrServerClosed once Shutdown completes
+		// Each returns http.ErrServerClosed once Shutdown completes.
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.log.Warn("a listener ended with an error while shutting down", "err", err)
+		}
 	}
 	return nil
 }

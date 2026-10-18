@@ -355,7 +355,9 @@ func TestStartingFromNowSkipsWhatIsAlreadyThere(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Errorf("Run returned %v after it was cancelled", err)
+	}
 	if got := strings.Join(d.bodies(), ","); got != "new" {
 		t.Errorf("bodies = %s, want only the message that arrived after the start", got)
 	}

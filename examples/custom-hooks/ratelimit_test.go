@@ -153,7 +153,12 @@ func TestTheProgramAnswers429WhenTheLimitIsReached(t *testing.T) {
 		done <- run(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), func(k string) string { return env[k] })
 		close(done) // so that a second receive, in the cleanup, does not wait
 	}()
-	t.Cleanup(func() { stop(); <-done })
+	t.Cleanup(func() {
+		stop()
+		if err := <-done; err != nil {
+			t.Errorf("the example stopped with %v", err)
+		}
+	})
 
 	base := "http://" + addr
 	waitUp(t, base+"/healthz", done)
