@@ -63,6 +63,12 @@ func (s *server) start(ctx context.Context) (time.Duration, error) {
 		"HOOKINLET_LISTEN_ADDR="+s.cfg.addr(),
 		"HOOKINLET_LOG_LEVEL=warn",
 		"HOOKINLET_RETENTION_INTERVAL=1s",
+		// The audited inboxes that take unverified messages (the verifier none, and
+		// on_verify_fail=store) would reach the default cap of 1,000 in under a minute and
+		// then refuse nearly all of their load. The cap is set too high to reach, not off,
+		// so that every one of those deliveries still goes through the per-inbox lock and
+		// the count the cap is checked with. The cap itself is tested in pkg/server.
+		"HOOKINLET_MAX_UNVERIFIED=100000000",
 	)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
