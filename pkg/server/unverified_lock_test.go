@@ -53,8 +53,9 @@ func TestManyConcurrentForgedDeliveriesStoreExactlyTheCap(t *testing.T) {
 		t.Errorf("%d accepted, %d refused and %d stored; want %d, %d and %d",
 			ok, refused, e.count(in), maxUnverified, senders-maxUnverified, maxUnverified)
 	}
-	if got := strings.Count(e.logs.String(), "too many unverified messages"); got != senders-maxUnverified {
-		t.Errorf("%d refusals logged, want %d", got, senders-maxUnverified)
+	// An inbox at its cap refuses every delivery, and the line is written once a minute.
+	if got := strings.Count(e.logs.String(), "too many unverified messages"); got != 1 {
+		t.Errorf("%d refusal lines logged for %d refusals, want 1", got, senders-maxUnverified)
 	}
 	if n := e.server.unverifiedLocks.len(); n != 0 {
 		t.Errorf("%d inbox locks left once every delivery ended, want 0", n)

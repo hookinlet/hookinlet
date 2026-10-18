@@ -255,6 +255,7 @@ type Server struct {
 	limiter         inbox.UnverifiedLimiter // nil unless the Hooks set the cap per inbox
 	observer        inbox.IngestObserver    // nil unless the Hooks observe how deliveries end
 	unverifiedLocks inboxLocks              // an inbox's is held from counting its unverified messages to storing one
+	capLog          *logThrottle            // the refusal an inbox at its unverified cap gives every delivery, logged once a minute
 
 	spec       *specvalidate.Document // docs/openapi.json, which requests are held to
 	mux        *http.ServeMux
@@ -398,6 +399,7 @@ func New(opts Options) (*Server, error) {
 		reads:        make(chan struct{}, opts.MaxConcurrentReads),
 		streams:      make(chan struct{}, opts.MaxStreams),
 		ingestBudget: byteBudget{limit: opts.IngestMemoryBudget},
+		capLog:       newLogThrottle(time.Minute),
 		streamCounts: make(map[inbox.ID]int),
 		admitter:     admitterOf(opts.Hooks),
 		closeCtx:     closeCtx,
