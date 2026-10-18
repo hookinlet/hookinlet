@@ -29,8 +29,31 @@ var baseTime = time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 // newStore must return a new, empty Store on every call, driven by the given
 // clock: the Store must use now for every timestamp it assigns. The suite
 // closes each Store itself, so newStore must not register its own Close.
+//
+// Two checks need something only the Store's own test can supply, and run under
+// StoreSuiteWith: a Store that is full (StoreOptions.MakeFull), and a second Store
+// value on the same backend (StoreOptions.Peer).
 func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) inbox.Store) {
 	t.Helper()
+	runStoreSuite(t, newStore, StoreOptions{})
+}
+
+func runStoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) inbox.Store, opts StoreOptions) {
+	t.Helper()
+	// peers makes the other Store values on the backend s uses, if the options
+	// say how. The suite closes them.
+	peers := func(t *testing.T, s inbox.Store) []inbox.Store {
+		t.Helper()
+		if opts.Peer == nil {
+			return nil
+		}
+		p := opts.Peer(t, s)
+		if p == nil {
+			t.Fatal("StoreOptions.Peer returned a nil Store")
+		}
+		t.Cleanup(func() { _ = p.Close() })
+		return []inbox.Store{p}
+	}
 	cases := []struct {
 		name string
 		fn   func(*testing.T, inbox.Store, *Clock)
@@ -77,6 +100,14 @@ func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) 
 		{"RetentionDeletesAPrefix", testRetentionIsPrefix},
 		{"RetentionAndDedupe", testRetentionAndDedupe},
 		{"PruneCancelledPartway", testPruneCancelledPartway},
+		{"ConcurrentPrune", func(t *testing.T, s inbox.Store, clk *Clock) { testConcurrentPrune(t, s, clk, peers(t, s)) }},
+		{"PruneRacingARetentionChange", func(t *testing.T, s inbox.Store, clk *Clock) { testPruneRacesARetentionChange(t, s, clk, peers(t, s)) }},
+		{"AppendToAFullStoreIsErrStorageFull", func(t *testing.T, s inbox.Store, _ *Clock) {
+			if opts.MakeFull == nil {
+				t.Skip("StoreOptions.MakeFull is not set; see StoreSuiteWith")
+			}
+			checkStorageFull(t, s, func() func() { return opts.MakeFull(t, s) })
+		}},
 		{"ConcurrentAppendsAreGapless", testConcurrentGapless},
 		{"CursorSafety", testCursorSafety},
 		{"UpdateDoesNotDisturbAppends", testUpdateDuringAppends},

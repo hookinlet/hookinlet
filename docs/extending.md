@@ -20,12 +20,13 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `ContextSecretBox` (optional, of `SecretBox`) | `SealContext` and `OpenContext`: `Seal` and `Open` given the context of the work, so a box that asks a key service can stop when it is cancelled or past its deadline, read what the embedder put on it, and see the inbox's tenant (`inbox.TenantFrom`). The server calls them in place of `Seal` and `Open`. See [Writing a SecretBox](#writing-a-secretbox). | `pkg/secretbox` (which ignores the context) | `SecretBoxSuite`, and `ContextSecretBoxSuite` for a box that does I/O |
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
 | `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
-| `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
-| `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | the server's tests |
-| `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, the host it was addressed to, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | the server's tests |
+| `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. A Store that holds several tenants refuses a tenant-scoped context. | the SQLite store | `BackupperSuite` |
+| `EpochRenewer` (optional) | `RenewEpochs(ctx)` gives every inbox a new epoch and changes nothing else, for a Store restored by means that are not part of the interface (a copied database file, a point-in-time recovery). The server does not call it; a restore procedure does. See [A restore is a new epoch](#writing-a-store). | the SQLite store (`hookinlet renew-epochs` runs it) | `EpochRenewerSuite` |
+| `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | `UnverifiedLimiterSuite` (it returns at once and leaves the inbox alone; the cap itself is the server's tests) |
+| `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, the host it was addressed to, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | `IngestObserverSuite` (it returns at once for every outcome and leaves the event alone; what the server reports is the server's tests) |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
 | `StatusReporter` (optional) | The schema version, the size of the data and the free space, for `GET /v1/admin/status` and the console. | the SQLite store | none |
-| `Challenger` (optional, of the error `Authenticate` returns) | `WWWAuthenticate() string`: the `WWW-Authenticate` value for the `401`, in place of `Bearer realm="hookinlet"`. See [Choosing the 401 challenge](#choosing-the-401-challenge). | none: the server sends its own | the server's tests |
+| `Challenger` (optional, of the error `Authenticate` returns) | `WWWAuthenticate() string`: the `WWW-Authenticate` value for the `401`, in place of `Bearer realm="hookinlet"`. See [Choosing the 401 challenge](#choosing-the-401-challenge). | none: the server sends its own | `ChallengerSuite` (the value is one the server sends; the rest is the server's tests) |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. `InboxIDs(ctx)` may look the list up, and may fail. | the agent principal | checked by `AuthenticatorSuite` |
 | `TenantPrincipal` (optional) | A `Principal` that belongs to one tenant. After authenticating, the server scopes the request's context to it (`inbox.WithTenant`), so slugs are looked up in that tenant and nothing outside it is reachable. See [Tenants](#tenants). | none: the shipped principals are not in a tenant | `StoreSuite` (the `Tenants` case) and the server's tests |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
@@ -321,6 +322,37 @@ A delivery whose ingest key names no inbox is not observed, nor is one with the 
 method: there is no inbox to count it against, and an observer would otherwise see
 every guess anyone makes at a key.
 
+### Checking a hook of your own
+
+The server's own tests cover what it does with a hook's answers. A hook can be checked
+for what holds for every implementation without a server, and three suites do it:
+
+```go
+inboxtest.UnverifiedLimiterSuite(t, func(t *testing.T) inbox.UnverifiedLimiter { return newLimiter(t) })
+inboxtest.IngestObserverSuite(t, func(t *testing.T) inbox.IngestObserver { return newObserver(t) })
+inboxtest.AdmitterSuite(t, func(t *testing.T) inbox.Admitter { return newAdmitter(t) })
+```
+
+`UnverifiedLimiterSuite` and `IngestObserverSuite` call the hook with an ordinary context,
+one that carries `inbox.AccessFrom`, and one that is already cancelled, and check that it
+returns at once (both are called on the request's goroutine), does not change the inbox or
+the event it is given, and survives being called from many requests together. The observer
+is called with an event of every `inbox.Ingest*` outcome and one the package does not know
+yet. Which cap a limiter answers for which inbox, and what an observer counts, are for your
+own tests. `AdmitterSuite` is described above.
+
+The contract points that no suite can reach, because they are about what the server does,
+are these. Check them in your own tests:
+
+- A limiter's answer is the cap: positive is the cap, `0` the server's limit, negative none. It
+  is asked only for an unverified delivery, and only has an effect on a Store with
+  `UnverifiedCounter`.
+- An observer is told about deliveries to a known inbox only, after `AfterIngest`, and
+  a panic in it does not change the response.
+- A `Principal` that belongs to a tenant implements `TenantPrincipal` with the same
+  `Tenant` for its life; one that does not is unscoped, and reaches the default tenant.
+  `StoreSuite` checks what a Store does with a scoped context.
+
 ## Writing a Store
 
 The `Store` documentation in `pkg/inbox/interfaces.go` is the contract; the
@@ -344,9 +376,15 @@ suite is what makes it testable. The points that are easy to get wrong:
   (inbox, received_at, seq), and retention by age always deletes a prefix.
 - **A restore is a new epoch.** `Inbox.Epoch` must change for every inbox when the
   Store is restored from a backup, so that an old cursor is refused. A `Backupper`'s
-  snapshot does it (`BackupperSuite` checks it); a Store restored by other means, such
-  as a database's own backups, must renew every epoch as part of the restore. The
-  suite cannot check that, since restoring is not a method of `Store`.
+  snapshot does it (`BackupperSuite` checks it). A Store restored by any other means,
+  such as a copied database file or a point-in-time recovery, must renew every epoch
+  before it serves again; restoring is not a method of `Store`, so nothing does it
+  for you. Implement `inbox.EpochRenewer` (`RenewEpochs(ctx) error`) and call it as the
+  last step of the restore. `EpochRenewerSuite` checks it: after a call every inbox has a
+  different epoch, so that a client holding a cursor from the old one gets `409
+  epoch_changed`; the messages, their sequence numbers, the tokens and the inboxes'
+  settings are as they were; and a second call is safe and renews again. The SQLite
+  store has it, and `hookinlet renew-epochs` runs it.
 - **Scope by tenant, except tokens.** A context scoped with `inbox.WithTenant` limits
   every method to that tenant's inboxes (see [Tenants](#tenants)). The token methods
   are the operator's: `GetTokenByHash`, `ListTokens` and `DeleteToken` ignore the
@@ -369,6 +407,22 @@ suite is what makes it testable. The points that are easy to get wrong:
   delivery first with `ErrQuotaExceeded` (`402`).
 - **Large deletes must not block writes.** `DeleteInbox` and `Prune` run in small
   batches; deleting everything in one transaction stalls every delivery.
+- **`Prune` may run at the same time as itself.** The servers of one deployment each run
+  the retention sweep, so several `Store` values on one backend call `Prune` together,
+  and one server can call it while another changes an inbox's retention. It must be
+  safe. Deletes are per inbox and idempotent, so a message another call has already
+  removed is not an error, and two calls that select the same messages may each count
+  them (the counts do not add up). It leaves no gap, whatever else is running. If
+  `RetentionDays` or `RetentionMaxCount` is changed while it runs, it applies the old
+  limit or the new one, and the next call applies the new one. `StoreSuite` checks this
+  from several goroutines, and also on a second `Store` value when you give
+  `StoreOptions.Peer`.
+- **A refused write is `ErrStorageFull` and leaves nothing behind.** When there is no
+  room (a full disk, a size limit), `Append` returns an error that wraps
+  `inbox.ErrStorageFull`, which the server answers with `503` so that the sender retries.
+  It stores no part of the message and uses up no sequence number: once there is room
+  again the next message gets the next number. `StoreSuite` checks this when you give
+  `StoreOptions.MakeFull`.
 
 Run the suite from an ordinary test:
 
@@ -380,9 +434,25 @@ func TestMyStore(t *testing.T) {
 }
 ```
 
-The suite closes each Store itself. If your Store can take backups, add
+The suite closes each Store itself. Two checks need something only your test can do,
+and run when you use `inboxtest.StoreSuiteWith(t, newStore, inboxtest.StoreOptions{...})`:
+
+- `MakeFull` makes the Store unable to take another message (a size limit lowered to
+  what it holds, say) and returns a function that gives it room again. The suite then
+  expects `ErrStorageFull` from `Append`, no message stored and no sequence number used.
+  Left nil, that case is skipped.
+- `Peer` returns a second `Store` value on the same backend, so that the concurrent
+  `Prune` check calls `Prune` on both, as two servers do. Left nil, the check runs on
+  one value from several goroutines.
+
+If your Store can take backups, add
 `inboxtest.BackupperSuite(t, newStore, restore)`, where `restore` opens a Store
-from a snapshot's bytes. If it can count unverified messages cheaply (reading no
+from a snapshot's bytes. A snapshot holds every tenant's data, so a Store that keeps
+inboxes under tenants refuses `Backup` for a context scoped with `inbox.WithTenant`,
+returning an error that wraps `ErrForbidden` (or gives a snapshot of that tenant alone, if
+it can); the suite checks it, and skips the check for a Store that is not multi-tenant. If it
+restores by other means than a snapshot, add `inboxtest.EpochRenewerSuite(t, newStore)`
+(see **A restore is a new epoch** above). If it can count unverified messages cheaply (reading no
 more rows than the limit), implement `inbox.UnverifiedCounter` and add
 `inboxtest.UnverifiedCounterSuite(t, newStore)`; the server then caps the unverified
 messages an inbox keeps (see [verifiers](verifiers.md#unverified-messages-are-capped)).
@@ -392,13 +462,15 @@ messages an inbox keeps (see [verifiers](verifiers.md#unverified-messages-are-ca
 To add something around a Store (tenancy, a quota, a byte count per tenant), wrap it
 in a type of your own and give the server the wrapper. Besides the 19 methods of
 `inbox.Store`, the server looks on the Store it is given for three optional
-interfaces, by type assertion, and does without each one it does not find:
+interfaces, by type assertion, and does without each one it does not find. A fourth,
+`inbox.EpochRenewer`, is not looked for by the server but by a restore procedure of your own:
 
 | Optional interface | Without it |
 |---|---|
 | `inbox.UnverifiedCounter` | Unverified messages are not capped: `Options.MaxUnverified` and an `UnverifiedLimiter` on your `Hooks` have no effect. Every delivery stored unverified (with `on_verify_fail=store`, or the verifier `none`) is accepted with `200`. The only sign is a warning in the log when the server starts. |
 | `inbox.Backupper` | `GET /v1/admin/backup` answers `501 not_implemented`, and `hookinlet backup` says the store does not support backups. |
 | `inbox.StatusReporter` | `GET /v1/admin/status` reports `schema_version` and `database_bytes` as `0` and leaves out `free_bytes`. |
+| `inbox.EpochRenewer` | Nothing in the server. Your restore procedure, which asserts the Store it holds to `EpochRenewer`, finds no way to renew the epochs and cannot tell readers holding old cursors to start again. |
 
 The core grows by adding optional interfaces like these ([Stability](stability.md#the-go-packages)), so
 a later release may add to this table.
@@ -442,6 +514,10 @@ func (s *metered) Backup(ctx context.Context) (io.ReadCloser, int64, error) {
 
 func (s *metered) Status(ctx context.Context) (inbox.StoreStatus, error) {
 	return s.Store.(inbox.StatusReporter).Status(ctx)
+}
+
+func (s *metered) RenewEpochs(ctx context.Context) error {
+	return s.Store.(inbox.EpochRenewer).RenewEpochs(ctx)
 }
 ```
 
@@ -520,6 +596,11 @@ An in-process notifier must not drop signals. One that crosses the network may
 stream and MCP wait re-read the Store on that interval regardless. `Publish` is
 called with a context that may already be cancelled and must still deliver.
 
+`CancellingReleasesEverythingItHeld` counts goroutines before and after a thousand
+subscriptions are made and cancelled. A notifier that opens its connection to a
+backend the first time it is used therefore looks like a leak: open it before the check
+(in the function that makes the notifier) or close it when the notifier is closed.
+
 Readers subscribe first and read the Store second, so a subscription has to be live
 when `Subscribe` returns: every `Publish` that begins after that must reach it. A
 notifier that crosses the network waits for its backend to confirm the subscription
@@ -534,6 +615,15 @@ the first at once sees the later ones as new signals, as it should. Run such a
 notifier with `inboxtest.NotifierSuiteWith(t, newNotifier, inboxtest.NotifierOptions{Settle: d})`,
 where `d` is how long a burst of a thousand publishes takes to arrive: the coalescing
 check then waits that long before it reads, and still requires one signal.
+
+The suite runs one notifier. A notifier whose instances reach each other through a
+backend can lose a wake-up between instances and still pass a suite that has only one.
+Give `NotifierOptions.Peer` a function that returns a second notifier on the same
+backend as the first, and the suite also checks that a `Publish` on either instance
+wakes the subscribers of both, that another inbox's subscribers are not woken, and
+that cancelling a subscription on one instance leaves the other's. Left nil, the
+suite runs as before. The in-process notifier has one instance, so its test passes the
+notifier itself as its own peer.
 
 ## Writing a SecretBox
 
@@ -625,6 +715,11 @@ string fails any of that, the server sends `Bearer realm="hookinlet"` and logs a
 warning, once. The same string goes to every caller who is refused, so do not build
 it from the request's credentials. An error that does not wrap `ErrUnauthenticated`
 is still a server error, whatever else it has.
+
+`inboxtest.ChallengerSuite(t, func(t *testing.T) inbox.Challenger { return yourError })`
+checks the value against these rules (so a mistake that would send the server's own
+challenge shows up in your tests, not in a warning in the log), that it is the same on every
+call, and that the error wraps `ErrUnauthenticated`.
 
 ## Serving other paths next to the API
 

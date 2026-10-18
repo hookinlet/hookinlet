@@ -291,4 +291,46 @@ func BackupperSuite(t *testing.T, newStore func(t *testing.T) inbox.Store, resto
 			t.Error("a message appended after the backup appeared in it")
 		}
 	})
+
+	// A snapshot holds every tenant's data, so a caller scoped to one tenant must
+	// not be given it. The Store refuses, or gives a snapshot of that tenant alone.
+	// A Store that does not keep inboxes under tenants has nothing to check.
+	t.Run("ATenantScopedContextIsNotGivenOtherTenantsData", func(t *testing.T) {
+		s := newStore(t)
+		defer func() { _ = s.Close() }()
+		ctxA := inbox.WithTenant(t.Context(), "backup-org-a")
+		ctxB := inbox.WithTenant(t.Context(), "backup-org-b")
+		a := mkInbox("tenant-a")
+		b := mkInbox("tenant-b")
+		if err := s.CreateInbox(ctxA, a); err != nil {
+			t.Skipf("the Store does not take inboxes in a tenant (%v), so a tenant-scoped backup has nothing to refuse", err)
+		}
+		if a.Tenant != "backup-org-a" {
+			t.Skipf("the Store keeps an inbox made in a tenant's context under tenant %q, not the tenant: it is not multi-tenant", a.Tenant)
+		}
+		if err := s.CreateInbox(ctxB, b); err != nil {
+			t.Fatal(err)
+		}
+		appendMsg(t, s, b.ID)
+
+		rc, _, err := s.(inbox.Backupper).Backup(ctxA)
+		if err != nil {
+			isErr(t, "Backup in a context scoped to one tenant", err, inbox.ErrForbidden)
+			if rc != nil {
+				_ = rc.Close()
+			}
+			return
+		}
+		// Not refused: the snapshot must hold nothing of the other tenant.
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := restore(t, data)
+		defer func() { _ = r.Close() }()
+		if got, err := r.GetInboxBySlug(ctxB, b.Slug); err == nil {
+			t.Errorf("a snapshot taken in tenant %q's context holds inbox %q of tenant %q: refuse the call with an error that wraps inbox.ErrForbidden", a.Tenant, got.Slug, got.Tenant)
+		}
+	})
 }

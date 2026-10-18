@@ -25,6 +25,7 @@ var optionalStoreInterfaces = []struct {
 }{
 	{reflect.TypeFor[inbox.Backupper](), "GET /v1/admin/backup answers 501 not_implemented"},
 	{reflect.TypeFor[inbox.StatusReporter](), "GET /v1/admin/status reports schema_version and database_bytes as 0 and leaves out free_bytes"},
+	{reflect.TypeFor[inbox.EpochRenewer](), "an operator's or embedder's restore procedure cannot renew the epochs through the wrapper, so readers holding cursors from before a restore by other means are not told to start again (the server itself does not call it)"},
 	{reflect.TypeFor[inbox.UnverifiedCounter](), "unverified messages are not capped: Options.MaxUnverified and any inbox.UnverifiedLimiter have no effect, and the server only logs a warning when it starts"},
 }
 
@@ -32,7 +33,7 @@ func implements(v any, typ reflect.Type) bool { return reflect.TypeOf(v).Impleme
 
 // AssertStoreWrapperForwards fails t if wrapper, a Store that wraps inner, does not
 // implement every optional Store interface (inbox.Backupper, inbox.StatusReporter,
-// inbox.UnverifiedCounter, and any added later) that inner implements. The server
+// inbox.UnverifiedCounter, inbox.EpochRenewer, and any added later) that inner implements. The server
 // finds those by type assertion on the Store it is given, so a wrapper that embeds
 // the inbox.Store interface hides them, and the server silently goes without:
 // the failure says what each missing one turns off.

@@ -10,7 +10,13 @@ import (
 	"testing"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
+	"github.com/hookinlet/hookinlet/pkg/inboxtest"
 )
+
+// The counter is an IngestObserver, so it can run the suite an observer of your own would.
+func TestOutcomeCounterPassesTheObserverSuite(t *testing.T) {
+	inboxtest.IngestObserverSuite(t, func(*testing.T) inbox.IngestObserver { return NewOutcomeCounter(inbox.NopHooks{}) })
+}
 
 func counted(t *testing.T, c *OutcomeCounter) string {
 	t.Helper()

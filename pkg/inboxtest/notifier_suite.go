@@ -27,7 +27,9 @@ const (
 // The suite checks the guarantees a consumer relies on, which are the same ones a
 // distributed implementation must keep: a Publish after Subscribe returns wakes
 // the subscriber, signals coalesce rather than queue, inboxes do not signal each
-// other, and cancelling releases everything.
+// other, and cancelling releases everything. It runs one notifier. A notifier whose
+// instances reach each other through a backend also needs the cases that run two,
+// which NotifierSuiteWith runs when NotifierOptions.Peer is set.
 //
 // It reads a signal as soon as it can. A notifier whose signals cross a network
 // delivers them later and spread out, so the coalescing check can see more than one;
@@ -49,6 +51,19 @@ type NotifierOptions struct {
 	// Settle the burst must still read as one signal (and at most one more). Zero
 	// reads at once.
 	Settle time.Duration
+
+	// Peer returns a second Notifier on the same backend as n, as another server of
+	// the same deployment would have: a Publish on either reaches the subscribers of
+	// both. It is for a notifier whose instances reach each other (over a network,
+	// say), where a signal lost between instances goes unnoticed by a suite that runs
+	// only one. With it the suite also checks that a Publish on one instance wakes
+	// subscribers on the other, in both directions, for every subscriber of the inbox
+	// and for no other inbox's, and that cancelling a subscription on one instance
+	// leaves the other's. Nil runs only the single-instance cases. Peer is called
+	// once per case with the notifier newNotifier returned; it must not return n
+	// itself unless the notifier has only one instance, and it releases what it holds
+	// with t.Cleanup.
+	Peer func(t *testing.T, n inbox.Notifier) inbox.Notifier
 }
 
 // NotifierSuiteWith is NotifierSuite with options.
@@ -369,6 +384,26 @@ func NotifierSuiteWith(t *testing.T, newNotifier func(t *testing.T) inbox.Notifi
 		publish(t, n, 1, 100)
 	})
 
+	if opts.Peer != nil {
+		for _, c := range []struct {
+			name string
+			fn   func(testing.TB, inbox.Notifier, inbox.Notifier)
+		}{
+			{"APublishOnAPeerWakesSubscribersOnBothInstances", checkPeerWakes},
+			{"APublishOnAPeerDoesNotWakeAnotherInbox", checkPeerIsolation},
+			{"CancellingOnOneInstanceLeavesTheOther", checkPeerCancel},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				n := newNotifier(t)
+				peer := opts.Peer(t, n)
+				if peer == nil {
+					t.Fatal("NotifierOptions.Peer returned a nil Notifier")
+				}
+				c.fn(t, n, peer)
+			})
+		}
+	}
+
 	t.Run("ConcurrentUseIsSafe", func(t *testing.T) {
 		n := newNotifier(t)
 		var wg sync.WaitGroup
@@ -394,4 +429,159 @@ func NotifierSuiteWith(t *testing.T, newNotifier func(t *testing.T) inbox.Notifi
 			t.Fatal("concurrent use did not finish: a Publish or Subscribe is blocking")
 		}
 	})
+}
+
+// The checks of a notifier with more than one instance. They report through t
+// without stopping the test, so a test of the checks can read what they said.
+
+// subscribeWithin calls Subscribe and gives up if it does not return in time.
+func subscribeWithin(t testing.TB, n inbox.Notifier, id inbox.ID) (<-chan struct{}, func(), bool) {
+	t.Helper()
+	type pair struct {
+		ch     <-chan struct{}
+		cancel func()
+	}
+	got := make(chan pair, 1)
+	go func() {
+		ch, cancel := n.Subscribe(t.Context(), id)
+		got <- pair{ch, cancel}
+	}()
+	select {
+	case p := <-got:
+		if p.ch == nil || p.cancel == nil {
+			t.Error("Subscribe returned a nil channel or cancel function")
+			return nil, nil, false
+		}
+		return p.ch, p.cancel, true
+	case <-time.After(signalWait):
+		t.Error("Subscribe blocked for 2s; it must return at once")
+		return nil, nil, false
+	}
+}
+
+func wokenWithin(ch <-chan struct{}, d time.Duration) bool {
+	select {
+	case <-ch:
+		return true
+	case <-time.After(d):
+		return false
+	}
+}
+
+// settleSignals discards signals that are still arriving, so that a check that
+// follows sees only its own.
+func settleSignals(chans ...<-chan struct{}) {
+	for _, ch := range chans {
+		for wokenWithin(ch, quiet) {
+		}
+	}
+}
+
+func checkPeerWakes(t testing.TB, a, b inbox.Notifier) {
+	t.Helper()
+	onA, cancelA, ok := subscribeWithin(t, a, 1)
+	if !ok {
+		return
+	}
+	defer cancelA()
+	onB, cancelB, ok := subscribeWithin(t, b, 1)
+	if !ok {
+		return
+	}
+	defer cancelB()
+	for _, c := range []struct {
+		from string
+		pub  inbox.Notifier
+	}{{"the second instance", b}, {"the first instance", a}} {
+		c.pub.Publish(t.Context(), 1, 1)
+		woke := wokenWithin(onA, signalWait)
+		if !woke {
+			t.Errorf("a Publish on %s did not wake a subscriber on the first instance", c.from)
+		}
+		if !wokenWithin(onB, signalWait) {
+			t.Errorf("a Publish on %s did not wake a subscriber on the second instance", c.from)
+			woke = false
+		}
+		if !woke {
+			return // the rest would only repeat it, slowly
+		}
+		settleSignals(onA, onB)
+	}
+	// Several subscribers on each instance are all woken.
+	var chans []<-chan struct{}
+	for i := range 10 {
+		n := a
+		if i%2 == 1 {
+			n = b
+		}
+		ch, cancel, ok := subscribeWithin(t, n, 2)
+		if !ok {
+			return
+		}
+		defer cancel()
+		chans = append(chans, ch)
+	}
+	a.Publish(t.Context(), 2, 1)
+	for i, ch := range chans {
+		if !wokenWithin(ch, signalWait) {
+			t.Errorf("subscriber %d (on instance %d) was not woken by a Publish on the first instance", i, i%2+1)
+		}
+	}
+}
+
+func checkPeerIsolation(t testing.TB, a, b inbox.Notifier) {
+	t.Helper()
+	other, cancelOther, ok := subscribeWithin(t, a, 2)
+	if !ok {
+		return
+	}
+	defer cancelOther()
+	same, cancelSame, ok := subscribeWithin(t, a, 1)
+	if !ok {
+		return
+	}
+	defer cancelSame()
+	b.Publish(t.Context(), 1, 1)
+	if !wokenWithin(same, signalWait) {
+		t.Error("a Publish on the second instance did not wake the first instance's subscriber of that inbox")
+	}
+	if wokenWithin(other, quiet) {
+		t.Error("a Publish to inbox 1 on the second instance woke a subscriber of inbox 2 on the first")
+	}
+}
+
+func checkPeerCancel(t testing.TB, a, b inbox.Notifier) {
+	t.Helper()
+	keepA, cancelKeepA, ok := subscribeWithin(t, a, 1)
+	if !ok {
+		return
+	}
+	defer cancelKeepA()
+	goneB, cancelGoneB, ok := subscribeWithin(t, b, 1)
+	if !ok {
+		return
+	}
+	cancelGoneB()
+	a.Publish(t.Context(), 1, 1)
+	if !wokenWithin(keepA, signalWait) {
+		t.Error("cancelling a subscription on the second instance stopped one on the first")
+	}
+	if wokenWithin(goneB, quiet) {
+		t.Error("a subscription cancelled on the second instance was signalled")
+	}
+	// And the other way: the one that is cancelled is on the first instance.
+	keepB, cancelKeepB, ok := subscribeWithin(t, b, 1)
+	if !ok {
+		return
+	}
+	defer cancelKeepB()
+	settleSignals(keepA)
+	cancelKeepA()
+	b.Publish(t.Context(), 1, 2)
+	if !wokenWithin(keepB, signalWait) {
+		t.Error("cancelling a subscription on the first instance stopped one on the second")
+	}
+	if wokenWithin(keepA, quiet) {
+		t.Error("a subscription cancelled on the first instance was signalled")
+	}
 }

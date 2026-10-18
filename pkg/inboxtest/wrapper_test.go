@@ -24,6 +24,7 @@ func (r *recordingTB) Helper() {}
 func (r *recordingTB) Errorf(format string, args ...any) {
 	r.errs = append(r.errs, fmt.Sprintf(format, args...))
 }
+func (r *recordingTB) Error(args ...any)                 { r.Errorf("%s", fmt.Sprint(args...)) }
 func (r *recordingTB) Fatalf(format string, args ...any) { r.Errorf(format, args...) }
 
 // embedsInterface is the mistake: embedding the interface promotes only its 19
@@ -46,6 +47,10 @@ func (f forwardsAll) Status(ctx context.Context) (inbox.StoreStatus, error) {
 
 func (f forwardsAll) CountUnverified(ctx context.Context, id inbox.ID, limit int64) (int64, error) {
 	return f.Store.(inbox.UnverifiedCounter).CountUnverified(ctx, id, limit)
+}
+
+func (f forwardsAll) RenewEpochs(ctx context.Context) error {
+	return f.Store.(inbox.EpochRenewer).RenewEpochs(ctx)
 }
 
 func openSQLite(t *testing.T) *sqlite.Store {
