@@ -39,8 +39,8 @@ are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, `Hooks` w
 ## Tenants
 
 A Store may hold the inboxes of several independent parties, each under its own
-tenant key (`Inbox.Tenant`, an opaque string, empty by default). This is how a hosted
-service keeps its customers' inboxes apart while running one server. An installation
+tenant key (`Inbox.Tenant`, an opaque string, empty by default). This is how one server
+keeps the inboxes of independent parties apart. An installation
 that never uses it has one tenant, the empty one, and sees no difference.
 
 - A **context scoped to a tenant** (`inbox.WithTenant(ctx, "acme")`) limits every
@@ -64,14 +64,14 @@ that never uses it has one tenant, the empty one, and sees no difference.
   `/v1/admin/status` and `/metrics`. A tenant's admin gets `403` with code
   `forbidden` and nothing is done; the log gets a warning naming the operation and
   the principal's Go type. Each admin operation's `x-admin-scope` in
-  `docs/openapi.json` says which kind it is. A hosted service should give its
-  customers principals whose `CanAdmin` is false, and keep admin to its own
+  `docs/openapi.json` says which kind it is. An embedder should give its
+  callers principals whose `CanAdmin` is false, and keep admin to its own
   operator principal.
 - **A principal that is not a `TenantPrincipal` is not scoped**, so one belonging to a
   tenant must implement it. The shipped token authenticator does not: it is for one
   tenant, and its all-inboxes tokens read every inbox in the Store.
 - **`Options.RequireTenant` makes a forgotten `Tenant()` fail closed.** Without it, a
-  customer's principal that does not implement `TenantPrincipal` is unscoped: it names
+  caller's principal that does not implement `TenantPrincipal` is unscoped: it names
   inboxes in the default tenant, and MCP's `list_inboxes` shows it every tenant's
   inboxes that its `CanReadInbox` allows. With it, the server refuses a principal that
   is neither a `TenantPrincipal` nor an admin (`CanAdmin`), on the read API, streams
@@ -79,7 +79,7 @@ that never uses it has one tenant, the empty one, and sees no difference.
   caller gets `500` with code `internal`, which says nothing of why; the log gets an
   error that names the principal's Go type, and never the credential. An admin in no
   tenant is still served, because that is how an operator gets its view across tenants;
-  an admin that is a `TenantPrincipal` keeps to its tenant as before. A hosted service
+  an admin that is a `TenantPrincipal` keeps to its tenant as before. An embedder
   whose callers all belong to tenants should turn it on. It is off by default, and with
   an `Authenticator` whose principals are never `TenantPrincipal`s, such as the shipped
   token one, it would refuse every caller but the admin.
@@ -419,8 +419,8 @@ wrapper that embeds the concrete type passes it.
   created, verified or not.
 - **Decide on `Message.Verified`.** With `on_verify_fail=store` a forged delivery is
   stored with `Verified == false`, and unverified messages are never deduplicated, so
-  each replay of one is a new message (`created == true`). A count of what customers
-  are billed for, or of genuine deliveries, should look at `Verified`.
+  each replay of one is a new message (`created == true`). A count of what is
+  charged for, or of genuine deliveries, should look at `Verified`.
 - **`Store.Append` does not signal the Notifier.** The server calls
   `Notifier.Publish` after a delivery that created a message. Anything else that
   appends (a Store or a hook that writes to another inbox) must call `Publish` for

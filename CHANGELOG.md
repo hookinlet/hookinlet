@@ -58,7 +58,7 @@ with its code. Visible to operators: `/readyz` samples secrets across tenants, a
   a token not limited to a list still stops without saying so when a call has looked through 10,000 inboxes. A client
   that never passes `after` gets the same inboxes and `truncated` as before. See [`list_inboxes`](docs/mcp.md#list_inboxes).
 - **`server.Options.RequireTenant`** refuses a caller whose `Principal` is neither an `inbox.TenantPrincipal` nor an
-  admin (`CanAdmin`), so that a hosted embedder's principal that forgets `Tenant()` fails closed instead of running
+  admin (`CanAdmin`), so that an embedder's principal that forgets `Tenant()` fails closed instead of running
   unscoped (naming inboxes in the default tenant, and seeing every tenant's inboxes in MCP `list_inboxes` that its
   `CanReadInbox` allows). The refusal applies to the read API, streams and MCP waits (also when they are checked
   again), every MCP call and the admin API; it is a `500` with code `internal`, and the log line names the

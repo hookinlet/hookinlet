@@ -4,7 +4,7 @@
 // Package inbox defines hookinlet's domain types and the interfaces that
 // storage, notification, authentication, and secret handling implement. It is
 // the public contract: the open-source defaults and any third-party
-// implementation (for example a hosted multi-node one) satisfy the same
+// implementation (for example a multi-node one) satisfy the same
 // interfaces and pass the same conformance suites in pkg/inboxtest.
 //
 // Nothing in this package knows about organizations, users, plans, or billing. A
@@ -124,7 +124,7 @@ type Inbox struct {
 	UID string
 	// Tenant says which tenant the inbox belongs to: an opaque key, empty by
 	// default, that a Store which holds the inboxes of several independent parties
-	// (the organizations of a hosted service) uses to keep them apart. Slugs are
+	// (separate organizations, say) uses to keep them apart. Slugs are
 	// unique within a tenant, not across them. It is set when the inbox is created
 	// and never changes; see the Store's "Tenants" section for what it does.
 	// Installations that do not use tenants have only the empty one.

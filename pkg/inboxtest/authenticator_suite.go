@@ -131,8 +131,8 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 		}
 	})
 
-	// A hosted implementation will have inboxes that share slugs across tenants,
-	// and slugs can change meaning. Authorization must follow the immutable ID.
+	// An implementation that holds several tenants' inboxes will have inboxes that share
+	// slugs across tenants, and slugs can change meaning. Authorization must follow the immutable ID.
 	t.Run("ReadAccessFollowsTheInboxIDNotItsName", func(t *testing.T) {
 		f := newFixture(t)
 		pa, err := authenticate(t, f, bearer(f.TokenA)...)

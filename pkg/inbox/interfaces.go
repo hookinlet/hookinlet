@@ -249,7 +249,7 @@ type StatusReporter interface {
 
 // Backupper is an optional capability of a Store: a consistent copy of all its
 // data that can be saved elsewhere. It is optional because not every backend
-// can offer one (a hosted database is backed up by its operator). Callers find
+// can offer one (a database run by someone else is backed up by its operator). Callers find
 // it with a type assertion and answer 501 when it is absent; this is the one
 // documented exception to the rule that handlers reach the Store only through its interface.
 type Backupper interface {

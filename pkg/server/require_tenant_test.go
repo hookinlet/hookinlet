@@ -16,7 +16,7 @@ import (
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
 )
 
-// carelessPrincipal is the mistake Options.RequireTenant is there to catch: a customer's
+// carelessPrincipal is the mistake Options.RequireTenant is there to catch: a caller's
 // principal that says yes to every inbox and forgot Tenant().
 type carelessPrincipal struct{}
 
@@ -135,7 +135,7 @@ func TestRequireTenantRefusesAPrincipalWithoutATenant(t *testing.T) {
 }
 
 // A principal in a tenant is served as before, and so is an admin in no tenant (the
-// operator), which is the one view across every tenant a hosted operator has.
+// operator), which is the one view across every tenant an operator has.
 func TestRequireTenantServesTenantsAndTheOperator(t *testing.T) {
 	e, base, _ := requireTenantEnv(t, true)
 

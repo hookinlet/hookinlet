@@ -168,7 +168,7 @@ func TestTheCapRefusalHasItsOwnMetricLabel(t *testing.T) {
 }
 
 // planHooks is a Hooks that also decides, per inbox, how many unverified messages
-// it may keep: what an embedder with plans does.
+// it may keep: what an embedder with its own limits does.
 type planHooks struct {
 	*recHooks
 	limits map[string]int // by slug; absent means 0
