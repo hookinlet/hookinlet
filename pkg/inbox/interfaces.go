@@ -413,6 +413,15 @@ type IngestRequest struct {
 	// SourceIP is where the delivery came from, as the server records it: the
 	// peer's address, or the client's behind a trusted proxy. It may be empty.
 	SourceIP string
+	// Host is the host the delivery was addressed to: the request's Host header as
+	// the server received it, in lower case, without a trailing dot, and with the
+	// port only if the header had one ("hooks.example.com", "hooks.example.com:8443",
+	// "[::1]:8080"). It is empty if the request sent none. It is never taken from
+	// X-Forwarded-Host or any other header a proxy adds: behind a proxy that rewrites
+	// Host, Host is what the proxy sent, and arranging for it to name the original
+	// host is the embedder's concern. It came from the sender like every other field,
+	// so it names a hostname the request used, not one the sender is entitled to.
+	Host string
 	// Method is POST or PUT, and PathSuffix is what followed the inbox key in the
 	// URL (without the leading slash).
 	Method, PathSuffix string
@@ -426,7 +435,10 @@ type IngestRequest struct {
 type Hooks interface {
 	// BeforeIngest may reject a delivery before it is verified or stored by
 	// returning an error wrapping ErrRateLimited (429), ErrQuotaExceeded (402),
-	// or ErrForbidden (403). Any other error is treated as an internal failure.
+	// or ErrForbidden (403), or ErrNotFound, which is answered exactly as an
+	// unknown ingest key is (404), so that an inbox that exists but is not served
+	// to this caller looks as if it did not exist. Any other error is treated as
+	// an internal failure.
 	// A refusal may say when to retry (RefuseAfter, RetryAfterer). The request is
 	// what is known of the delivery at that point; it grows by adding fields, which
 	// is why it is a struct. AccessFrom(ctx) says which operation it is for.
@@ -565,7 +577,7 @@ const (
 // grows by adding fields, which is why it is a struct. An observer must not modify
 // it or the Inbox it points to.
 //
-// It carries nothing the sender sent beyond its size and address: no headers, no
+// It carries nothing the sender sent beyond its size, address and host: no headers, no
 // body, and not the reason text of a signature failure (the server logs that
 // itself), only its VerifyFailure kind, so that what an embedder logs or forwards
 // from it cannot leak them.
@@ -584,6 +596,10 @@ type IngestEvent struct {
 	// SourceIP is where the delivery came from, as in IngestRequest. It may be
 	// empty.
 	SourceIP string
+	// Host is the host the delivery was addressed to, as in IngestRequest. It was
+	// chosen by the sender, so treat it as input (as a metric label it can grow
+	// without bound). It may be empty.
+	Host string
 	// Seq is the message's sequence number for IngestStored, and for
 	// IngestDuplicate that of the message it repeats; 0 otherwise.
 	Seq int64

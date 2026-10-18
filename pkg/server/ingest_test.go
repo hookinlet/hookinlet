@@ -207,6 +207,7 @@ type req struct {
 	body    string
 	headers http.Header
 	remote  string
+	host    string // the Host header, if not the test request's default
 	length  *int64 // override Content-Length
 }
 
@@ -223,6 +224,9 @@ func (e *env) do(r req) *httptest.ResponseRecorder {
 	}
 	if r.remote != "" {
 		hr.RemoteAddr = r.remote
+	}
+	if r.host != "" {
+		hr.Host = r.host
 	}
 	if r.length != nil {
 		hr.ContentLength = *r.length

@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/hookinlet/hookinlet/internal/jsonptr"
@@ -142,7 +144,7 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 	// 3. Let the embedder reject the delivery (rate limit, quota, policy).
 	if err := s.opts.Hooks.BeforeIngest(ctx, &inbox.IngestRequest{
 		Inbox: in, Size: int64(len(body)), SourceIP: clientIP(r, s.opts.TrustedProxies),
-		Method: r.Method, PathSuffix: r.PathValue("rest"), Headers: r.Header,
+		Host: requestHost(r), Method: r.Method, PathSuffix: r.PathValue("rest"), Headers: r.Header,
 	}); err != nil {
 		return s.rejected(ctx, in, err)
 	}
@@ -263,6 +265,7 @@ func (s *Server) observe(ctx context.Context, in *inbox.Inbox, r *http.Request, 
 		Status:        res.status,
 		Size:          res.size,
 		SourceIP:      clientIP(r, s.opts.TrustedProxies),
+		Host:          requestHost(r),
 		Seq:           res.seq,
 		Verified:      res.verified,
 		VerifyFailure: res.verifyFailure,
@@ -389,10 +392,35 @@ func dedupeKey(res verify.Result, body []byte) string {
 	return res.DeliveryID + "#sha256:" + hex.EncodeToString(sum[:])
 }
 
+// requestHost is the host a request was addressed to, for IngestRequest.Host: r.Host,
+// lower-cased, with a trailing dot taken off the name and the port kept only if there
+// is one. It never looks at X-Forwarded-Host or any other header.
+func requestHost(r *http.Request) string {
+	h := strings.ToLower(r.Host)
+	name, port := h, ""
+	if n, p, err := net.SplitHostPort(h); err == nil {
+		name, port = n, p
+		if strings.Contains(n, ":") {
+			name = "[" + n + "]" // an IPv6 literal keeps its brackets
+		}
+	}
+	name = strings.TrimSuffix(name, ".")
+	if port != "" {
+		return name + ":" + port
+	}
+	return name
+}
+
 // rejected is the answer to a delivery that BeforeIngest refused.
 func (s *Server) rejected(ctx context.Context, in *inbox.Inbox, err error) ingestResult {
 	var res ingestResult
 	switch {
+	case errors.Is(err, inbox.ErrNotFound):
+		// Answered as an unknown ingest key is, with nothing of the hook's: no
+		// Retry-After, and nothing logged above debug (an unknown key logs nothing).
+		s.log.LogAttrs(ctx, slog.LevelDebug, "delivery refused by hook as not found",
+			inboxAttrs(in, slog.String("reason", err.Error()))...)
+		return refuse(http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, inbox.ErrRateLimited):
 		res = refuse(http.StatusTooManyRequests, "rate_limited", "too many requests")
 	case errors.Is(err, inbox.ErrQuotaExceeded):

@@ -4,6 +4,24 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+Two additions to the ingest hooks, both optional. Nothing to migrate.
+
+**Added**
+
+- **`inbox.IngestRequest.Host`** is the host a delivery was addressed to, for an embedder that serves several
+  hostnames from one server. It is the request's `Host` header as the server received it, in lower case, without a
+  trailing dot, and with the port only if the header had one. It is never taken from `X-Forwarded-Host` or another
+  forwarding header; behind a proxy that rewrites `Host`, it is what the proxy sent. `inbox.IngestEvent.Host` carries
+  the same value to an `IngestObserver`; `AfterIngest` has no host, because its arguments are fixed.
+- **A `BeforeIngest` error that wraps `inbox.ErrNotFound` is answered `404`**, in the same words and with the same
+  headers as an ingest key that names no inbox, and with no `Retry-After`. The server logs nothing above debug level
+  for it, as for an unknown key. A hook that checks `req.Host` against the hostnames an inbox is served on uses it to
+  answer `404` for an inbox that exists but is not served there. Until now such an error was a `500`. The other
+  refusals (`429`, `402`, `403`, and `Retry-After`) and every other error (`500`) are unchanged. See
+  [Which host a delivery arrived on](docs/extending.md#which-host-a-delivery-arrived-on).
+
 ## 0.7.0 - 2026-10-18
 
 Two additions to the Go API, both optional: an `Authenticator` can choose the challenge on a `401`, and a server can

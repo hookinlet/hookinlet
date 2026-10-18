@@ -22,7 +22,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
 | `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | the server's tests |
-| `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | the server's tests |
+| `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, the host it was addressed to, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | the server's tests |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
 | `StatusReporter` (optional) | The schema version, the size of the data and the free space, for `GET /v1/admin/status` and the console. | the SQLite store | none |
 | `Challenger` (optional, of the error `Authenticate` returns) | `WWWAuthenticate() string`: the `WWW-Authenticate` value for the `401`, in place of `Bearer realm="hookinlet"`. See [Choosing the 401 challenge](#choosing-the-401-challenge). | none: the server sends its own | the server's tests |
@@ -160,8 +160,9 @@ func (limiter) BeforeIngest(ctx context.Context, req *inbox.IngestRequest) error
 ```
 
 `BeforeIngest` gets an `*inbox.IngestRequest`: the inbox, the body size, the source
-address (as recorded, honoring trusted proxies), the method, the path after the
-inbox key, and the request headers (read-only). It runs after the inbox is found
+address (as recorded, honoring trusted proxies), the host the delivery was addressed to
+(see below), the method, the path after the inbox key, and the request headers
+(read-only). It runs after the inbox is found
 and the body is read, before the
 signature is checked, so a refusal is cheap. That has a cost to weigh: it sees
 unverified requests too, so a limit that counts every request lets anyone who knows
@@ -170,8 +171,41 @@ which may not retry, is then refused. Limit by something the stranger cannot
 spend (the source address of unverified traffic, say), or meter what was accepted
 in `AfterIngest`, or accept the trade-off knowingly, as the example does for
 brevity. Return an error wrapping
-`ErrRateLimited` (429), `ErrQuotaExceeded` (402), or `ErrForbidden` (403); any
-other error is a 500. It is called concurrently, from every request.
+`ErrRateLimited` (429), `ErrQuotaExceeded` (402), or `ErrForbidden` (403), or
+`ErrNotFound` to answer 404 (see below); any other error is a 500, so an error from
+a lookup of your own that happens to wrap `ErrNotFound` is a 404 and no longer a 500.
+It is called concurrently, from every request.
+
+### Which host a delivery arrived on
+
+`req.Host` is the `Host` header of the request as the server received it, in lower
+case, with a trailing dot taken off the name, and with the port only if the header
+had one: `hooks.example.com`, `hooks.example.com:8443`, `[::1]:8080`. It is empty if
+the request sent no `Host`. `X-Forwarded-Host`, `Forwarded` and the like are never
+read, because anyone can send them. If a proxy in front of the server rewrites `Host`,
+`req.Host` is what the proxy sent; having the proxy pass the original on is up to
+the embedder. The sender chooses the value, so compare it with the hostnames you
+serve and do not use it unchecked as a key, a label or a file name.
+
+An embedder that serves several hostnames can use it to answer only for the right one.
+An inbox that exists but is not served on the host the delivery arrived on gets
+`ErrNotFound`:
+
+```go
+func (h hosts) BeforeIngest(ctx context.Context, req *inbox.IngestRequest) error {
+	if !h.serves(req.Inbox, req.Host) {
+		return inbox.ErrNotFound // 404, the same as an unknown ingest key
+	}
+	return nil
+}
+```
+
+The server then answers exactly as it does for an ingest key that names no inbox: the
+same status, headers (apart from the request id) and body, with no `Retry-After`, and
+no log line above debug level. The hook runs after the body is read, so the sender
+sees the same answer but not in the same time; and `IngestObserver` is told of it as
+`not_found`, which an unknown key is not. `AfterIngest` has no host, because its
+arguments are fixed; `IngestEvent.Host` carries it to an observer.
 
 `AfterIngest` runs after the message is committed (or recognized as a duplicate,
 with `created == false`, so a meter does not count it twice). It must not block,
@@ -263,9 +297,9 @@ does not change.
 `ev.Outcome` is one of the `inbox.Ingest*` constants: `stored`, `duplicate`,
 `handshake`, `verification_failed`, `rate_limited`, `quota_exceeded` and `forbidden`
 (refused by `BeforeIngest`), `unverified_limit`, `storage_full`, `overloaded`,
-`too_large`, `bad_request`, `not_found` (the inbox is disabled or was deleted while the
-delivery was received) and `error`. More may be added, so treat one you do not know
-as a refusal. The event never carries headers, the body, or the reason text of a
+`too_large`, `bad_request`, `not_found` (the inbox is disabled, was deleted while the
+delivery was received, or `BeforeIngest` answered `ErrNotFound`) and `error`. More may be added, so treat one you do not know
+as a refusal. The event carries the `Host` the delivery was addressed to, as in `IngestRequest`. It never carries headers, the body, or the reason text of a
 signature failure (the server logs that), so whatever you do with it cannot leak them.
 
 When `Outcome` is `verification_failed`, `ev.VerifyFailure` says which kind of
