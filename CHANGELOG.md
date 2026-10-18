@@ -4,7 +4,15 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.5.0 - 2026-10-18
+
+A fix for servers where a tenant has its own administrator: such an admin could reach admin operations that act on
+the whole store, such as another tenant's tokens and a backup of every tenant's data, and now cannot (see
+**Changed**). Also a faster unverified-message cap on servers with many inboxes, and clearer `Store` and `Notifier`
+contracts with new conformance cases. There is nothing to migrate: upgrade by starting the new version on the same
+data directory. If you are coming from 0.1.x, read the 0.2.0 **Upgrading** notes below first, because 0.2.0 needs
+stored verifier secrets set again. If you run a tenant's admin through the admin API, check **Changed** before
+upgrading. If you wrote your own `Store` or `Notifier`, run the conformance suites again: the new cases may fail it.
 
 **Changed**
 
