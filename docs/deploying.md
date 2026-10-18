@@ -386,7 +386,7 @@ if it must never be killed. Lower the budget on a small host: the table shows wh
 becomes 229 MB at 64 MiB). Ordinary traffic is far below this (the same test used about 170 MB most of the
 time), and only a burst of large deliveries, or a sender holding many bodies open, reaches the
 budget. Setting `GOMEMLIMIT` makes the
-runtime collect sooner but only trimmed the peak by a fifth to a quarter in the same test, so
+runtime collect sooner but only trimmed the peak by a fifth to a quarter in the ingest-only test above, so
 the budget is the setting that matters. A lower budget means more `503`s to a burst of large
 deliveries, which a sender retries. Put a rate limit in front, or in a hook (see [extending](extending.md)). Disk is
 what grows: size the volume for the messages you keep, and set retention on
