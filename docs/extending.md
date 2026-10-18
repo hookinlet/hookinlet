@@ -25,6 +25,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | the server's tests |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
 | `StatusReporter` (optional) | The schema version, the size of the data and the free space, for `GET /v1/admin/status` and the console. | the SQLite store | none |
+| `Challenger` (optional, of the error `Authenticate` returns) | `WWWAuthenticate() string`: the `WWW-Authenticate` value for the `401`, in place of `Bearer realm="hookinlet"`. See [Choosing the 401 challenge](#choosing-the-401-challenge). | none: the server sends its own | the server's tests |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. `InboxIDs(ctx)` may look the list up, and may fail. | the agent principal | checked by `AuthenticatorSuite` |
 | `TenantPrincipal` (optional) | A `Principal` that belongs to one tenant. After authenticating, the server scopes the request's context to it (`inbox.WithTenant`), so slugs are looked up in that tenant and nothing outside it is reachable. See [Tenants](#tenants). | none: the shipped principals are not in a tenant | `StoreSuite` (the `Tenants` case) and the server's tests |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
@@ -558,6 +559,95 @@ whether another exists (the server answers 404 for both).
 ```go
 inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture { … })
 ```
+
+### Choosing the 401 challenge
+
+A `401` carries `WWW-Authenticate: Bearer realm="hookinlet"`. If the error your
+`Authenticate` returns (or any error it wraps, found with `errors.As`) also has a
+`WWWAuthenticate() string` method (`inbox.Challenger`), the server sends that string
+instead. It applies to every `401` the server writes: the read API, the admin API,
+a stream, the MCP endpoint, and the `405` that checks the credential first.
+
+A self-hoster who puts an OAuth server in front can use it to point clients to the
+discovery document:
+
+```go
+type needsLogin struct{}
+
+func (needsLogin) Error() string { return "unauthenticated" }
+func (needsLogin) Unwrap() error { return inbox.ErrUnauthenticated }
+func (needsLogin) WWWAuthenticate() string {
+	return `Bearer resource_metadata="https://hooks.example.com/.well-known/oauth-protected-resource"`
+}
+```
+
+(Serve that document with [`Options.Fallback`](#serving-other-paths-next-to-the-api).)
+
+The server sends the string only if it is one line of printable ASCII (no control
+characters, tab included), not empty, at most 4096 bytes, and starts with an HTTP
+authentication scheme: a token as RFC 9110 defines it, such as `Bearer`, followed by
+nothing or by a space and the parameters. It does not parse the parameters. If the
+string fails any of that, the server sends `Bearer realm="hookinlet"` and logs a
+warning, once. The same string goes to every caller who is refused, so do not build
+it from the request's credentials. An error that does not wrap `ErrUnauthenticated`
+is still a server error, whatever else it has.
+
+## Serving other paths next to the API
+
+`Options.Fallback` is an `http.Handler` that answers requests for paths the server
+has no route for, in place of the fixed `404`. It is for a self-hosted server that
+also serves a file under `/.well-known/` or a small static site at the same
+address:
+
+```go
+mux := http.NewServeMux()
+mux.Handle("/.well-known/oauth-protected-resource", metadataDocument)
+mux.Handle("/", http.FileServer(http.Dir("./public")))
+
+srv, err := server.New(server.Options{ /* … */ Fallback: mux })
+```
+
+- **What reaches it.** Any request whose first path segment is not one the server
+  uses. Those segments are `in`, `v1`, `mcp`, `healthz`, `readyz`, `metrics` and
+  `admin`, and a request under one of them gets the server's own answer whether or
+  not the server serves that path in this configuration. With `DisableAdmin` set,
+  `/v1/admin/...` and `/admin` still answer the same `404` as before, and a server
+  with no `Authenticator` still answers `404` for the read API and MCP. The root
+  path `/` and paths such as `/robots.txt` or `/.well-known/...` go to the
+  `Fallback`.
+- **Without it** (the default) every unrouted path answers
+  `{"error":{"code":"not_found","message":"not found"}}` with status `404`, as
+  before.
+- **Which listener.** With `AdminAddr` set, the `Fallback` serves on the public
+  listener only; the admin listener keeps its `404`.
+- **No authentication.** The server does not authenticate requests to the
+  `Fallback`, so it must serve nothing private. If it needs a credential, check it
+  yourself.
+- **Middleware and limits.** The `Fallback` runs inside the server's request ID,
+  access log and panic recovery (a panic becomes a JSON `500`). The server-wide
+  limits apply: request headers are limited by `MaxHeaderBytes` and must arrive
+  within 10 seconds; a request with a body must deliver it within `ReadBodyTimeout`
+  (60 seconds); and the response must be taken within `ResponseTimeout` (2 minutes
+  from when the request arrived), after which the write fails. A handler that
+  streams for longer can move the write deadline with
+  `http.NewResponseController(w).SetWriteDeadline`. The body is also capped at 1 MiB;
+  `Options.FallbackMaxBodyBytes` changes that (a negative number removes the cap),
+  and a read past the cap fails with `*http.MaxBytesError`. Responses carry
+  `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`; the handler can
+  set its own `Cache-Control` for files that may be cached.
+- **Shutdown.** `Run` and `Serve` wait for a `Fallback` request that is in progress,
+  up to `ShutdownTimeout` (10 seconds by default), then close its connection; with
+  `srv.Handler()` mounted in your own server, `srv.Shutdown(ctx)` waits up to the
+  deadline of `ctx`. The server tells its own streams and MCP waits to finish; it
+  cannot tell a `Fallback` handler to, which sees its request's context cancelled
+  only when the client goes away or the connection is closed. During the drain
+  delay before shutdown, `/readyz` reports not ready; the `Fallback` keeps
+  answering.
+- **With `Handler()`.** The `Fallback` is part of the returned handler, so it works
+  the same when you mount `srv.Handler()` yourself; the deadlines then depend on the
+  server you mount it in.
+- **Metrics.** The `Fallback`'s responses are counted under the route `/`, which
+  is where unrouted requests were already counted.
 
 ## Adding a verifier
 

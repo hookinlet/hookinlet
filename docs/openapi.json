@@ -1423,10 +1423,11 @@
             "description": "A missing or wrong credential.",
             "headers": {
               "WWW-Authenticate": {
+                "description": "The challenge. It is `Bearer realm=\"hookinlet\"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme).",
                 "required": true,
                 "schema": {
                   "type": "string",
-                  "const": "Bearer realm=\"hookinlet\""
+                  "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+( [ -~]*)?$"
                 }
               },
               "X-Request-Id": {
@@ -1794,10 +1795,11 @@
             "description": "A missing or wrong credential.",
             "headers": {
               "WWW-Authenticate": {
+                "description": "The challenge. It is `Bearer realm=\"hookinlet\"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme).",
                 "required": true,
                 "schema": {
                   "type": "string",
-                  "const": "Bearer realm=\"hookinlet\""
+                  "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+( [ -~]*)?$"
                 }
               },
               "X-Request-Id": {
@@ -2189,10 +2191,11 @@
             "description": "A missing or wrong credential.",
             "headers": {
               "WWW-Authenticate": {
+                "description": "The challenge. It is `Bearer realm=\"hookinlet\"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme).",
                 "required": true,
                 "schema": {
                   "type": "string",
-                  "const": "Bearer realm=\"hookinlet\""
+                  "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+( [ -~]*)?$"
                 }
               },
               "X-Request-Id": {
@@ -2546,10 +2549,11 @@
             "description": "A missing or wrong credential.",
             "headers": {
               "WWW-Authenticate": {
+                "description": "The challenge. It is `Bearer realm=\"hookinlet\"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme).",
                 "required": true,
                 "schema": {
                   "type": "string",
-                  "const": "Bearer realm=\"hookinlet\""
+                  "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+( [ -~]*)?$"
                 }
               },
               "X-Request-Id": {
@@ -5678,10 +5682,11 @@
         },
         "headers": {
           "WWW-Authenticate": {
+            "description": "The challenge. It is `Bearer realm=\"hookinlet\"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme).",
             "required": true,
             "schema": {
               "type": "string",
-              "const": "Bearer realm=\"hookinlet\""
+              "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+( [ -~]*)?$"
             }
           },
           "X-Request-Id": {

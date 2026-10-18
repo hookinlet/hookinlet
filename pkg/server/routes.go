@@ -258,7 +258,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, need need,
 	principal, err := s.opts.Authenticator.Authenticate(r)
 	switch {
 	case errors.Is(err, inbox.ErrUnauthenticated):
-		w.Header().Set("WWW-Authenticate", `Bearer realm="hookinlet"`)
+		w.Header().Set("WWW-Authenticate", s.challengeFor(err))
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 		return nil, false
 	case err != nil:

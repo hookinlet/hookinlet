@@ -4,6 +4,29 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+Two additions to the Go API, both optional: an `Authenticator` can choose the challenge on a `401`, and a server can
+answer paths it has no route for. Nothing to migrate.
+
+**Added**
+
+- **`inbox.Challenger`** lets an `Authenticator` choose the `WWW-Authenticate` value of a `401`. An error that wraps
+  `inbox.ErrUnauthenticated` may have a `WWWAuthenticate() string` method; the server uses its result on every `401`
+  it writes (the read API, the admin API, streams, MCP) in place of `Bearer realm="hookinlet"`. A self-hoster with an
+  OAuth server in front can send `Bearer resource_metadata="https://..."` to point clients to its discovery document.
+  The value is used only if it is one line of printable ASCII, at most 4096 bytes, and starts with an authentication
+  scheme (an RFC 9110 token such as `Bearer`); otherwise the server sends its own challenge and logs a warning once.
+  Without the method nothing changes. `docs/openapi.json` now describes the header as a challenge matching that
+  pattern instead of the fixed string. See [Choosing the 401 challenge](docs/extending.md#choosing-the-401-challenge).
+- **`server.Options.Fallback`** is an `http.Handler` that answers paths the server has no route for, in place of the
+  `404`, for serving a `/.well-known/` document or a static file next to the API. It never sees a path under a
+  segment the server uses (`in`, `v1`, `mcp`, `healthz`, `readyz`, `metrics`, `admin`), including the admin API when
+  `DisableAdmin` is set, which keep their `404`. It runs inside the server's middleware, request deadlines and
+  shutdown, and its request body is capped at 1 MiB (`Options.FallbackMaxBodyBytes`; zero is the default, a negative
+  number removes the cap). It is not used on the `AdminAddr` listener. With no `Fallback` the `404` is unchanged. See
+  [Serving other paths next to the API](docs/extending.md#serving-other-paths-next-to-the-api).
+
 ## 0.6.0 - 2026-10-18
 
 Two additions, both optional and found by type assertion: an ingest observer can tell why a signature failed, and a

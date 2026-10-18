@@ -901,7 +901,8 @@ export interface components {
         /** @description A missing or wrong credential. */
         Unauthenticated: {
             headers: {
-                "WWW-Authenticate": "Bearer realm=\"hookinlet\"";
+                /** @description The challenge. It is `Bearer realm="hookinlet"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme). */
+                "WWW-Authenticate": string;
                 /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                 "X-Request-Id": string;
                 [name: string]: unknown;
@@ -2064,7 +2065,8 @@ export interface operations {
             /** @description A missing or wrong credential. */
             401: {
                 headers: {
-                    "WWW-Authenticate": "Bearer realm=\"hookinlet\"";
+                    /** @description The challenge. It is `Bearer realm="hookinlet"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme). */
+                    "WWW-Authenticate": string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -2250,7 +2252,8 @@ export interface operations {
             /** @description A missing or wrong credential. */
             401: {
                 headers: {
-                    "WWW-Authenticate": "Bearer realm=\"hookinlet\"";
+                    /** @description The challenge. It is `Bearer realm="hookinlet"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme). */
+                    "WWW-Authenticate": string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -2413,7 +2416,8 @@ export interface operations {
             /** @description A missing or wrong credential. */
             401: {
                 headers: {
-                    "WWW-Authenticate": "Bearer realm=\"hookinlet\"";
+                    /** @description The challenge. It is `Bearer realm="hookinlet"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme). */
+                    "WWW-Authenticate": string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;
@@ -2586,7 +2590,8 @@ export interface operations {
             /** @description A missing or wrong credential. */
             401: {
                 headers: {
-                    "WWW-Authenticate": "Bearer realm=\"hookinlet\"";
+                    /** @description The challenge. It is `Bearer realm="hookinlet"` unless the Authenticator the server was built with supplies its own (a single line that starts with an authentication scheme). */
+                    "WWW-Authenticate": string;
                     /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
                     "X-Request-Id": string;
                     [name: string]: unknown;

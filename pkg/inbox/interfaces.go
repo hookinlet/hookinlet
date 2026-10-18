@@ -345,6 +345,27 @@ type Authenticator interface {
 	Authenticate(r *http.Request) (Principal, error)
 }
 
+// Challenger is an optional capability of the error an Authenticator returns for
+// a request it refuses. The server looks for it in the error chain (errors.As) of
+// an error that wraps ErrUnauthenticated, and uses WWWAuthenticate as the value of
+// the 401 response's WWW-Authenticate header in place of its own
+// (`Bearer realm="hookinlet"`). It lets an Authenticator tell clients how to
+// authenticate: for one that sits behind an OAuth server, a challenge such as
+// `Bearer resource_metadata="https://example.com/.well-known/oauth-protected-resource"`
+// points them to the server's discovery document.
+//
+// The value must be one line of printable ASCII (no control characters, tab
+// included), at most 4096 bytes, and start with an HTTP authentication scheme (an
+// RFC 9110 token such as Bearer), followed by nothing or by a space and the
+// scheme's parameters. The server does not parse the parameters. A value that
+// does not meet that, or an empty one, is ignored and the server's own challenge
+// is sent, so a mistake here cannot produce a malformed header. The same text is
+// sent to every caller who is refused, so it must not depend on the request's
+// credentials.
+type Challenger interface {
+	WWWAuthenticate() string
+}
+
 // Principal is an authenticated caller and what it may do.
 type Principal interface {
 	// CanReadInbox reports whether the caller may read in's messages. Callers

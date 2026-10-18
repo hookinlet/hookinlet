@@ -58,6 +58,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 			"Subscribe(context.Context, inbox.ID) (<-chan struct {}, func())",
 		},
 		// The optional interfaces are part of the surface too.
+		"Challenger":        {"WWWAuthenticate() string"},
 		"Admitter":          {"Admit(context.Context, inbox.Principal, *inbox.Inbox, inbox.AccessKind) (func(), error)"},
 		"Backupper":         {"Backup(context.Context) (io.ReadCloser, int64, error)"},
 		"RetryAfterer":      {"RetryAfter() time.Duration"},
@@ -83,6 +84,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"Authenticator":     reflect.TypeFor[inbox.Authenticator](),
 		"Principal":         reflect.TypeFor[inbox.Principal](),
 		"Notifier":          reflect.TypeFor[inbox.Notifier](),
+		"Challenger":        reflect.TypeFor[inbox.Challenger](),
 		"Admitter":          reflect.TypeFor[inbox.Admitter](),
 		"TenantPrincipal":   reflect.TypeFor[inbox.TenantPrincipal](),
 		"Backupper":         reflect.TypeFor[inbox.Backupper](),

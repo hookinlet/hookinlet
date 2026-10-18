@@ -378,7 +378,7 @@ but do not treat it as an identity.
 | Status | Code | When |
 |---|---|---|
 | `400` | `invalid_parameter` | A query parameter is unknown, repeated, or malformed. The message names it. |
-| `401` | `unauthenticated` | Missing or invalid credentials. The response has `WWW-Authenticate: Bearer`. |
+| `401` | `unauthenticated` | Missing or invalid credentials. The response has `WWW-Authenticate: Bearer realm="hookinlet"`, or the challenge the server's `Authenticator` chooses (see [extending](extending.md#choosing-the-401-challenge)). |
 | `402` | `quota_exceeded` | Refused by an embedder's [`Admitter`](extending.md#admitting-reads-streams-and-waits) (the open-source build never returns this). `Retry-After` is set when the embedder says when to retry. |
 | `403` | `forbidden` | Refused by an embedder's `Admitter` (the open-source build never returns this). `Retry-After` as for `402`. |
 | `404` | `not_found` | No such inbox, message, or route, **or** the token may not read that inbox. |
