@@ -4,6 +4,14 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+**Documentation**
+
+- The deploying guide's memory sizing now covers more than the ingest budget. Its table is the deliveries alone; a
+  35-minute test at the default budget that also ran 250 streams, reads, backups and restarts peaked at 650 MB, so it
+  says to give the process about 1 GB at the default if it must never be killed.
+
 ## 0.9.0 - 2026-10-18
 
 A lower default ingest memory budget, with the memory it implies written down, and two log lines made quieter.

@@ -376,11 +376,16 @@ resident memory at the busiest was:
 | 128 MiB (the default) | 380 MB |
 | 256 MiB | 750 MB |
 
-So plan for about three times the budget plus 50 MB, and lower the budget on a small
-host: for a 512 MB container, 64 MiB leaves room for streams and reads on top. Ordinary
-traffic is far below this (a 35-minute test with 250 open streams and about 300 deliveries
-a second used about 160 MB most of the time), and only a burst of large deliveries, or a
-sender holding many bodies open, reaches the budget. Setting `GOMEMLIMIT` makes the
+That is the deliveries alone. So plan for about three times the budget plus 50 MB for them,
+and then leave room for the rest of what the server is doing: a page of messages is built in
+memory (16 MiB at most, 16 reads at a time), and each open stream costs a little. A 35-minute
+test at the default 128 MiB that ran all of it together (250 open streams, about 300
+deliveries a second, backups, restarts, a burst of large deliveries that filled the budget,
+and a burst of large reads) peaked at 650 MB, so at the default, give the process about 1 GB
+if it must never be killed. Lower the budget on a small host: with 64 MiB the same figures are
+roughly half. Ordinary traffic is far below this (the same test used about 170 MB most of the
+time), and only a burst of large deliveries, or a sender holding many bodies open, reaches the
+budget. Setting `GOMEMLIMIT` makes the
 runtime collect sooner but only trimmed the peak by a fifth to a quarter in the same test, so
 the budget is the setting that matters. A lower budget means more `503`s to a burst of large
 deliveries, which a sender retries. Put a rate limit in front, or in a hook (see [extending](extending.md)). Disk is
