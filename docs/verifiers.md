@@ -132,6 +132,11 @@ Examples:
  "payload_template": "v0:{timestamp}:{body}", "tolerance_seconds": 120}
 ```
 
+The inbox's `GET /v1/inboxes/{slug}` and MCP `list_inboxes` name the stored header
+that carries the signature as `signature_headers` (names only, never values), for
+example `["X-Signature"]`, so a client that forwards stored headers can leave it
+out. The presets whose header is fixed by the sender do not list one.
+
 SHA-1 is offered only because some senders offer nothing else. HMAC-SHA-1 is
 still a sound message authentication code, but prefer SHA-256 when you can
 choose.
@@ -317,6 +322,11 @@ srv, _ := server.New(server.Options{ /* ... */ Verifiers: reg })
 A `Verifier` returns an error satisfying `verify.IsFailure` when a delivery does
 not verify, and an error wrapping `verify.ErrConfig` when the verifier cannot
 run at all. If its credential travels in a header, it should also implement
-`verify.HeaderRedactor` so that header is never stored. Compare secrets and
+`verify.HeaderRedactor` so that header is never stored. Build failures with
+`verify.Failure{Kind: ...}` using `verify.FailureMissing`, `FailureMalformed`,
+`FailureMismatch` or `FailureStale`, so that an `inbox.IngestObserver` can tell
+them apart; an empty `Kind` is allowed. A verifier whose signature header is set
+per inbox can implement `verify.SignatureHeaderer` to have the header's name
+shown in the inbox's metadata. Compare secrets and
 signatures with `hmac.Equal` or `crypto/subtle`, never with `==` or
 `bytes.Equal`.

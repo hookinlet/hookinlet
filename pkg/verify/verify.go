@@ -89,6 +89,19 @@ type HeaderRedactor interface {
 	SecretHeaders() []string
 }
 
+// SignatureHeaderer is implemented by verifiers that read the signature from a
+// request header whose name is part of the inbox's configuration, so that a
+// reader can tell which stored header carries it. It lists header names only,
+// never values. Presets whose header is fixed by the sender (stripe, github,
+// slack, standardwebhooks) do not implement it; the generic hmac verifier does.
+// A verifier whose credential must not be stored implements HeaderRedactor
+// instead.
+type SignatureHeaderer interface {
+	// SignatureHeaders names the request headers that carry the signature, in
+	// canonical form.
+	SignatureHeaders() []string
+}
+
 // Factory builds a Verifier from an inbox's non-secret verifier_config, which
 // is a JSON object (possibly "{}").
 type Factory func(config json.RawMessage) (Verifier, error)
@@ -104,14 +117,48 @@ var (
 	ErrUnknown = fmt.Errorf("unknown verifier: %w", ErrConfig)
 )
 
+// FailureKind says in a few fixed words how a delivery failed to verify. It
+// names no header and no sender, so it can be counted or forwarded freely.
+type FailureKind string
+
+const (
+	// FailureMissing: a header the verifier needs was not sent.
+	FailureMissing FailureKind = "missing"
+	// FailureMalformed: a header was sent but could not be read as what the
+	// verifier expects (wrong prefix or encoding, a bad timestamp, or the
+	// header repeated).
+	FailureMalformed FailureKind = "malformed"
+	// FailureMismatch: the signature or token was well formed and did not match.
+	FailureMismatch FailureKind = "mismatch"
+	// FailureStale: the signature matched but the signed timestamp is outside
+	// the tolerance window. Verifiers check the signature first, so a forged
+	// delivery never reports this.
+	FailureStale FailureKind = "stale"
+)
+
 // Failure is the error for a delivery that did not verify. Reason is short,
 // fixed text that is safe to return to the sender and to store; it never
-// contains secrets, signatures, or request data.
-type Failure struct{ Reason string }
+// contains secrets, signatures, or request data. Kind is one of the
+// FailureKind values, or empty when the verifier does not classify its
+// failures (a verifier written by an embedder may leave it empty).
+type Failure struct {
+	Reason string
+	Kind   FailureKind
+}
 
 func (f *Failure) Error() string { return "verification failed: " + f.Reason }
 
-func fail(reason string) error { return &Failure{Reason: reason} }
+func fail(kind FailureKind, reason string) error { return &Failure{Reason: reason, Kind: kind} }
+
+// FailureKindOf returns the kind of a verification failure, or "" if err is not
+// one or its verifier did not classify it.
+func FailureKindOf(err error) FailureKind {
+	var f *Failure
+	if errors.As(err, &f) {
+		return f.Kind
+	}
+	return ""
+}
 
 // IsFailure reports whether err is a verification failure and returns its
 // reason.

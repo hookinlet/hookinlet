@@ -53,7 +53,7 @@ func (s standardWebhooks) Verify(r *http.Request, body, secret []byte, now time.
 	// The signed text is "<id>.<timestamp>.<body>"; a "." inside the id would let
 	// the same bytes be read as a different split.
 	if id == "" || len(id) > maxIDLen || strings.Contains(id, ".") {
-		return Result{}, fail("malformed webhook-id header")
+		return Result{}, fail(FailureMalformed, "malformed webhook-id header")
 	}
 	tsStr, err := singleHeader(r, "webhook-timestamp")
 	if err != nil {
@@ -61,7 +61,7 @@ func (s standardWebhooks) Verify(r *http.Request, body, secret []byte, now time.
 	}
 	ts, ok := parseUnixSeconds(tsStr)
 	if !ok {
-		return Result{}, fail("malformed timestamp header")
+		return Result{}, fail(FailureMalformed, "malformed timestamp header")
 	}
 	header, err := singleHeader(r, "webhook-signature")
 	if err != nil {
@@ -69,15 +69,15 @@ func (s standardWebhooks) Verify(r *http.Request, body, secret []byte, now time.
 	}
 	sigs := parseStandardWebhooksSignatures(header)
 	if len(sigs) == 0 {
-		return Result{}, fail("malformed signature header")
+		return Result{}, fail(FailureMalformed, "malformed signature header")
 	}
 
 	want := mac(sha256.New, key, []byte(id), []byte("."), []byte(tsStr), []byte("."), body)
 	if !anyEqual(want, sigs) {
-		return Result{}, fail("signature mismatch")
+		return Result{}, fail(FailureMismatch, "signature mismatch")
 	}
 	if !withinTolerance(ts, now, s.tolerance) {
-		return Result{}, fail("timestamp outside tolerance")
+		return Result{}, fail(FailureStale, "timestamp outside tolerance")
 	}
 
 	f := topLevelStrings(body, "type")

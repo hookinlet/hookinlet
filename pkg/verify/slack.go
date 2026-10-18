@@ -48,7 +48,7 @@ func (s slack) Verify(r *http.Request, body, secret []byte, now time.Time) (Resu
 	}
 	ts, ok := parseUnixSeconds(tsStr)
 	if !ok {
-		return Result{}, fail("malformed timestamp header")
+		return Result{}, fail(FailureMalformed, "malformed timestamp header")
 	}
 	header, err := singleHeader(r, "X-Slack-Signature")
 	if err != nil {
@@ -56,19 +56,19 @@ func (s slack) Verify(r *http.Request, body, secret []byte, now time.Time) (Resu
 	}
 	hexSig, ok := strings.CutPrefix(header, "v0=")
 	if !ok {
-		return Result{}, fail("malformed signature header")
+		return Result{}, fail(FailureMalformed, "malformed signature header")
 	}
 	sig, err := hex.DecodeString(hexSig)
 	if err != nil || len(sig) != sha256.Size {
-		return Result{}, fail("malformed signature header")
+		return Result{}, fail(FailureMalformed, "malformed signature header")
 	}
 
 	want := mac(sha256.New, secret, []byte("v0:"), []byte(tsStr), []byte(":"), body)
 	if !anyEqual(want, [][]byte{sig}) {
-		return Result{}, fail("signature mismatch")
+		return Result{}, fail(FailureMismatch, "signature mismatch")
 	}
 	if !withinTolerance(ts, now, s.tolerance) {
-		return Result{}, fail("timestamp outside tolerance")
+		return Result{}, fail(FailureStale, "timestamp outside tolerance")
 	}
 
 	res := Result{}

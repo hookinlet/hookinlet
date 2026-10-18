@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/hookinlet/hookinlet/internal/jsonptr"
@@ -49,7 +50,9 @@ type ingestResult struct {
 	challenge []byte // set for a handshake answered instead of stored
 	duplicate bool   // a repeat of a delivery already stored
 	verified  bool   // the stored message (or the one it repeats) is verified
-	size      int64  // body bytes read
+	// verifyFailure is how verification failed, for a delivery refused with 401.
+	verifyFailure inbox.VerifyFailure
+	size          int64 // body bytes read
 	// retryAfter is the Retry-After for a refusal by BeforeIngest that said when to
 	// retry (see retryAfterOf), or "".
 	retryAfter string
@@ -181,7 +184,9 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 			// whoever happens to hold the ingest key; it goes to the log.
 			s.log.LogAttrs(ctx, slog.LevelInfo, "delivery rejected",
 				inboxAttrs(in, slog.String("reason", reason), slog.Int("size", len(body)))...)
-			return refuse(http.StatusUnauthorized, "verification_failed", "webhook verification failed")
+			res := refuse(http.StatusUnauthorized, "verification_failed", "webhook verification failed")
+			res.verifyFailure = verifyFailureOf(verr)
+			return res
 		}
 	}
 
@@ -253,14 +258,45 @@ func (s *Server) observe(ctx context.Context, in *inbox.Inbox, r *http.Request, 
 		}
 	}()
 	s.observer.ObserveIngest(ctx, &inbox.IngestEvent{
-		Inbox:    in,
-		Outcome:  ingestOutcome(res),
-		Status:   res.status,
-		Size:     res.size,
-		SourceIP: clientIP(r, s.opts.TrustedProxies),
-		Seq:      res.seq,
-		Verified: res.verified,
+		Inbox:         in,
+		Outcome:       ingestOutcome(res),
+		Status:        res.status,
+		Size:          res.size,
+		SourceIP:      clientIP(r, s.opts.TrustedProxies),
+		Seq:           res.seq,
+		Verified:      res.verified,
+		VerifyFailure: res.verifyFailure,
 	})
+}
+
+// verifyFailureOf maps a verifier's failure kind onto the closed set an observer
+// sees. A kind a custom verifier made up is dropped, not passed on.
+func verifyFailureOf(err error) inbox.VerifyFailure {
+	switch verify.FailureKindOf(err) {
+	case verify.FailureMissing:
+		return inbox.VerifyFailureMissing
+	case verify.FailureMalformed:
+		return inbox.VerifyFailureMalformed
+	case verify.FailureMismatch:
+		return inbox.VerifyFailureMismatch
+	case verify.FailureStale:
+		return inbox.VerifyFailureStale
+	}
+	return ""
+}
+
+// signatureHeaders names the stored request headers that carry in's signature, for
+// verifiers that say (verify.SignatureHeaderer), or nil. Names only.
+func (s *Server) signatureHeaders(in *inbox.Inbox) []string {
+	v, err := s.opts.Verifiers.New(in.Verifier, in.VerifierConfig)
+	if err != nil {
+		return nil
+	}
+	sh, ok := v.(verify.SignatureHeaderer)
+	if !ok {
+		return nil
+	}
+	return slices.Clone(sh.SignatureHeaders())
 }
 
 // ingestOutcome names how a delivery ended for an IngestObserver.

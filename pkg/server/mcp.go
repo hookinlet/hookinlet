@@ -264,6 +264,9 @@ type inboxSummary struct {
 	Verifier  string `json:"verifier"`
 	LatestSeq int64  `json:"latest_seq"`
 	Epoch     string `json:"epoch"`
+	// SignatureHeaders names the stored headers that carry the signature, when the
+	// inbox's verifier says. Names only.
+	SignatureHeaders []string `json:"signature_headers,omitempty"`
 }
 
 type listInboxesOutput struct {
@@ -376,7 +379,10 @@ func (t *mcpTools) listInboxes(ctx context.Context, _ *mcp.CallToolRequest, args
 		if err != nil {
 			return err
 		}
-		out.Inboxes = append(out.Inboxes, inboxSummary{Slug: in.Slug, Name: in.Name, Verifier: in.Verifier, LatestSeq: latest, Epoch: in.Epoch})
+		out.Inboxes = append(out.Inboxes, inboxSummary{
+			Slug: in.Slug, Name: in.Name, Verifier: in.Verifier, LatestSeq: latest, Epoch: in.Epoch,
+			SignatureHeaders: t.s.signatureHeaders(in),
+		})
 		return nil
 	}
 	// truncate ends a full page that has more after it.

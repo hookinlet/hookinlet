@@ -154,6 +154,9 @@ type InboxInfo struct {
 	OldestSeq    int64  `json:"oldest_seq"`
 	LatestSeq    int64  `json:"latest_seq"`
 	Epoch        string `json:"epoch"`
+	// SignatureHeaders names the stored headers that carry the signature, when the
+	// inbox's verifier says. FetchInfo does not fill it; the server does.
+	SignatureHeaders []string `json:"signature_headers,omitempty"`
 }
 
 // FetchInfo returns the metadata of an inbox.

@@ -519,13 +519,35 @@ const (
 	IngestError IngestOutcome = "error"
 )
 
+// VerifyFailure says, in a few fixed words, how a signature failed to verify, for
+// IngestEvent. It names no header and no sender. The values are fixed; a verifier
+// that does not classify its failures leaves it empty.
+type VerifyFailure string
+
+const (
+	// VerifyFailureMissing: a header the verifier needs was not sent.
+	VerifyFailureMissing VerifyFailure = "missing"
+	// VerifyFailureMalformed: a header was sent but could not be read as what the
+	// verifier expects (wrong prefix or encoding, a bad timestamp, or the header
+	// repeated).
+	VerifyFailureMalformed VerifyFailure = "malformed"
+	// VerifyFailureMismatch: the signature or token was well formed and did not
+	// match.
+	VerifyFailureMismatch VerifyFailure = "mismatch"
+	// VerifyFailureStale: the signature matched but its timestamp was outside the
+	// tolerance window. A forged delivery never has this kind: the signature is
+	// checked first.
+	VerifyFailureStale VerifyFailure = "stale"
+)
+
 // IngestEvent is how one delivery to a known inbox ended, for IngestObserver. It
 // grows by adding fields, which is why it is a struct. An observer must not modify
 // it or the Inbox it points to.
 //
 // It carries nothing the sender sent beyond its size and address: no headers, no
-// body, and not the reason a signature failed (the server logs that itself), so
-// that what an embedder logs or forwards from it cannot leak them.
+// body, and not the reason text of a signature failure (the server logs that
+// itself), only its VerifyFailure kind, so that what an embedder logs or forwards
+// from it cannot leak them.
 type IngestEvent struct {
 	// Inbox is the inbox the delivery was for. It is never nil; its Slug, Tenant and
 	// UID say which inbox it is.
@@ -547,6 +569,10 @@ type IngestEvent struct {
 	// Verified is whether the stored message is verified, for IngestStored and
 	// IngestDuplicate (a duplicate is always verified); false otherwise.
 	Verified bool
+	// VerifyFailure says how verification failed, set only when Outcome is
+	// IngestVerificationFailed. It is empty when the verifier does not say (a
+	// custom verifier may not).
+	VerifyFailure VerifyFailure
 }
 
 // IngestObserver is an optional capability of Hooks, found by type assertion: a
