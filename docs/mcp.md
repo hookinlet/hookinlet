@@ -51,7 +51,7 @@ Authorization: Bearer <token>
   reveals what else is on the server.
 - The **admin token** reads every inbox.
 
-A missing or wrong token gets `401` with a `WWW-Authenticate: Bearer` header,
+A missing or wrong token gets `401` with a `WWW-Authenticate` header (`Bearer realm="hookinlet"`, unless the server's `Authenticator` chooses another challenge),
 before anything else is looked at.
 
 ## Tools

@@ -216,7 +216,7 @@ func TestOpenAPIIsInternallyConsistent(t *testing.T) {
 
 // The document is what creates the routes: every operation in it is registered
 // under the pattern the document gives, and no route is registered by hand
-// except the one that answers 404.
+// except the one that answers 404 (or hands the request to Options.Fallback).
 func TestEveryOperationIsRegisteredAndNothingIsRegisteredByHand(t *testing.T) {
 	e := newAgentEnv(t)
 	sp := loadSpec(t)
@@ -249,7 +249,7 @@ func TestEveryOperationIsRegisteredAndNothingIsRegisteredByHand(t *testing.T) {
 			t.Errorf("%s registers %d routes by hand, want %d", f, n, allowed[f])
 		}
 	}
-	if b, _ := os.ReadFile("server.go"); !strings.Contains(string(b), `mux.HandleFunc("/", notFound)`) {
+	if b, _ := os.ReadFile("server.go"); !strings.Contains(string(b), `mux.HandleFunc("/", s.unrouted(surface))`) {
 		t.Error("server.go no longer registers the catch-all by that name")
 	}
 }

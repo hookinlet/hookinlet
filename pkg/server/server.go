@@ -28,6 +28,7 @@ import (
 	"github.com/hookinlet/hookinlet/docs"
 	"github.com/hookinlet/hookinlet/internal/admin"
 	"github.com/hookinlet/hookinlet/internal/specvalidate"
+	"github.com/hookinlet/hookinlet/internal/ui"
 	"github.com/hookinlet/hookinlet/internal/wire"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
@@ -207,6 +208,23 @@ type Options struct {
 	// is large enough that even a sample is unwelcome. cmd/hookinlet's start-up check,
 	// Server.CheckSecrets, is separate and always opens everything.
 	SkipReadinessSecretCheck bool
+	// Fallback, if set, answers requests for paths the server has no route for, in place
+	// of the fixed 404. It is how a self-hosted server also serves a document under
+	// /.well-known/ or a static file at its address. The server's paths are never
+	// handed to it, even ones the server does not serve in this configuration (the
+	// admin API with DisableAdmin, the read API with no Authenticator): a path whose first
+	// segment is one the server uses (in, v1, mcp, healthz, readyz, metrics, admin) keeps
+	// the 404 it always had. The Fallback runs inside the server's middleware (request
+	// ID, access log, panic recovery, header limits and the read and write deadlines of
+	// ReadBodyTimeout and ResponseTimeout) and is waited for by Shutdown like any
+	// request; it does no authentication of its own, so it must not serve anything
+	// private. It is used only on the listener that serves the public surface, not on the
+	// AdminAddr listener. See docs/extending.md.
+	Fallback http.Handler
+	// FallbackMaxBodyBytes limits the request body a Fallback may read: past it a read
+	// fails with *http.MaxBytesError. Zero means 1 MiB and a negative number means no
+	// limit. It applies only to requests the Fallback answers.
+	FallbackMaxBodyBytes int64
 	// Version is reported to MCP clients as the server's version. Defaults to "dev".
 	Version string
 }
@@ -229,6 +247,7 @@ type Server struct {
 	reads        chan struct{} // a slot per read request being served
 
 	metrics      metrics
+	badChallenge sync.Once   // the warning about an invalid inbox.Challenger value
 	draining     atomic.Bool // set when the server is told to stop: /readyz fails
 	ingestBudget byteBudget  // body bytes held by deliveries being received
 
@@ -419,7 +438,7 @@ func (s *Server) build(surface surface) http.Handler {
 	}
 	s.registerRoutes(mux, surface)
 	s.mountConsole(mux, surface)
-	mux.HandleFunc("/", notFound)
+	mux.HandleFunc("/", s.unrouted(surface))
 	// Outermost first. accessLog must see the same *http.Request the mux
 	// annotates with r.Pattern, so nothing between it and the mux may clone
 	// the request.
@@ -658,6 +677,39 @@ func (s *Server) closeStreams() { s.closeCancel() }
 
 func notFound(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusNotFound, "not_found", "not found")
+}
+
+// defaultFallbackMaxBody is the default for Options.FallbackMaxBodyBytes.
+const defaultFallbackMaxBody = 1 << 20
+
+// unrouted answers a request no route matched: Options.Fallback if there is one and the
+// listener is a public one, and the fixed 404 otherwise. It is the mux's "/" pattern, so
+// it sees only what nothing else took, but it keeps every path the server uses out of the
+// Fallback, including those the configuration leaves unserved (see Options.Fallback).
+func (s *Server) unrouted(surface surface) http.HandlerFunc {
+	if s.opts.Fallback == nil || surface == surfaceAdmin {
+		return notFound
+	}
+	owned := map[string]bool{strings.Trim(ui.Prefix, "/"): true}
+	for _, route := range s.spec.Routes() {
+		first, _, _ := strings.Cut(strings.TrimPrefix(route.Path, "/"), "/")
+		owned[first] = true
+	}
+	limit := s.opts.FallbackMaxBodyBytes
+	if limit == 0 {
+		limit = defaultFallbackMaxBody
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		first, _, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
+		if owned[first] {
+			notFound(w, r)
+			return
+		}
+		if limit > 0 && r.Body != nil && r.Body != http.NoBody {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		s.opts.Fallback.ServeHTTP(w, r)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
