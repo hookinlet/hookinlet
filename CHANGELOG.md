@@ -4,7 +4,7 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.10.0 - 2026-10-19
 
 More of the contract is written down and checked by the conformance suites: what `Prune` does when several `Store`
 values share a backend, what a full `Store` answers, what `Backup` does for a tenant, how an inbox's epochs are
