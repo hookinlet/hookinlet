@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/hookinlet/hookinlet/internal/jsonptr"
@@ -142,7 +144,7 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 	// 3. Let the embedder reject the delivery (rate limit, quota, policy).
 	if err := s.opts.Hooks.BeforeIngest(ctx, &inbox.IngestRequest{
 		Inbox: in, Size: int64(len(body)), SourceIP: clientIP(r, s.opts.TrustedProxies),
-		Method: r.Method, PathSuffix: r.PathValue("rest"), Headers: r.Header,
+		Host: requestHost(r), Method: r.Method, PathSuffix: r.PathValue("rest"), Headers: r.Header,
 	}); err != nil {
 		return s.rejected(ctx, in, err)
 	}
@@ -227,8 +229,6 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 	case errors.Is(err, inbox.ErrNotFound): // deleted while we were verifying
 		return refuse(http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, errUnverifiedFull):
-		s.log.LogAttrs(ctx, slog.LevelWarn, "delivery refused: too many unverified messages",
-			inboxAttrs(in, slog.Int("max_unverified", s.opts.MaxUnverified))...)
 		return refuse(http.StatusTooManyRequests, codeUnverifiedLimit, "this inbox holds as many unverified messages as it may; verified deliveries are still accepted")
 	case errors.Is(err, inbox.ErrStorageFull):
 		// Not stored, so not acknowledged: the sender keeps it and tries again.
@@ -263,6 +263,7 @@ func (s *Server) observe(ctx context.Context, in *inbox.Inbox, r *http.Request, 
 		Status:        res.status,
 		Size:          res.size,
 		SourceIP:      clientIP(r, s.opts.TrustedProxies),
+		Host:          requestHost(r),
 		Seq:           res.seq,
 		Verified:      res.verified,
 		VerifyFailure: res.verifyFailure,
@@ -370,6 +371,9 @@ func (s *Server) append(ctx context.Context, in *inbox.Inbox, m *inbox.NewMessag
 	if n, err := s.unverified.CountUnverified(ctx, in.ID, max); err != nil {
 		return nil, false, err
 	} else if n >= max {
+		// The cap that applied, which is the limiter's when it gave one.
+		s.log.LogAttrs(ctx, slog.LevelWarn, "delivery refused: too many unverified messages",
+			inboxAttrs(in, slog.Int64("max_unverified", max))...)
 		return nil, false, errUnverifiedFull
 	}
 	return s.opts.Store.Append(ctx, in.ID, m)
@@ -389,10 +393,35 @@ func dedupeKey(res verify.Result, body []byte) string {
 	return res.DeliveryID + "#sha256:" + hex.EncodeToString(sum[:])
 }
 
+// requestHost is the host a request was addressed to, for IngestRequest.Host: r.Host,
+// lower-cased, with a trailing dot taken off the name and the port kept only if there
+// is one. It never looks at X-Forwarded-Host or any other header.
+func requestHost(r *http.Request) string {
+	h := strings.ToLower(r.Host)
+	name, port := h, ""
+	if n, p, err := net.SplitHostPort(h); err == nil {
+		name, port = n, p
+		if strings.Contains(n, ":") {
+			name = "[" + n + "]" // an IPv6 literal keeps its brackets
+		}
+	}
+	name = strings.TrimSuffix(name, ".")
+	if port != "" {
+		return name + ":" + port
+	}
+	return name
+}
+
 // rejected is the answer to a delivery that BeforeIngest refused.
 func (s *Server) rejected(ctx context.Context, in *inbox.Inbox, err error) ingestResult {
 	var res ingestResult
 	switch {
+	case errors.Is(err, inbox.ErrNotFound):
+		// Answered as an unknown ingest key is, with nothing of the hook's: no
+		// Retry-After, and nothing logged above debug (an unknown key logs nothing).
+		s.log.LogAttrs(ctx, slog.LevelDebug, "delivery refused by hook as not found",
+			inboxAttrs(in, slog.String("reason", err.Error()))...)
+		return refuse(http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, inbox.ErrRateLimited):
 		res = refuse(http.StatusTooManyRequests, "rate_limited", "too many requests")
 	case errors.Is(err, inbox.ErrQuotaExceeded):
