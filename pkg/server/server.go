@@ -100,9 +100,13 @@ type Options struct {
 	// deliveries being received. The bytes are counted as they arrive and held until
 	// the delivery is stored or refused, so a connection that has promised a body and
 	// not sent it costs nothing; a delivery whose bytes would take the total over is
-	// answered 503 with Retry-After. The memory used is a small multiple of the bytes
-	// counted. Defaults to 256 MiB, must be at least the largest body an inbox may take
-	// (10 MiB), and a negative value turns the bound off.
+	// answered 503 with Retry-After. The memory the process uses is about three times
+	// the bytes counted when the budget is full (a Go heap may grow to twice what is
+	// live, and a body is read into a buffer with some spare room): measured, the
+	// resident memory at the busiest was about three times the budget plus 50 MB, so
+	// size the host for that and lower the budget on a small one. Defaults to 128 MiB,
+	// must be at least the largest body an inbox may take (10 MiB), and a negative
+	// value turns the bound off.
 	IngestMemoryBudget int64
 	// ResponseTimeout bounds how long a response may take to be written to the client,
 	// from the moment the request has been checked. A client that sends a request and
@@ -333,7 +337,7 @@ func New(opts Options) (*Server, error) {
 		opts.Now = time.Now
 	}
 	if opts.IngestMemoryBudget == 0 {
-		opts.IngestMemoryBudget = 256 << 20
+		opts.IngestMemoryBudget = 128 << 20
 	}
 	if opts.IngestMemoryBudget > 0 && opts.IngestMemoryBudget < inbox.MaxBodyBytesCeiling {
 		return nil, fmt.Errorf("server: Options.IngestMemoryBudget must be at least %d bytes, the largest body an inbox may take, or a delivery that is allowed could never be received", inbox.MaxBodyBytesCeiling)

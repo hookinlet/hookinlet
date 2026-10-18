@@ -157,7 +157,7 @@ var specs = []spec{
 	{name: "admin-ui", def: "true", usage: "serve the admin console at /admin, beside the admin API (it needs --admin-enabled)"},
 	{name: "mcp-enabled", def: "true", usage: "serve the MCP endpoint at /mcp"},
 	{name: "mcp-inline-body-bytes", def: "16384", usage: "largest message body returned inline by MCP tools (at most 65536)"},
-	{name: "ingest-memory-budget", def: "268435456", usage: "most bytes of request bodies held in memory at once by deliveries being received; more are answered 503 with Retry-After (0 turns the bound off)"},
+	{name: "ingest-memory-budget", def: "134217728", usage: "most bytes of request bodies held in memory at once by deliveries being received; more are answered 503 with Retry-After; memory use at the busiest is about three times this plus 50 MB (0 turns the bound off)"},
 	{name: "max-unverified", def: "1000", usage: "most unverified messages one inbox keeps (those stored by on_verify_fail=store or accepted by the verifier none); a delivery over it is answered 429 and not stored, and verified deliveries are never refused for it (0 turns the cap off)"},
 	{name: "drain-delay", def: "0", usage: "after being told to stop, keep serving for this long while /readyz answers 503, so a load balancer can take the instance out of rotation before the listener closes; 0 stops at once"},
 	{name: "retention-interval", def: "1h", usage: "interval between retention sweeps, at least 1s; \"off\" turns the schedule off (sweeps still run on request)"},

@@ -38,7 +38,8 @@ func TestLoadDefaults(t *testing.T) {
 	if c.ListenAddr != ":8080" || c.DataDir != "./data" || c.LogFormat != "json" ||
 		c.LogLevel != slog.LevelInfo || c.SSEHeartbeat != 15*time.Second ||
 		c.SSERecheckInterval != 0 || !c.MCPEnabled || !c.AdminUI || c.MCPInlineBodyBytes != 16384 ||
-		c.RetentionInterval != time.Hour || c.MaxUnverified != 1000 || c.ShutdownTimeout != 10*time.Second {
+		c.RetentionInterval != time.Hour || c.MaxUnverified != 1000 || c.ShutdownTimeout != 10*time.Second ||
+		c.IngestMemoryBudget != 128<<20 {
 		t.Fatalf("unexpected defaults: %+v", c)
 	}
 	if got := c.MasterKey.Reveal(); got != string(bytes.Repeat([]byte{7}, 32)) {

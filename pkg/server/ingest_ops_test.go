@@ -541,3 +541,14 @@ func TestTheResponseTimeoutDoesNotCutOffASlowIngest(t *testing.T) {
 		t.Errorf("status %d", resp.StatusCode)
 	}
 }
+
+// The budget a server starts with when none is set: 128 MiB, which is why a process
+// that has taken as much as it may holds a few hundred megabytes (docs/deploying.md).
+func TestTheIngestMemoryBudgetDefaultsTo128MiB(t *testing.T) {
+	e := newEnv(t)
+	var m strings.Builder
+	_ = e.server.writeMetrics(&m)
+	if !strings.Contains(m.String(), "hookinlet_ingest_memory_budget_bytes 134217728\n") {
+		t.Errorf("the default budget is not 128 MiB:\n%s", m.String())
+	}
+}
