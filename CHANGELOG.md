@@ -4,7 +4,7 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.7.0 - 2026-10-18
 
 Two additions to the Go API, both optional: an `Authenticator` can choose the challenge on a `401`, and a server can
 answer paths it has no route for. Nothing to migrate.
