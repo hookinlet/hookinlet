@@ -652,6 +652,8 @@ export interface components {
             latest_seq: number;
             /** @description Identifies one lifetime of this inbox's sequence numbers. It changes if the inbox is deleted and made again, and for a server restored from a backup. Opaque: compare it for equality. Cursors carry it. */
             epoch: string;
+            /** @description Names (never values) of the stored request headers that carry the delivery's signature, for a verifier whose header is set per inbox (`hmac`). Absent for the others, whose header is fixed by the sender. A client that forwards stored headers can use it to leave the signature out. */
+            signature_headers?: string[];
         };
         /**
          * @example {

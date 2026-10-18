@@ -108,9 +108,14 @@ func (a *readAPI) info(ctx context.Context) (api.InboxInfo, *readFail) {
 		f := a.s.classifyRead(ctx, "inbox info", err)
 		return api.InboxInfo{}, &f
 	}
+	var sigHeaders *[]string
+	if h := a.s.signatureHeaders(rr.in); len(h) > 0 {
+		sigHeaders = &h
+	}
 	return api.InboxInfo{
 		Epoch: info.Epoch, LatestSeq: int(info.LatestSeq), MessageCount: int(info.MessageCount), Name: info.Name,
 		OldestSeq: int(info.OldestSeq), Slug: info.Slug, Verifier: info.Verifier,
+		SignatureHeaders: sigHeaders,
 	}, nil
 }
 

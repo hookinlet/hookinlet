@@ -41,14 +41,14 @@ func (github) Verify(r *http.Request, body, secret []byte, _ time.Time) (Result,
 	}
 	hexSig, ok := strings.CutPrefix(header, "sha256=")
 	if !ok {
-		return Result{}, fail("malformed signature header")
+		return Result{}, fail(FailureMalformed, "malformed signature header")
 	}
 	sig, err := hex.DecodeString(hexSig)
 	if err != nil || len(sig) != sha256.Size {
-		return Result{}, fail("malformed signature header")
+		return Result{}, fail(FailureMalformed, "malformed signature header")
 	}
 	if !anyEqual(mac(sha256.New, secret, body), [][]byte{sig}) {
-		return Result{}, fail("signature mismatch")
+		return Result{}, fail(FailureMismatch, "signature mismatch")
 	}
 	return Result{
 		DeliveryID: cleanID(r.Header.Get("X-GitHub-Delivery"), maxIDLen),

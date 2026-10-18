@@ -226,6 +226,9 @@ func digitsOnly(s string) bool {
 	return true
 }
 
+// SignatureHeaders implements SignatureHeaderer: the configured signature header.
+func (g *genericHMAC) SignatureHeaders() []string { return []string{g.header} }
+
 func (g *genericHMAC) Verify(r *http.Request, body, secret []byte, now time.Time) (Result, error) {
 	if err := requireSecret(secret); err != nil {
 		return Result{}, err
@@ -236,11 +239,11 @@ func (g *genericHMAC) Verify(r *http.Request, body, secret []byte, now time.Time
 	}
 	encoded, ok := strings.CutPrefix(header, g.prefix)
 	if !ok {
-		return Result{}, fail("malformed signature header")
+		return Result{}, fail(FailureMalformed, "malformed signature header")
 	}
 	sig, err := g.decode(encoded)
 	if err != nil || len(sig) == 0 {
-		return Result{}, fail("malformed signature header")
+		return Result{}, fail(FailureMalformed, "malformed signature header")
 	}
 
 	var ts time.Time
@@ -250,7 +253,7 @@ func (g *genericHMAC) Verify(r *http.Request, body, secret []byte, now time.Time
 			return Result{}, err
 		}
 		if ts, ok = parseUnixSeconds(tsStr); !ok {
-			return Result{}, fail("malformed timestamp header")
+			return Result{}, fail(FailureMalformed, "malformed timestamp header")
 		}
 	}
 
@@ -266,10 +269,10 @@ func (g *genericHMAC) Verify(r *http.Request, body, secret []byte, now time.Time
 		}
 	}
 	if !anyEqual(mac(g.newHash, secret, parts...), [][]byte{sig}) {
-		return Result{}, fail("signature mismatch")
+		return Result{}, fail(FailureMismatch, "signature mismatch")
 	}
 	if g.timestampHdr != "" && !withinTolerance(ts, now, g.tolerance) {
-		return Result{}, fail("timestamp outside tolerance")
+		return Result{}, fail(FailureStale, "timestamp outside tolerance")
 	}
 
 	res := Result{}

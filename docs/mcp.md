@@ -85,8 +85,9 @@ value.)
 |---|---|
 | `after` | optional: the `next_after` of your previous result, to read the next page. Omit it (or pass `""`) to start at the beginning |
 
-The inboxes this token can read: `slug`, `name`, `verifier`, `latest_seq`, and `epoch`,
-at most 100 per call, whether it is an agent token for some inboxes, a token for
+The inboxes this token can read: `slug`, `name`, `verifier`, `latest_seq`, and `epoch`
+(and, for an `hmac` inbox, `signature_headers`: the names, never the values, of the
+stored headers that carry the signature), at most 100 per call, whether it is an agent token for some inboxes, a token for
 all inboxes, or the admin token. When it can read more than that, the result has
 `truncated: true` and `next_after`, an opaque cursor: pass it back as `after` for
 the next 100, and keep going while `next_after` is present. The last page has

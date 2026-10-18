@@ -756,8 +756,11 @@ type InboxInfo struct {
 	MessageCount int    `json:"message_count"`
 	Name         string `json:"name"`
 	OldestSeq    int    `json:"oldest_seq"`
-	Slug         string `json:"slug"`
-	Verifier     string `json:"verifier"`
+
+	// SignatureHeaders Names (never values) of the stored request headers that carry the delivery's signature, for a verifier whose header is set per inbox (`hmac`). Absent for the others, whose header is fixed by the sender. A client that forwards stored headers can use it to leave the signature out.
+	SignatureHeaders *[]string `json:"signature_headers,omitempty"`
+	Slug             string    `json:"slug"`
+	Verifier         string    `json:"verifier"`
 }
 
 // JsonRpcRequest defines model for JsonRpcRequest.

@@ -55,12 +55,12 @@ func (s stripe) Verify(r *http.Request, body, secret []byte, now time.Time) (Res
 
 	want := mac(sha256.New, secret, []byte(tsStr), []byte("."), body)
 	if !anyEqual(want, sigs) {
-		return Result{}, fail("signature mismatch")
+		return Result{}, fail(FailureMismatch, "signature mismatch")
 	}
 	// The signature is checked first so a forged request learns nothing about
 	// the tolerance window.
 	if !withinTolerance(ts, now, s.tolerance) {
-		return Result{}, fail("timestamp outside tolerance")
+		return Result{}, fail(FailureStale, "timestamp outside tolerance")
 	}
 
 	f := topLevelStrings(body, "id", "type")
@@ -73,7 +73,7 @@ func (s stripe) Verify(r *http.Request, body, secret []byte, now time.Time) (Res
 func parseStripeHeader(h string) (ts string, sigs [][]byte, err error) {
 	parts := strings.Split(h, ",")
 	if len(parts) > maxSignatureParts {
-		return "", nil, fail("malformed signature header")
+		return "", nil, fail(FailureMalformed, "malformed signature header")
 	}
 	for _, part := range parts {
 		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
@@ -83,7 +83,7 @@ func parseStripeHeader(h string) (ts string, sigs [][]byte, err error) {
 		switch k {
 		case "t":
 			if ts != "" {
-				return "", nil, fail("malformed signature header")
+				return "", nil, fail(FailureMalformed, "malformed signature header")
 			}
 			ts = v
 		case "v1":
@@ -93,7 +93,7 @@ func parseStripeHeader(h string) (ts string, sigs [][]byte, err error) {
 		}
 	}
 	if _, ok := parseUnixSeconds(ts); !ok || len(sigs) == 0 {
-		return "", nil, fail("malformed signature header")
+		return "", nil, fail(FailureMalformed, "malformed signature header")
 	}
 	return ts, sigs, nil
 }

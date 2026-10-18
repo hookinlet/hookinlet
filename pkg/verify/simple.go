@@ -66,7 +66,7 @@ func (t token) Verify(r *http.Request, _ []byte, secret []byte, _ time.Time) (Re
 	// length of the secret, which ConstantTimeCompare would otherwise leak.
 	a, b := sha256.Sum256([]byte(got)), sha256.Sum256(secret)
 	if subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
-		return Result{}, fail("token mismatch")
+		return Result{}, fail(FailureMismatch, "token mismatch")
 	}
 	return Result{}, nil
 }

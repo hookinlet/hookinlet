@@ -19,11 +19,11 @@ import (
 func singleHeader(r *http.Request, name string) (string, error) {
 	switch vs := r.Header.Values(name); len(vs) {
 	case 0:
-		return "", fail("missing " + name + " header")
+		return "", fail(FailureMissing, "missing "+name+" header")
 	case 1:
 		return vs[0], nil
 	default:
-		return "", fail("multiple " + name + " headers")
+		return "", fail(FailureMalformed, "multiple "+name+" headers")
 	}
 }
 

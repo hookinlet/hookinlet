@@ -4,6 +4,29 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+Two additions, both optional and found by type assertion: an ingest observer can tell why a signature failed, and a
+reader can tell which stored header carries an `hmac` inbox's signature. Nothing to migrate.
+
+**Added**
+
+- **`IngestEvent.VerifyFailure`** says how verification failed when `Outcome` is `verification_failed`: `missing`
+  (a header the verifier needs was not sent), `malformed` (a header was sent but unreadable, or sent more than once),
+  `mismatch` (a well-formed signature or token that did not match) or `stale` (the signature matched, its timestamp
+  was outside the tolerance). The constants are `inbox.VerifyFailureMissing`, `VerifyFailureMalformed`,
+  `VerifyFailureMismatch` and `VerifyFailureStale`; the field is empty for other outcomes and for a verifier that does
+  not classify its failures. It names no header and carries no request data. To support it, `verify.Failure` has a
+  new `Kind` field (`verify.FailureMissing`, `FailureMalformed`, `FailureMismatch`, `FailureStale`) and
+  `verify.FailureKindOf` reads it; the built-in verifiers set it, and a custom verifier may leave it empty. A
+  repeated header counts as `malformed`. See [Observing how deliveries end](docs/extending.md#observing-how-deliveries-end).
+- **`signature_headers` on an inbox's metadata.** `GET /v1/inboxes/{slug}` and MCP `list_inboxes` now name the stored
+  request headers that carry the signature, for verifiers whose header is set per inbox (`hmac`), so a client that
+  forwards stored headers can leave the signature out. Names only, never values; absent for the presets, whose
+  header is fixed by the sender. The new optional interface is `verify.SignatureHeaderer`
+  (`SignatureHeaders() []string`), found by type assertion on the built verifier; the response field is optional and
+  added to `docs/openapi.json`.
+
 ## 0.5.0 - 2026-10-18
 
 A fix for servers where a tenant has its own administrator: such an admin could reach admin operations that act on

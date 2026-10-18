@@ -22,7 +22,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. | the SQLite store | `BackupperSuite` |
 | `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | the server's tests |
-| `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, and for a stored message its `Seq` and whether it is verified), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | the server's tests |
+| `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | the server's tests |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
 | `StatusReporter` (optional) | The schema version, the size of the data and the free space, for `GET /v1/admin/status` and the console. | the SQLite store | none |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. `InboxIDs(ctx)` may look the list up, and may fail. | the agent principal | checked by `AuthenticatorSuite` |
@@ -264,8 +264,23 @@ does not change.
 (refused by `BeforeIngest`), `unverified_limit`, `storage_full`, `overloaded`,
 `too_large`, `bad_request`, `not_found` (the inbox is disabled or was deleted while the
 delivery was received) and `error`. More may be added, so treat one you do not know
-as a refusal. The event never carries headers, the body, or why a signature failed
-(the server logs that), so whatever you do with it cannot leak them.
+as a refusal. The event never carries headers, the body, or the reason text of a
+signature failure (the server logs that), so whatever you do with it cannot leak them.
+
+When `Outcome` is `verification_failed`, `ev.VerifyFailure` says which kind of
+failure it was, so an observer can tell a sender that sends no signature from one
+whose signature is wrong:
+
+| `VerifyFailure` | Meaning |
+|---|---|
+| `missing` | A header the verifier needs was not sent. |
+| `malformed` | A header was sent but could not be read as what the verifier expects: wrong prefix or encoding, a bad timestamp, or the header sent more than once. |
+| `mismatch` | The signature or token was well formed and did not match. |
+| `stale` | The signature matched, but its timestamp was outside the tolerance window. The signature is checked first, so a forged delivery is `mismatch`, never `stale`. |
+
+The field is empty for every other outcome, and for a failure from a custom
+verifier that does not classify its failures (a `verify.Failure` with an empty
+`Kind`). A kind a custom verifier makes up is not passed on.
 
 A delivery whose ingest key names no inbox is not observed, nor is one with the wrong
 method: there is no inbox to count it against, and an observer would otherwise see

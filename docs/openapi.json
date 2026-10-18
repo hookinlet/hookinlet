@@ -4918,6 +4918,13 @@
           "epoch": {
             "type": "string",
             "description": "Identifies one lifetime of this inbox's sequence numbers. It changes if the inbox is deleted and made again, and for a server restored from a backup. Opaque: compare it for equality. Cursors carry it."
+          },
+          "signature_headers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names (never values) of the stored request headers that carry the delivery's signature, for a verifier whose header is set per inbox (`hmac`). Absent for the others, whose header is fixed by the sender. A client that forwards stored headers can use it to leave the signature out."
           }
         }
       },
@@ -6105,7 +6112,7 @@
   "x-mcp-tools": [
     {
       "name": "list_inboxes",
-      "description": "List the inboxes this token can read, with each one's latest_seq and epoch, at most 100 at a time. When there are more, the result has truncated: true and a next_after cursor: call list_inboxes again with it as `after` for the next page, and keep going while next_after is present. A list that ends without next_after may still not be every inbox when the token can read inboxes among very many it cannot; read any inbox you know by its slug.",
+      "description": "List the inboxes this token can read, with each one's latest_seq and epoch, and signature_headers (the names of the stored headers that carry the signature) when the inbox's verifier is configured with one, at most 100 at a time. When there are more, the result has truncated: true and a next_after cursor: call list_inboxes again with it as `after` for the next page, and keep going while next_after is present. A list that ends without next_after may still not be every inbox when the token can read inboxes among very many it cannot; read any inbox you know by its slug.",
       "input": {
         "$ref": "#/components/schemas/McpListInboxesInput"
       },

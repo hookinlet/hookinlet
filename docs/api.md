@@ -70,6 +70,11 @@ drain what it holds.
 }
 ```
 
+An `hmac` inbox also has `signature_headers`, the names of the stored headers
+that carry the signature (for example `["X-Signature"]`), because its header is
+set per inbox. It holds names only, never values, and is absent for the other
+verifiers, whose header is fixed by the sender.
+
 `message_count` is exact. After retention has removed old messages,
 `oldest_seq` is the first one still stored. An empty inbox has zeros. Nothing
 secret is ever included.

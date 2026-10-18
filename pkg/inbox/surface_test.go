@@ -73,7 +73,8 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 			"Seal([]uint8, []uint8) ([]uint8, error)",
 			"SealContext(context.Context, []uint8, []uint8) ([]uint8, error)",
 		},
-		"Verifier": {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
+		"Verifier":          {"Verify(*http.Request, []uint8, []uint8, time.Time) (verify.Result, error)"},
+		"SignatureHeaderer": {"SignatureHeaders() []string"},
 	}
 	got := map[string]reflect.Type{
 		"Store":             reflect.TypeFor[inbox.Store](),
@@ -93,6 +94,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"ScopedPrincipal":   reflect.TypeFor[inbox.ScopedPrincipal](),
 		"ContextSecretBox":  reflect.TypeFor[inbox.ContextSecretBox](),
 		"Verifier":          reflect.TypeFor[verify.Verifier](),
+		"SignatureHeaderer": reflect.TypeFor[verify.SignatureHeaderer](),
 	}
 	for name, typ := range got {
 		var methods []string
