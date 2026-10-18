@@ -28,8 +28,35 @@ const (
 // distributed implementation must keep: a Publish after Subscribe returns wakes
 // the subscriber, signals coalesce rather than queue, inboxes do not signal each
 // other, and cancelling releases everything.
+//
+// It reads a signal as soon as it can. A notifier whose signals cross a network
+// delivers them later and spread out, so the coalescing check can see more than one;
+// such a notifier runs NotifierSuiteWith and sets NotifierOptions.Settle.
 func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) {
 	t.Helper()
+	NotifierSuiteWith(t, newNotifier, NotifierOptions{})
+}
+
+// NotifierOptions adjusts NotifierSuiteWith to a notifier whose signals cross a
+// network. The zero value is NotifierSuite, which is right for an in-process one.
+type NotifierOptions struct {
+	// Settle is how long the coalescing check waits, after its burst of publishes
+	// and before it reads, for signals still on their way to arrive. Signals coalesce
+	// only when they arrive before the receiver reads: one that arrives after a read
+	// is a new signal, which a networked notifier legitimately delivers when a burst
+	// reaches the subscriber spread over time. Set it to the longest a burst of a
+	// thousand publishes takes to arrive. The check itself is not relaxed: after
+	// Settle the burst must still read as one signal (and at most one more). Zero
+	// reads at once.
+	Settle time.Duration
+}
+
+// NotifierSuiteWith is NotifierSuite with options.
+func NotifierSuiteWith(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier, opts NotifierOptions) {
+	t.Helper()
+	if opts.Settle < 0 {
+		t.Fatalf("NotifierOptions.Settle is %v; it must not be negative", opts.Settle)
+	}
 
 	signalled := func(ch <-chan struct{}, within time.Duration) bool {
 		select {
@@ -131,6 +158,7 @@ func NotifierSuite(t *testing.T, newNotifier func(t *testing.T) inbox.Notifier) 
 		ch, cancel := subscribe(t, n, t.Context(), 1)
 		defer cancel()
 		publish(t, n, 1, 1000)
+		time.Sleep(opts.Settle) // let signals still on their way arrive, so that they arrive before the read
 		if !signalled(ch, signalWait) {
 			t.Fatal("no signal after 1000 publishes")
 		}

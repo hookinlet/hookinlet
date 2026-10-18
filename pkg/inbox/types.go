@@ -463,6 +463,9 @@ type TokenID int64
 // once, a name for people to tell tokens apart by, and what it may read. An
 // inbox can have any number of tokens, so that one can be replaced by another
 // without a moment in which an agent has none that works.
+//
+// A token belongs to no tenant: the Store's token methods are the operator's,
+// whatever tenant the context is scoped to (see Store, under Tenants).
 type Token struct {
 	ID   TokenID
 	Name string

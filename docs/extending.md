@@ -87,6 +87,21 @@ that never uses it has one tenant, the empty one, and sees no difference.
   inbox a delivery is for. A `Store` you write must keep to all of this; the `Tenants`
   case of `StoreSuite` checks it, including that one tenant cannot read, write, list or
   delete another's inbox by any method.
+- **Tokens are the operator's, not a tenant's.** An `inbox.Token` has no tenant.
+  `GetTokenByHash`, `ListTokens` (its `InboxID` filter included) and `DeleteToken`
+  act on every token whether or not the context is scoped, exactly as they do
+  unscoped; `GetTokenByHash` has to, because the server calls it to authenticate a
+  request before it knows the tenant. The one check a scope adds is `CreateToken`'s:
+  every inbox in `InboxIDs` must be one of the tenant's (`ErrNotFound` otherwise). An
+  `AllInboxes` token is not limited to the tenant and reads every inbox in the Store.
+  The `TokensAreNotScopedByTenant` case of `StoreSuite` checks this. So the agent
+  tokens of `pkg/auth/token`, and the admin API's `/v1/admin/tokens`, which works
+  through these methods, are for the operator: the server refuses a tenant's admin (a `TenantPrincipal`
+  whose `CanAdmin` is true) on `/v1/admin/tokens`, because through these methods it
+  could list tokens of other tenants, revoke any token by its `id`, or issue an
+  `all_inboxes` token that reads every tenant's inboxes. An embedder that gives each
+  tenant's callers credentials of their own keeps them in its own `Authenticator`,
+  whose principals are `TenantPrincipal`s.
 
 ## Putting them together
 
@@ -271,7 +286,21 @@ suite is what makes it testable. The points that are easy to get wrong:
 - **Read your writes.** Once `Append` returns, every later read, on any node, sees
   the message: a wake-up followed by a read must not find it missing.
 - **The Store owns the clock** (UTC, microsecond precision), and `ReceivedAt`
-  never decreases with `Seq` within an inbox.
+  never decreases with `Seq` within an inbox, even if the system clock steps back:
+  `Append` uses the later of the clock and the previous message's `ReceivedAt`. So
+  within one inbox, ordering by (`ReceivedAt`, `Seq`) and ordering by `Seq` agree, and
+  the messages in a range of times are a range of `Seq`s. A query filtered by time
+  (`Query.Since`, `Query.Until`) and paged by `Seq` can be served from one index on
+  (inbox, received_at, seq), and retention by age always deletes a prefix.
+- **A restore is a new epoch.** `Inbox.Epoch` must change for every inbox when the
+  Store is restored from a backup, so that an old cursor is refused. A `Backupper`'s
+  snapshot does it (`BackupperSuite` checks it); a Store restored by other means, such
+  as a database's own backups, must renew every epoch as part of the restore. The
+  suite cannot check that, since restoring is not a method of `Store`.
+- **Scope by tenant, except tokens.** A context scoped with `inbox.WithTenant` limits
+  every method to that tenant's inboxes (see [Tenants](#tenants)). The token methods
+  are the operator's: `GetTokenByHash`, `ListTokens` and `DeleteToken` ignore the
+  scope, and `CreateToken` only checks that a token's inboxes are the tenant's.
 - **An inbox has an ingest key** (`Inbox.IngestKey`, the `{key}` in `/in/{key}`), which
   the caller supplies when it creates the inbox; a Store does not make one up. It is
   a capability, so it should be random.
@@ -282,6 +311,12 @@ suite is what makes it testable. The points that are easy to get wrong:
 - **Secrets stay sealed.** A Store persists `VerifierSecret` verbatim and never
   sees plaintext, and returns inboxes whose `String` and log forms redact
   secrets and token hashes.
+- **`Ping` is about the whole Store.** Any error from it makes `/readyz` answer `503`
+  and takes the server out of rotation; `ErrStorageFull` says there is no room left at
+  all. A quota on one tenant or inbox must never show there, or every server sharing
+  the Store fails readiness at once. Refuse the write instead: `Append` returns
+  `ErrStorageFull` for it (`503`, and the sender retries), or a hook refuses the
+  delivery first with `ErrQuotaExceeded` (`402`).
 - **Large deletes must not block writes.** `DeleteInbox` and `Prune` run in small
   batches; deleting everything in one transaction stalls every delivery.
 
@@ -434,6 +469,21 @@ An in-process notifier must not drop signals. One that crosses the network may
 `HOOKINLET_SSE_RECHECK_INTERVAL` (`Options.SSERecheckInterval`), which makes every
 stream and MCP wait re-read the Store on that interval regardless. `Publish` is
 called with a context that may already be cancelled and must still deliver.
+
+Readers subscribe first and read the Store second, so a subscription has to be live
+when `Subscribe` returns: every `Publish` that begins after that must reach it. A
+notifier that crosses the network waits for its backend to confirm the subscription
+(the reply to a pub/sub `SUBSCRIBE`, say) before returning, but only briefly, since
+`Subscribe` must not block the caller. If it returns before the confirmation, a signal
+published in between can be lost, which is the at-most-once delivery the recheck
+interval covers: the reader sees the message on its next re-read.
+
+Signals coalesce when they arrive before the subscriber reads. A notifier that crosses
+the network delivers a burst of publishes spread over time, so a subscriber that reads
+the first at once sees the later ones as new signals, as it should. Run such a
+notifier with `inboxtest.NotifierSuiteWith(t, newNotifier, inboxtest.NotifierOptions{Settle: d})`,
+where `d` is how long a burst of a thousand publishes takes to arrive: the coalescing
+check then waits that long before it reads, and still requires one signal.
 
 ## Writing a SecretBox
 
