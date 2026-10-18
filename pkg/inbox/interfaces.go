@@ -24,8 +24,8 @@ import (
 // After(k) sees every message that commits afterward, exactly once, and never
 // sees a message with a Seq at or below k appear late. Implementations on
 // databases that hand out ids at insert time but commit out of order (such as
-// Postgres sequences) must serialize appends per inbox, for example with a row
-// lock on a per-inbox counter. The conformance suite tests this property under
+// auto-increment sequences) must serialize appends per inbox, for example with a
+// row lock on a per-inbox counter. The conformance suite tests this property under
 // concurrency.
 //
 // Seqs are never reused. Retention removes old messages but leaves LastSeq
