@@ -282,8 +282,8 @@ func TestShutdownWaitsForInFlightRequest(t *testing.T) {
 	<-started
 	cancel()
 	select {
-	case <-done:
-		t.Fatal("Serve returned while a request was still in flight")
+	case err := <-done:
+		t.Fatalf("Serve returned (%v) while a request was still in flight", err)
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(release)

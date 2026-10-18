@@ -263,8 +263,8 @@ func TestFallbackWorksWithServeAndShutdownWaitsForIt(t *testing.T) {
 	shut := make(chan error, 1)
 	go func() { shut <- e.server.Shutdown(t.Context()) }()
 	select {
-	case <-shut:
-		t.Fatal("Shutdown returned while the fallback was answering")
+	case err := <-shut:
+		t.Fatalf("Shutdown returned (%v) while the fallback was answering", err)
 	case <-time.After(150 * time.Millisecond):
 	}
 	close(release)

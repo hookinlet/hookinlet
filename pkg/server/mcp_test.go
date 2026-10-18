@@ -560,7 +560,9 @@ func TestAbandonedWaitsReleaseTheirSubscription(t *testing.T) {
 	}()
 	waitFor(t, "the wait to subscribe", func() bool { return n.Subscribers() == 1 })
 	cancel()
-	<-errc
+	if err := <-errc; err == nil {
+		t.Error("the cancelled wait returned without an error")
+	}
 	waitFor(t, "the abandoned wait to unsubscribe", func() bool { return n.Subscribers() == 0 })
 }
 
