@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -23,6 +24,11 @@ type TokenView struct {
 	AllInboxes bool     `json:"all_inboxes"`
 	Inboxes    []string `json:"inboxes"`
 	CreatedAt  string   `json:"created_at"`
+	// ExpiresAt is when the token stops working; absent for one that never does.
+	ExpiresAt *string `json:"expires_at,omitempty"`
+	// LastUsedAt is when the token was last seen authenticating, to within the
+	// recording interval; absent if it has not been, or the Store does not record it.
+	LastUsedAt *string `json:"last_used_at,omitempty"`
 }
 
 // TokenParams describes a new token: a name, and either a list of inbox slugs
@@ -31,6 +37,9 @@ type TokenParams struct {
 	Name       string   `json:"name"`
 	Inboxes    []string `json:"inboxes,omitempty"`
 	AllInboxes bool     `json:"all_inboxes,omitempty"`
+	// ExpiresAt, when set, is when the token stops working. It must be in the
+	// future.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // TokenCreated is the result of CreateToken. Token is the only copy there will
@@ -46,12 +55,12 @@ type issued struct {
 }
 
 // issue generates a token and stores it.
-func (s *Service) issue(ctx context.Context, name string, ids []inbox.ID, all bool) (*issued, error) {
+func (s *Service) issue(ctx context.Context, name string, ids []inbox.ID, all bool, expires *time.Time) (*issued, error) {
 	tok, hash, err := token.Generate()
 	if err != nil {
 		return nil, fmt.Errorf("admin: generate token: %w", err)
 	}
-	rec := &inbox.Token{Name: name, Hash: hash, AllInboxes: all, InboxIDs: ids}
+	rec := &inbox.Token{Name: name, Hash: hash, AllInboxes: all, InboxIDs: ids, ExpiresAt: expires}
 	if err := s.Store.CreateToken(ctx, rec); err != nil {
 		return nil, err
 	}
@@ -75,10 +84,10 @@ func (s *Service) CreateToken(ctx context.Context, p TokenParams) (*TokenCreated
 		}
 		ids = append(ids, in.ID)
 	}
-	if err := (&inbox.Token{Name: p.Name, Hash: []byte{1}, AllInboxes: p.AllInboxes, InboxIDs: ids}).Validate(); err != nil {
+	if err := (&inbox.Token{Name: p.Name, Hash: []byte{1}, AllInboxes: p.AllInboxes, InboxIDs: ids, ExpiresAt: p.ExpiresAt}).ValidateAt(s.now()); err != nil {
 		return nil, err
 	}
-	t, err := s.issue(ctx, p.Name, ids, p.AllInboxes)
+	t, err := s.issue(ctx, p.Name, ids, p.AllInboxes, p.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +142,7 @@ func (s *Service) tokenViews(ctx context.Context, tokens []*inbox.Token) ([]Toke
 		v := TokenView{
 			ID: int64(t.ID), Name: t.Name, AllInboxes: t.AllInboxes, Inboxes: []string{},
 			CreatedAt: t.CreatedAt.UTC().Format(TimeLayout),
+			ExpiresAt: formatOptional(t.ExpiresAt), LastUsedAt: formatOptional(t.LastUsedAt),
 		}
 		for _, id := range t.InboxIDs {
 			if gone[id] {
@@ -159,4 +169,12 @@ func (s *Service) tokenViews(ctx context.Context, tokens []*inbox.Token) ([]Toke
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+func formatOptional(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	v := t.UTC().Format(TimeLayout)
+	return &v
 }

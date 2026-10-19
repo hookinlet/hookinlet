@@ -191,6 +191,9 @@ type Store interface {
 	// GetTokenByHash finds the token with this hash, or returns ErrNotFound. It
 	// must be an indexed lookup, not a scan: the server calls it on every
 	// authenticated request. It ignores the context's tenant (see Tenants).
+	// A token whose ExpiresAt has passed, by the Store's clock, is ErrNotFound,
+	// the same as one that never existed, so that an Authenticator built on the
+	// Store cannot tell the two apart or serve an expired token.
 	GetTokenByHash(ctx context.Context, hash []byte) (*Token, error)
 	// ListTokens pages through tokens (see TokenListParams). It ignores the
 	// context's tenant (see Tenants): it lists every token.
@@ -284,6 +287,23 @@ type Backupper interface {
 	// call Backup for a tenant's principal. A Store that holds one tenant's data
 	// only has nothing to refuse.
 	Backup(ctx context.Context) (snapshot io.ReadCloser, size int64, err error)
+}
+
+// TokenUseRecorder is an optional capability of a Store: remembering when a
+// token last authenticated a request, which a Store shows as Token.LastUsedAt.
+// The default Authenticator (pkg/auth/token) finds it with a type assertion;
+// a Store without it has no last-used time and nothing fails.
+//
+// It is called at most once per token per interval (five minutes by default),
+// from outside the request, and its failure is logged and otherwise ignored,
+// so an implementation may be slow or may refuse under load without harm.
+type TokenUseRecorder interface {
+	// TouchToken records that token id was used at the given time. LastUsedAt
+	// only moves forward: a call with a time that is not after the one already
+	// recorded changes nothing and is not an error. It returns ErrNotFound if
+	// there is no such token (it was revoked meanwhile). It does not change
+	// anything else about the token.
+	TouchToken(ctx context.Context, id TokenID, at time.Time) error
 }
 
 // EpochRenewer is an optional capability of a Store: giving every inbox a new

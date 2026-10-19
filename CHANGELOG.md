@@ -10,6 +10,16 @@ The conformance suites cover more of what embedders rely on: a `Store` that has 
 `StoreSuite`, and the server's tenant behaviours have a suite of their own. Nothing to migrate, and nothing that passed
 before can fail: both additions are opt-in.
 
+Tokens can expire, and a token's last use is noted. Both are optional: a token made without an expiry never
+expires, which is every token that exists now, and an embedder's `Store` that does not know about either keeps
+working. **The upgrade changes the database in a way an older version refuses:** the SQLite store gains a migration
+(`0011`) that adds two nullable columns to `tokens`, and migrations only move forward, so once the new version
+has started on a data directory, an older binary refuses that data directory ("newer than this build supports").
+Upgrade by starting the new version on the same data directory as usual; a copy of the database is kept before the
+migration (see [Deploying](docs/deploying.md#upgrading)), and that copy is the way back to the older version. An embedder
+that wrote its own `Store` or `Authenticator` should read **Go API**: the new `StoreSuite` and `AuthenticatorSuite`
+cases skip themselves for an implementation that does not offer the new behaviour, so one that passed before still passes.
+
 **Added**
 
 - **An `Authenticator` can ask for a `404` for a host that serves no org.** If the error `Authenticate` returns
@@ -22,6 +32,19 @@ before can fail: both additions are opt-in.
   [Answering 404 for a host that serves no org](docs/extending.md#answering-404-for-a-host-that-serves-no-org).
   `docs/openapi.json` now lists the `404` response for the operations that did not (`createInbox`, `listInboxes`,
   `runRetention`, `adminStatus`, `backup`, `metrics`, `mcp`); the shipped token authenticator never produces it.
+
+- **A token can expire.** `POST /v1/admin/tokens` takes an optional `expires_at` (a time in the future, otherwise
+  `400`), and `hookinlet token create` takes `--expires-in` (a duration such as `720h`, or days such as `90d`) or
+  `--expires-at` (RFC 3339). From that moment the token is refused with the same `401` as an unknown one, with the same
+  body and no difference a caller could use. The expiry cannot be changed afterwards; issue another token and revoke the
+  old one. An expired token stays in the list so that it can be revoked, and a stream or MCP wait that was open ends
+  at its next re-check, within about 30 seconds (`StreamRevalidateInterval`), as it does when a token is revoked.
+- **A token shows when it was last used.** Token objects in the admin API carry `expires_at` and `last_used_at`
+  (both omitted when there is nothing to say), and `hookinlet token list` has **EXPIRES** and **LAST USED** columns
+  (`--json` has the same fields as the API). A use is recorded at most once every five minutes for each token, in the
+  background, so reading does not become a write on every request; a failure to record it is logged and never fails the
+  request. `last_used_at` can therefore lag by a few minutes, and is empty for a token not used since this upgrade.
+- **Migration 0011** adds `expires_at` and `last_used_at` (nullable) to `tokens`.
 
 **Go API**
 
@@ -52,6 +75,28 @@ before can fail: both additions are opt-in.
   has a new optional field, `UnroutedHost`; when set, `AuthenticatorSuite` also checks that every caller of that
   host is refused alike. The suite also now fails an `Authenticator` that asks for a `404` on a host that serves an
   org. An `Authenticator` that does not implement `Unrouted` is unaffected.
+
+- **`inbox.Token` has `ExpiresAt` and `LastUsedAt`** (`*time.Time`). This breaks only code that builds a `Token` with an
+  unkeyed struct literal. `Token.Validate` now refuses an `ExpiresAt` that is not in the future, and there is a new
+  `Token.ValidateAt(now)` for a `Store` with a clock of its own (the SQLite store uses its clock, so a test with a
+  made-up clock behaves). `CreateToken` ignores `LastUsedAt`.
+- **`GetTokenByHash` returns `ErrNotFound` for a token whose `ExpiresAt` has passed**, by the `Store`'s clock; `ListTokens`
+  still returns it. This is documented on the method and checked by the new `TokenExpiry` case of `StoreSuite`. The
+  `Store` interface gains no method.
+- **`inbox.TokenUseRecorder` is a new optional interface of a `Store`**: `TouchToken(ctx, id, at) error` records when a
+  token was last used. The time only moves forward and an unknown token is `ErrNotFound`. The SQLite store implements
+  it. `inboxtest.AssertStoreWrapperForwards` now also fails a wrapper that hides it from a store that has it, so a wrapper
+  of the SQLite store must forward `TouchToken`; without it nothing fails, and tokens just show no last use.
+- **`token.NewAuthenticator` takes options**: `WithClock` (the clock for expiry and for the recording interval;
+  pass `server.Options.Now` if you set one), `WithLastUsedInterval` (default `token.DefaultLastUsedInterval`, five minutes;
+  negative turns recording off) and `WithLogger`. Existing calls compile and behave as before, except that the
+  `Authenticator` now refuses an expired token itself (so a `Store` that does not enforce expiry is still safe) and
+  records last use when the `Store` can.
+- **New suite cases, and whether an implementation that passed before can fail them.** `StoreSuite` has `TokenExpiry`,
+  which skips unless the `Store` returns `ExpiresAt` on a token created with one, and `TokenLastUsed`, which skips unless
+  the `Store` implements `inbox.TokenUseRecorder`; a `Store` that keeps the field must enforce it (so it can fail the case)
+  and one that does not is not failed. `AuthenticatorSuite` has `AnExpiredTokenIsRefusedLikeAnUnknownOne`, which runs only
+  when the new optional field `AuthFixture.Expire` is set.
 
 **Documentation**
 

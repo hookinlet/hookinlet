@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/hookinlet/hookinlet/internal/admin"
 )
@@ -19,8 +20,10 @@ import (
 const accessUsage = `Usage: hookinlet token <command> [flags]
 
 Commands:
-  create    Issue a token for some inboxes (--inbox, repeatable) or all (--all-inboxes)
-  list      List tokens; --inbox SLUG shows those that can read that inbox
+  create    Issue a token for some inboxes (--inbox, repeatable) or all (--all-inboxes),
+            optionally one that stops working after --expires-in or at --expires-at
+  list      List tokens with their expiry and when each was last used; --inbox SLUG
+            shows those that can read that inbox
   revoke ID Revoke a token; it stops working at once
 
 An inbox can have any number of tokens, so a token is replaced without a gap:
@@ -61,6 +64,8 @@ func tokenCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 	c := addConn(fs, getenv)
 	name := fs.String("name", "", "a name for people to tell tokens apart by (required)")
 	all := fs.Bool("all-inboxes", false, "the token reads every inbox, those made later included")
+	expiresIn := fs.String("expires-in", "", "the token stops working after this long, such as 720h or 90d (default: it never expires)")
+	expiresAt := fs.String("expires-at", "", "the token stops working at this time, RFC 3339, such as 2027-01-31T00:00:00Z")
 	var inboxes []string
 	fs.Func("inbox", "slug of an inbox the token may read; repeat for more", func(v string) error {
 		inboxes = append(inboxes, v)
@@ -77,6 +82,11 @@ func tokenCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 		fmt.Fprintln(stderr, "hookinlet: give --inbox SLUG (once per inbox) or --all-inboxes, but not both and not neither")
 		return exitUsage
 	}
+	expires, err := parseExpiry(*expiresIn, *expiresAt, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "hookinlet: %v\n", err)
+		return exitUsage
+	}
 	ctx, stop := notifyContext()
 	defer stop()
 	api, closeAPI, code := c.open(ctx, stderr, false)
@@ -86,7 +96,7 @@ func tokenCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 	defer closeAPI()
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	created, err := api.CreateToken(ctx, admin.TokenParams{Name: *name, Inboxes: inboxes, AllInboxes: *all})
+	created, err := api.CreateToken(ctx, admin.TokenParams{Name: *name, Inboxes: inboxes, AllInboxes: *all, ExpiresAt: expires})
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -96,8 +106,50 @@ func tokenCreate(args []string, getenv func(string) string, stdout, stderr io.Wr
 	}
 	fmt.Fprintf(stdout, "created token %d (%s) for %s\n", created.Record.ID, created.Record.Name, describeScope(created.Record))
 	fmt.Fprintf(stdout, "  agent token:  %s\n", created.Token)
+	if created.Record.ExpiresAt != nil {
+		fmt.Fprintf(stdout, "  expires:      %s\n", *created.Record.ExpiresAt)
+	}
 	fmt.Fprintln(stdout, "\nThe token is shown only once and cannot be recovered; store it now.")
 	return 0
+}
+
+// parseExpiry turns --expires-in (a duration; "d" counts days) or --expires-at
+// (RFC 3339) into a time, or nil when neither is given. Giving both is an error, and
+// so is a time that is not after now: the server would refuse it too, but this says why.
+func parseExpiry(in, at string, now time.Time) (*time.Time, error) {
+	switch {
+	case in != "" && at != "":
+		return nil, errors.New("give --expires-in or --expires-at, not both")
+	case in != "":
+		d, err := parseLife(in)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("--expires-in must be a positive duration such as 720h or 90d, not %q", in)
+		}
+		t := now.Add(d).UTC()
+		return &t, nil
+	case at != "":
+		t, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			return nil, fmt.Errorf("--expires-at must be a time like 2027-01-31T00:00:00Z, not %q", at)
+		}
+		if !t.After(now) {
+			return nil, fmt.Errorf("--expires-at %s is not in the future", at)
+		}
+		return &t, nil
+	}
+	return nil, nil
+}
+
+// parseLife reads a Go duration, or a whole number of days such as "90d".
+func parseLife(s string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.ParseInt(days, 10, 32)
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
 }
 
 func describeScope(t admin.TokenView) string {
@@ -138,16 +190,35 @@ func tokenList(args []string, getenv func(string) string, stdout, stderr io.Writ
 		return 0
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tREADS\tCREATED")
+	fmt.Fprintln(tw, "ID\tNAME\tREADS\tCREATED\tEXPIRES\tLAST USED")
+	now := time.Now()
 	for _, v := range views {
 		reads := "all inboxes"
 		if !v.AllInboxes {
 			reads = strings.Join(v.Inboxes, ", ")
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", v.ID, v.Name, reads, v.CreatedAt)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", v.ID, v.Name, reads, v.CreatedAt, expiryColumn(v.ExpiresAt, now), orDash(v.LastUsedAt))
 	}
 	_ = tw.Flush()
 	return 0
+}
+
+// expiryColumn is "never" for a token that does not expire, and marks one that has.
+func expiryColumn(expires *string, now time.Time) string {
+	if expires == nil {
+		return "never"
+	}
+	if t, err := time.Parse(admin.TimeLayout, *expires); err == nil && !t.After(now) {
+		return *expires + " (expired)"
+	}
+	return *expires
+}
+
+func orDash(s *string) string {
+	if s == nil {
+		return "-"
+	}
+	return *s
 }
 
 func tokenRevoke(args []string, getenv func(string) string, stdout, stderr io.Writer) int {

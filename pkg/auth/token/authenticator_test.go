@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
 	"github.com/hookinlet/hookinlet/pkg/inbox"
@@ -28,22 +29,31 @@ type fixture struct {
 	tokenBoth, tokenAll string
 	idA                 inbox.TokenID
 	a, b                *inbox.Inbox
+	// clock is the time of the store and the authenticator.
+	clock *inboxtest.Clock
 }
 
 func newFixture(t *testing.T, admin string) *fixture {
 	t.Helper()
-	store, err := sqlite.Open(t.Context(), t.TempDir())
+	clock := inboxtest.NewClock(time.Now())
+	store, err := sqlite.Open(t.Context(), t.TempDir(), sqlite.WithClock(clock.Now))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	f := &fixture{store: store, auth: token.NewAuthenticator(store, admin)}
+	f := &fixture{store: store, auth: token.NewAuthenticator(store, admin, token.WithClock(clock.Now)), clock: clock}
 	issue := func(name string, all bool, ids ...inbox.ID) (string, inbox.TokenID) {
 		tok, hash, err := token.Generate()
 		if err != nil {
 			t.Fatal(err)
 		}
-		rec := &inbox.Token{Name: name, Hash: hash, AllInboxes: all, InboxIDs: ids}
+		// Token A expires soonest, so that a test can expire it alone.
+		life := 30 * 24 * time.Hour
+		if name == "a" {
+			life = time.Hour
+		}
+		exp := clock.Now().Add(life)
+		rec := &inbox.Token{Name: name, Hash: hash, AllInboxes: all, InboxIDs: ids, ExpiresAt: &exp}
 		if err := store.CreateToken(t.Context(), rec); err != nil {
 			t.Fatal(err)
 		}
@@ -75,17 +85,26 @@ func (f *fixture) revoke(tok string) {
 	}
 }
 
+// expire moves the clock to just past the token's expiry.
+func (f *fixture) expire(tok string) {
+	rec, err := f.store.GetTokenByHash(context.Background(), token.Hash(tok))
+	if err != nil {
+		panic(err)
+	}
+	f.clock.Set(rec.ExpiresAt.Add(time.Second))
+}
+
 func TestConformance(t *testing.T) {
 	inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
 		f := newFixture(t, adminToken)
 		return inboxtest.AuthFixture{
-			Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, AdminToken: adminToken, Revoke: f.revoke,
+			Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, AdminToken: adminToken, Revoke: f.revoke, Expire: f.expire,
 		}
 	})
 	t.Run("without an admin token", func(t *testing.T) {
 		inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
 			f := newFixture(t, "")
-			return inboxtest.AuthFixture{Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, Revoke: f.revoke}
+			return inboxtest.AuthFixture{Authenticator: f.auth, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB, TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, Revoke: f.revoke, Expire: f.expire}
 		})
 	})
 }

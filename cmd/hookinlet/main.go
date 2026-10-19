@@ -246,7 +246,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger) (*se
 		ShutdownTimeout:         cfg.ShutdownTimeout,
 		Store:                   store,
 		SecretBox:               box,
-		Authenticator:           token.NewAuthenticator(store, cfg.AdminToken.Reveal()),
+		Authenticator:           token.NewAuthenticator(store, cfg.AdminToken.Reveal(), token.WithLogger(log)),
 		Notifier:                local.New(),
 		MaxStreams:              cfg.MaxStreams,
 		MaxStreamsPerInbox:      cfg.MaxStreamsPerInbox,

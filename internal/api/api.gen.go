@@ -491,6 +491,9 @@ type CreateToken struct {
 	// AllInboxes Read every inbox. Give this or `inboxes`.
 	AllInboxes *bool `json:"all_inboxes,omitempty"`
 
+	// ExpiresAt When the token stops working. It must be in the future. Omit it for a token that does not expire. It cannot be changed afterwards: to extend a token's life, issue another and revoke this one.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
 	// Inboxes Slugs of the inboxes the token may read. Give this or `all_inboxes`.
 	Inboxes *[]string `json:"inboxes,omitempty"`
 
@@ -961,11 +964,17 @@ type Token struct {
 	// AllInboxes The token reads every inbox, those made later included.
 	AllInboxes bool      `json:"all_inboxes"`
 	CreatedAt  time.Time `json:"created_at"`
-	Id         int       `json:"id"`
+
+	// ExpiresAt When the token stops working: from then on it is refused like a token that does not exist. Absent for a token that never expires. The token stays in the list so that it can be revoked.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Id        int        `json:"id"`
 
 	// Inboxes The slugs of the inboxes it reads. Empty when `all_inboxes` is true.
 	Inboxes []string `json:"inboxes"`
-	Name    string   `json:"name"`
+
+	// LastUsedAt When the token was last seen authenticating a request. Approximate, since a use is noted at most once every few minutes. Absent if it has not been used, or if the store does not record it.
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	Name       string     `json:"name"`
 }
 
 // TokenCreated defines model for TokenCreated.

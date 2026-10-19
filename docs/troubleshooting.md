@@ -95,7 +95,7 @@ A delivery to an inbox whose verifier is `none` is stored, but never marked `ver
 
 | You get | Because | Do |
 |---|---|---|
-| `401` | Missing, malformed or revoked token. | Send `Authorization: Bearer hki_...`. Tokens in a URL are not accepted. |
+| `401` | Missing, malformed, revoked or expired token. | Send `Authorization: Bearer hki_...`. Tokens in a URL are not accepted. `hookinlet token list` shows an expired token (the server does not say why it refused one). |
 | `403` on `/v1/admin/...` | An agent token. | Use the admin token. |
 | `404` on an inbox that exists | The token does not cover that inbox. It is indistinguishable from "no such inbox" by design. | `hookinlet token list --inbox SLUG`; issue a token for it. |
 | `404` on `/v1/admin/...` | The admin API is off (`HOOKINLET_ADMIN_ENABLED=false`) or on its own address (`HOOKINLET_ADMIN_LISTEN_ADDR`). | Use that address. |

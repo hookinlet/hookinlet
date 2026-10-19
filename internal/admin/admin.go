@@ -228,7 +228,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 	if err := s.Store.CreateInbox(ctx, in); err != nil {
 		return nil, err
 	}
-	tok, err := s.issue(ctx, DefaultTokenName, []inbox.ID{in.ID}, false)
+	tok, err := s.issue(ctx, DefaultTokenName, []inbox.ID{in.ID}, false, nil)
 	if err != nil {
 		// An inbox nobody can read is no use; undo it rather than leave it behind.
 		_ = s.Store.DeleteInbox(context.WithoutCancel(ctx), in.ID)

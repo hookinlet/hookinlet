@@ -151,6 +151,42 @@ func TestRevokingATokenEndsStreamsOpenedWithIt(t *testing.T) {
 	}
 }
 
+// An expiry is a revocation by the clock. A stream authenticated before it must not
+// outlive it by more than the revalidation interval (30s by default), and the token must
+// not open a new one.
+func TestAnExpiringTokenEndsStreamsOpenedWithIt(t *testing.T) {
+	ae, base, _ := streamEnv(t, func(o *Options) { o.StreamRevalidateInterval = 100 * time.Millisecond })
+	tok, hash, err := token.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Now().Add(1500 * time.Millisecond)
+	if err := ae.store.CreateToken(t.Context(), &inbox.Token{Name: "short", Hash: hash, InboxIDs: []inbox.ID{ae.a.ID}, ExpiresAt: &expires}); err != nil {
+		t.Fatal(err)
+	}
+	short := openStream(t, ae.streamURL(base, "agent-a", ""), tok, nil)
+	long := openStream(t, ae.streamURL(base, "agent-a", ""), ae.tokenA, nil)
+	if short.status != 200 {
+		t.Fatalf("the token before it expires: status %d", short.status)
+	}
+	short.next(time.Second)
+	long.next(time.Second)
+	if short.ended(500 * time.Millisecond) {
+		t.Fatal("the stream ended before its token expired")
+	}
+	if !short.ended(5 * time.Second) {
+		t.Fatal("a stream opened with a token that has since expired is still open")
+	}
+	if c := openStream(t, ae.streamURL(base, "agent-a", ""), tok, nil); c.status != 401 {
+		t.Errorf("the expired token reconnecting: status %d, want 401", c.status)
+	}
+	select {
+	case <-long.done:
+		t.Error("another token's stream was ended")
+	default:
+	}
+}
+
 // Deleting an inbox publishes nothing, so a stream that only waits for signals
 // would idle forever on a dead inbox. It must notice on its own.
 func TestADeletedInboxEndsItsStreamWithoutAnySignal(t *testing.T) {

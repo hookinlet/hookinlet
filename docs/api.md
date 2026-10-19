@@ -43,6 +43,9 @@ Send `Authorization: Bearer <token>`. Two kinds of token work:
   gets the admin API;
 - the **admin token** from `HOOKINLET_ADMIN_TOKEN`, which reads every inbox. It must be at least 32 characters with no whitespace; `openssl rand -base64 32` makes a good one.
 
+An agent token may have an `expires_at` (see [Administration](admin.md#expiry-and-last-use)). From
+that moment it is refused with the same `401` as a token that does not exist.
+
 Tokens in URLs are not accepted, because URLs end up in logs.
 
 Two responses are deliberately alike:
@@ -325,8 +328,8 @@ are a `400`.
   finish at once; deliveries that are mid-way through being stored are allowed to
   complete. Reconnect with `Last-Event-ID` to carry on.
 - The inbox is deleted.
-- The token the stream was opened with is revoked, or the inbox it
-  belonged to is deleted. Open streams are re-checked every 30 seconds
+- The token the stream was opened with is revoked or has expired (its `expires_at` has
+  passed), or the inbox it belonged to is deleted. Open streams are re-checked every 30 seconds
   (`StreamRevalidateInterval`), so access ends within about that long. A
   re-check that cannot be made, because the store is erroring or the server is too busy (a long
   backup under heavy load is the usual cause), does not end the stream: it stays open until a check
