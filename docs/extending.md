@@ -262,7 +262,9 @@ answer nor the tool error carries your error's text.
 ### Which request a hook is called for
 
 `inbox.AccessFrom(ctx)` tells `Admit`, `BeforeIngest`, `AfterIngest`, `ObserveIngest`
-and `MaxUnverified` which request they are called for, for an audit trail:
+and `MaxUnverified` which request they are called for, for an audit trail. An
+`Authenticator` reads it from `r.Context()`, since the server attaches it before it
+calls `Authenticate`:
 
 - `Operation` is the operation's `operationId` in [the OpenAPI document](openapi.json)
   (`getInbox`, `headGetInbox`, `listMessages`, `headListMessages`, `getMessage`,
@@ -271,6 +273,18 @@ and `MaxUnverified` which request they are called for, for an audit trail:
   an MCP tool call (`mcp.list_inboxes`, `mcp.query_messages`, `mcp.get_message`,
   `mcp.wait_for_messages`). It is a fixed name, never a path.
 - `RequestID` is the request's `X-Request-Id`, the `request_id` of its access log line.
+- `ClientIP` is the address the request came from, the value ingest stores as a
+  message's `source_ip`. It is the connection's peer, unless the peer is in
+  `Options.TrustedProxies`, and then the client its `X-Forwarded-For` names; a header
+  from any other peer is ignored, so a caller cannot choose it. It may be **empty**
+  (the peer address could not be read). An allowlist built on it must **fail closed**:
+  an empty `ClientIP` is not on the list, and a refusal is the same
+  `inbox.ErrUnauthenticated` as for a bad credential.
+
+For `Authenticate`, `Operation` is empty for the `405` the server sends for a method a
+path does not take, and `mcp` for the HTTP request that carries MCP tool calls (the
+credential is checked before the tool is known). The recheck of a stream or an MCP
+wait sees that stream's operation or `mcp.` and the tool's name.
 
 It is false outside a request. `inbox.WithAccess` makes a context that carries one, for
 testing a hook.

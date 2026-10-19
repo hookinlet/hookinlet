@@ -97,6 +97,12 @@ func (s *Server) takeStream(ctx context.Context, p inbox.Principal, in *inbox.In
 // as being refused, and a passing database error must not disconnect every agent.
 func (s *Server) stillAllowed(r *http.Request, id inbox.ID) func(ctx context.Context) (bool, error) {
 	return func(ctx context.Context) (bool, error) {
+		// ctx carries the AccessInfo of the stream or the MCP tool call (see enforce
+		// and mcpTools.bind), which is what the Authenticator is told again. A caller
+		// that has none still gets the request's own.
+		if _, ok := inbox.AccessFrom(ctx); !ok {
+			ctx = inbox.WithAccess(ctx, s.accessInfo(r, ""))
+		}
 		principal, err := s.opts.Authenticator.Authenticate(r.WithContext(ctx))
 		switch {
 		case errors.Is(err, inbox.ErrUnauthenticated):
