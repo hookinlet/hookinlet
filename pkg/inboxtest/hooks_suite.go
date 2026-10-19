@@ -156,7 +156,7 @@ func checkLimiterConcurrent(t testing.TB, l inbox.UnverifiedLimiter) {
 // TestTheObserverSuiteCoversEveryOutcome fails when one is missing.
 var ingestOutcomes = []inbox.IngestOutcome{
 	inbox.IngestStored, inbox.IngestDuplicate, inbox.IngestHandshake, inbox.IngestVerificationFailed,
-	inbox.IngestRateLimited, inbox.IngestQuotaExceeded, inbox.IngestForbidden, inbox.IngestUnverifiedLimit,
+	inbox.IngestRateLimited, inbox.IngestQuotaExceeded, inbox.IngestForbidden, inbox.IngestBodyRefused, inbox.IngestUnverifiedLimit,
 	inbox.IngestStorageFull, inbox.IngestOverloaded, inbox.IngestTooLarge, inbox.IngestBadRequest,
 	inbox.IngestNotFound, inbox.IngestError,
 }
@@ -246,6 +246,130 @@ func checkObserverConcurrent(t testing.TB, o inbox.IngestObserver) {
 				events := ingestEvents()
 				for i := range 200 {
 					o.ObserveIngest(t.Context(), events[(g+i)%len(events)])
+				}
+			})
+		}
+		wg.Wait()
+	})
+}
+
+// ---- BodyScreener ----
+
+// screenInboxes are inboxes with a limit on the body, which a screener's replacement
+// is held to.
+func screenInboxes() []*inbox.Inbox {
+	ins := hookInboxes()
+	ins[0].MaxBodyBytes = 1 << 20
+	ins[1].MaxBodyBytes = 4096
+	return ins
+}
+
+// screenBodies are bodies of the kinds a screener meets, none over the smallest limit
+// of screenInboxes.
+func screenBodies() [][]byte {
+	return [][]byte{
+		{}, []byte("x"), []byte(`{"a":{"b":[1,2,3]},"card":"4111111111111111"}`),
+		{0, 1, 2, 0xff, 0xfe, 0}, bytes.Repeat([]byte("abc"), 1300), []byte("\xed\xa0\x80 not UTF-8"),
+	}
+}
+
+// BodyScreenerSuite runs the checks that hold for every inbox.BodyScreener.
+// newScreener returns a screener set up as the embedder uses it. ScreenBody runs on
+// the request's goroutine before a delivery is stored, so the suite checks that it
+// returns at once, with any context, for bodies of every kind and for a delivery
+// that verified and one that did not; that it does not change the body or the inbox
+// it is given (a screener that edits the body in place and says to keep it would
+// store what the signature did not cover, and the server refuses it); that a
+// replacement is no longer than the inbox's MaxBodyBytes; and that it is safe to
+// call from many requests at once. What it refuses and what it replaces are for the
+// embedder's own tests.
+func BodyScreenerSuite(t *testing.T, newScreener func(t *testing.T) inbox.BodyScreener) {
+	t.Helper()
+	for _, c := range []struct {
+		name string
+		fn   func(testing.TB, inbox.BodyScreener)
+	}{
+		{"ReturnsAtOnceForEveryBodyAndContext", checkScreenerReturns},
+		{"DoesNotChangeTheBodyOrItsInbox", checkScreenerLeavesTheBody},
+		{"ReplacementsFitTheInbox", checkScreenerReplacementsFit},
+		{"ConcurrentUseIsSafe", checkScreenerConcurrent},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newScreener(t)
+			if s == nil {
+				t.Fatal("newScreener returned nil")
+			}
+			c.fn(t, s)
+		})
+	}
+}
+
+func checkScreenerReturns(t testing.TB, s inbox.BodyScreener) {
+	t.Helper()
+	for name, ctx := range hookContexts(t) {
+		for _, in := range screenInboxes() {
+			for i, body := range screenBodies() {
+				for _, verified := range []bool{true, false} {
+					what := fmt.Sprintf("ScreenBody of body %d (verified=%v) with %s", i, verified, name)
+					req := &inbox.BodyScreenRequest{Inbox: in, Verified: verified, Body: bytes.Clone(body)}
+					if !within(t, what, func() { _, _ = s.ScreenBody(ctx, req) }) {
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
+func checkScreenerLeavesTheBody(t testing.TB, s inbox.BodyScreener) {
+	t.Helper()
+	for _, in := range screenInboxes() {
+		for i, body := range screenBodies() {
+			wantInbox, wantBody := cloneInbox(in), bytes.Clone(body)
+			given := bytes.Clone(body)
+			if !within(t, fmt.Sprintf("ScreenBody of body %d", i), func() {
+				_, _ = s.ScreenBody(t.Context(), &inbox.BodyScreenRequest{Inbox: in, Verified: true, Body: given})
+			}) {
+				return
+			}
+			if !bytes.Equal(given, wantBody) {
+				t.Errorf("ScreenBody changed the body it was given (body %d): the server stores what verified, or a replacement, and never the edited original", i)
+			}
+			if !reflect.DeepEqual(in, wantInbox) {
+				t.Errorf("ScreenBody changed the inbox it was given:\n got  %+v\n want %+v", in, wantInbox)
+			}
+		}
+	}
+}
+
+func checkScreenerReplacementsFit(t testing.TB, s inbox.BodyScreener) {
+	t.Helper()
+	for _, in := range screenInboxes() {
+		for i, body := range screenBodies() {
+			var dec inbox.BodyDecision
+			if !within(t, fmt.Sprintf("ScreenBody of body %d", i), func() {
+				dec, _ = s.ScreenBody(t.Context(), &inbox.BodyScreenRequest{Inbox: in, Verified: true, Body: bytes.Clone(body)})
+			}) {
+				return
+			}
+			if dec.Replace && int64(len(dec.Body)) > in.MaxBodyBytes {
+				t.Errorf("ScreenBody replaced body %d with %d bytes, over the inbox's MaxBodyBytes of %d; the server refuses it with a 500", i, len(dec.Body), in.MaxBodyBytes)
+			}
+		}
+	}
+}
+
+func checkScreenerConcurrent(t testing.TB, s inbox.BodyScreener) {
+	t.Helper()
+	_ = within(t, "concurrent calls to ScreenBody", func() {
+		var wg sync.WaitGroup
+		for g := range 16 {
+			wg.Go(func() {
+				ins, bodies := screenInboxes(), screenBodies()
+				for i := range 200 {
+					_, _ = s.ScreenBody(t.Context(), &inbox.BodyScreenRequest{
+						Inbox: ins[(g+i)%2], Verified: i%2 == 0, Body: bytes.Clone(bodies[(g+i)%len(bodies)]),
+					})
 				}
 			})
 		}

@@ -917,6 +917,9 @@ type Message struct {
 	Inbox   string              `json:"inbox"`
 	Method  MessageMethod       `json:"method"`
 
+	// Modified Present, and `true`, only when the stored body is not the bytes the sender sent: the server's embedder replaced it before storing (a redaction, say). The sender's signature covered the original bytes and cannot be checked against this body, though `verified` still says the delivery verified. Absent for every message stored as received, which is the default.
+	Modified *bool `json:"modified,omitempty"`
+
 	// Path The part of the ingest URL after the inbox key.
 	Path  string `json:"path"`
 	Query string `json:"query"`
@@ -1369,10 +1372,10 @@ type ServerInterface interface {
 	// HeadGetMessage Headers only: One message
 	// (HEAD /v1/inboxes/{slug}/messages/{seq})
 	HeadGetMessage(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageParams)
-	// GetMessageRaw The exact bytes received
+	// GetMessageRaw The stored bytes
 	// (GET /v1/inboxes/{slug}/messages/{seq}/raw)
 	GetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params GetMessageRawParams)
-	// HeadGetMessageRaw Headers only: The exact bytes received
+	// HeadGetMessageRaw Headers only: The stored bytes
 	// (HEAD /v1/inboxes/{slug}/messages/{seq}/raw)
 	HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageRawParams)
 	// ListReaders Named readers and their lag
@@ -10503,10 +10506,10 @@ type StrictServerInterface interface {
 	// HeadGetMessage Headers only: One message
 	// (HEAD /v1/inboxes/{slug}/messages/{seq})
 	HeadGetMessage(ctx context.Context, request HeadGetMessageRequestObject) (HeadGetMessageResponseObject, error)
-	// GetMessageRaw The exact bytes received
+	// GetMessageRaw The stored bytes
 	// (GET /v1/inboxes/{slug}/messages/{seq}/raw)
 	GetMessageRaw(ctx context.Context, request GetMessageRawRequestObject) (GetMessageRawResponseObject, error)
-	// HeadGetMessageRaw Headers only: The exact bytes received
+	// HeadGetMessageRaw Headers only: The stored bytes
 	// (HEAD /v1/inboxes/{slug}/messages/{seq}/raw)
 	HeadGetMessageRaw(ctx context.Context, request HeadGetMessageRawRequestObject) (HeadGetMessageRawResponseObject, error)
 	// ListReaders Named readers and their lag

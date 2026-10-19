@@ -18,7 +18,8 @@ import (
 )
 
 const messageCols = `seq, received_at, method, path_suffix, query, headers, content_type, size, verified,
-	verify_error, delivery_id, event_type, source_ip`
+	verify_error, delivery_id, event_type, source_ip,
+	EXISTS (SELECT 1 FROM message_modified WHERE message_id = messages.id)`
 
 // bodyExpr returns the SQL expression that selects a message body and the
 // argument it needs, if any. With a limit, bodies above it are replaced by NULL
@@ -43,11 +44,11 @@ func scanMessage(row rowScanner, inboxID inbox.ID, bodyLimit *int64) (*inbox.Mes
 		m                                       = inbox.Message{InboxID: inboxID}
 		receivedAt, headers                     string
 		body                                    []byte
-		verified                                int
+		verified, modified                      int
 		verifyErr, deliveryID, eventType, srcIP sql.NullString
 	)
 	if err := row.Scan(&m.Seq, &receivedAt, &m.Method, &m.PathSuffix, &m.Query, &headers, &m.ContentType, &m.Size,
-		&verified, &verifyErr, &deliveryID, &eventType, &srcIP, &body); err != nil {
+		&verified, &verifyErr, &deliveryID, &eventType, &srcIP, &modified, &body); err != nil {
 		return nil, err
 	}
 	var err error
@@ -58,7 +59,7 @@ func scanMessage(row rowScanner, inboxID inbox.ID, bodyLimit *int64) (*inbox.Mes
 	if err := json.Unmarshal([]byte(headers), &m.Headers); err != nil {
 		return nil, fmt.Errorf("sqlite: corrupt headers for seq %d: %w", m.Seq, err)
 	}
-	m.Verified = verified != 0
+	m.Verified, m.Modified = verified != 0, modified != 0
 	m.VerifyError, m.DeliveryID, m.EventType, m.SourceIP = verifyErr.String, deliveryID.String, eventType.String, srcIP.String
 
 	switch withheld := bodyLimit != nil && m.Size > *bodyLimit; {
@@ -152,12 +153,18 @@ func (s *Store) Append(ctx context.Context, inboxID inbox.ID, m *inbox.NewMessag
 			nullString(m.DeliveryID), nullString(m.EventType), nullString(m.SourceIP), nullString(dedupeKey)); err != nil {
 			return fmt.Errorf("sqlite: insert message: %w", err)
 		}
+		if m.Modified {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO message_modified (message_id)
+				SELECT id FROM messages WHERE inbox_id = ? AND seq = ?`, int64(inboxID), seq); err != nil {
+				return fmt.Errorf("sqlite: mark message modified: %w", err)
+			}
+		}
 
 		stored, created = &inbox.Message{
 			InboxID: inboxID, Seq: seq, ReceivedAt: receivedAt, Method: m.Method, PathSuffix: m.PathSuffix,
 			Query: m.Query, Headers: headers, ContentType: m.ContentType, Body: cloneBytes(body), Size: int64(len(body)),
 			Verified: m.Verified, VerifyError: m.VerifyError, DeliveryID: m.DeliveryID, EventType: m.EventType,
-			SourceIP: m.SourceIP,
+			SourceIP: m.SourceIP, Modified: m.Modified,
 		}, true
 		return nil
 	})

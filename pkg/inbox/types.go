@@ -281,6 +281,9 @@ type NewMessage struct {
 	Body        []byte
 	Verified    bool
 	VerifyError string
+	// Modified says Body is not what the sender sent: a BodyScreener replaced it. A
+	// Store keeps it with the message and returns it as Message.Modified.
+	Modified bool
 	// DeliveryID, when non-empty, identifies the delivery.
 	DeliveryID string
 	// DedupeKey, when non-empty, is what deduplication compares (see
@@ -326,9 +329,14 @@ type Message struct {
 	Size        int64 // size of the stored body, set even when Body is withheld
 	Verified    bool
 	VerifyError string
-	DeliveryID  string
-	EventType   string
-	SourceIP    string
+	// Modified is true when Body is not the bytes the sender sent, because a
+	// BodyScreener replaced them. A signature covered the original, so it cannot be
+	// checked against Body; Verified still says the delivery verified. False for
+	// every message stored without a screener.
+	Modified   bool
+	DeliveryID string
+	EventType  string
+	SourceIP   string
 }
 
 // Query selects messages from one inbox. Filters combine with AND, except

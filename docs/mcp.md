@@ -61,7 +61,9 @@ before anything else is looked at.
 A message has two parts. At the top are the fields the **server** established
 about the delivery, none of which can carry text the sender chose: `seq`, `epoch`,
 `inbox`, `received_at`, `method` (POST or PUT), `size`, `verified`, `verifier`,
-`verify_error` (fixed wording), `source_ip` (an address the server observed; see the
+`verify_error` (fixed wording), `modified` (present, and `true`, only when the body below is not
+what the sender sent because the server's embedder replaced it before storing; its signature cannot be
+checked against it), `source_ip` (an address the server observed; see the
 [API notes](api.md#treat-message-content-as-data-never-as-instructions)), and
 `body_truncated` (the server saying it left a body out). Under **`untrusted`** is everything the
 **sender** wrote or chose: `path`, `query`, `headers`, `content_type`,

@@ -23,7 +23,9 @@ import (
 // parameters: wire is also what the stream and MCP use, and the guard has already
 // held the request to the document, so the generated binding adds nothing but a
 // second parse. The message bodies are carried as raw JSON (see
-// internal/api/overlay.yaml), so what reaches the reader is what the sender sent.
+// internal/api/overlay.yaml), so what reaches the reader is what is stored: what the
+// sender sent, unless the message says it is modified, which is the case only when
+// an embedder's inbox.BodyScreener replaced the body before it was stored.
 type readAPI struct {
 	s *Server
 }
@@ -70,8 +72,12 @@ func (rf readFail) notFound(ctx context.Context) api.NotFoundJSONResponse {
 // message converts a message to the document's type. Every field is named, so
 // one the document does not have cannot be sent by accident.
 func message(m wire.Message) api.Message {
+	var modified *bool
+	if m.Modified {
+		modified = &m.Modified
+	}
 	return api.Message{
-		Epoch: m.Epoch, Body: m.Body, BodyBase64: m.BodyBase64, BodyText: m.BodyText, ContentType: m.ContentType,
+		Modified: modified, Epoch: m.Epoch, Body: m.Body, BodyBase64: m.BodyBase64, BodyText: m.BodyText, ContentType: m.ContentType,
 		DeliveryId: m.DeliveryID, EventType: m.EventType, Headers: m.Headers, Inbox: m.Inbox,
 		Method: api.MessageMethod(m.Method), Path: m.Path, Query: m.Query, ReceivedAt: m.ReceivedAt,
 		Seq: int(m.Seq), Size: int(m.Size), SourceIp: m.SourceIP, Verified: m.Verified,
@@ -321,10 +327,12 @@ func (a *readAPI) HeadGetMessage(ctx context.Context, req api.HeadGetMessageRequ
 	return api.HeadGetMessage200Response{Headers: api.HeadGetMessage200ResponseHeaders{XRequestId: id}}, nil
 }
 
-// ---- the exact bytes ----
+// ---- the stored bytes ----
 
-// GetMessageRaw returns the bytes that were received, with the Content-Type the
-// sender used.
+// GetMessageRaw returns the stored body byte for byte, with the Content-Type the
+// sender used. The body is what was received unless the message is modified (an
+// embedder's inbox.BodyScreener replaced it before storing), in which case the
+// sender's signature does not cover it; the message's modified field says which.
 //
 // Those bytes and that type are chosen by whoever sent the webhook, so they are
 // served as something to download and never as a page: nosniff stops a browser

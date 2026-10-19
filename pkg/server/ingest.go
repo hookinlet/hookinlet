@@ -58,6 +58,9 @@ type ingestResult struct {
 	// retryAfter is the Retry-After for a refusal by BeforeIngest that said when to
 	// retry (see retryAfterOf), or "".
 	retryAfter string
+	// bodyRefused is set on a refusal by the Hooks' BodyScreener, whose status is
+	// one a BeforeIngest refusal has too; it is what tells an observer which it was.
+	bodyRefused bool
 }
 
 func refuse(status int, code, msg string) ingestResult {
@@ -197,6 +200,20 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return ingestResult{status: http.StatusOK, challenge: res.Challenge}
 	}
 
+	// 5b. Let the embedder look at a body that verified, or was kept unverified: refuse
+	// it, or store something else in its place. The dedupe key is made first, from
+	// what was received, so a repeat is recognised whatever the screener makes of it.
+	dedupe := dedupeKey(res, body)
+	stored, modified := body, false
+	if s.screener != nil {
+		var release func()
+		var refused *ingestResult
+		if stored, modified, release, refused = s.screenBody(ctx, in, verified, body); refused != nil {
+			return *refused
+		}
+		defer release()
+	}
+
 	// 6. Store it. Only once this returns is the delivery safe to acknowledge.
 	//
 	var redact []string
@@ -205,9 +222,10 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 	}
 	eventType := res.EventType
 	// The pointer reads the body, which is only worth trusting, or even parsing,
-	// once the delivery has verified.
+	// once the delivery has verified. It reads the body that is stored, so that
+	// nothing is kept in a message's fields that a screener took out of its body.
 	if eventType == "" && verified && in.EventTypePointer != "" {
-		if v, ok := jsonptr.String(body, in.EventTypePointer); ok && v != "" && len(v) <= maxEventTypeLen {
+		if v, ok := jsonptr.String(stored, in.EventTypePointer); ok && v != "" && len(v) <= maxEventTypeLen {
 			eventType = v
 		}
 	}
@@ -217,11 +235,12 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 		Query:       r.URL.RawQuery,
 		Headers:     inbox.RedactHeaders(r.Header, redact...),
 		ContentType: r.Header.Get("Content-Type"),
-		Body:        body,
+		Body:        stored,
 		Verified:    verified,
 		VerifyError: verifyReason,
+		Modified:    modified,
 		DeliveryID:  res.DeliveryID,
-		DedupeKey:   dedupeKey(res, body),
+		DedupeKey:   dedupe,
 		EventType:   eventType,
 		SourceIP:    clientIP(r, s.opts.TrustedProxies),
 	})
@@ -242,9 +261,12 @@ func (s *Server) deliver(ctx context.Context, w http.ResponseWriter, r *http.Req
 	// may turn into an error response: the sender would retry a delivery we
 	// already hold.
 	s.afterCommit(ctx, in, msg, created)
-	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery",
-		inboxAttrs(in, slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
-			slog.Bool("verified", verified), slog.Bool("duplicate", !created))...)
+	attrs := inboxAttrs(in, slog.Int64("seq", msg.Seq), slog.Int("size", len(body)),
+		slog.Bool("verified", verified), slog.Bool("duplicate", !created))
+	if modified {
+		attrs = append(attrs, slog.Bool("modified", true), slog.Int("stored_size", len(stored)))
+	}
+	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery", attrs...)
 	return ingestResult{status: http.StatusOK, seq: msg.Seq, duplicate: !created, verified: msg.Verified}
 }
 
@@ -302,6 +324,9 @@ func (s *Server) signatureHeaders(in *inbox.Inbox) []string {
 
 // ingestOutcome names how a delivery ended for an IngestObserver.
 func ingestOutcome(res ingestResult) inbox.IngestOutcome {
+	if res.bodyRefused {
+		return inbox.IngestBodyRefused
+	}
 	if res.status == http.StatusOK {
 		switch {
 		case res.challenge != nil:
@@ -419,15 +444,84 @@ func requestHost(r *http.Request) string {
 	return name
 }
 
+// screenBody asks the Hooks' BodyScreener about a body that verified (or is kept
+// unverified), and returns the body to store and whether it is a replacement. A
+// non-nil result is the answer to give instead of storing.
+//
+// A replacement is held in memory beside the original, so its bytes are taken from
+// the same budget the original was counted in, and release gives them back once the
+// delivery is stored or refused; a replacement the budget has no room for is told to
+// come back. It is never longer than the inbox's MaxBodyBytes, and is refused as an
+// internal failure, not truncated, when it is. A replacement equal to the original is
+// not a modification. The screener is not given a copy, so one that changes the bytes
+// in place and then says to keep them is caught by a hash taken before the call: the
+// stored message would otherwise differ from what verified without saying so.
+//
+// A panic in the screener is answered as an internal failure and nothing is stored:
+// unlike an observer, whose outcome is already decided, a screener that redacts must
+// not fail open. Only the type of the panic value is logged, since what it holds may
+// be the body.
+func (s *Server) screenBody(ctx context.Context, in *inbox.Inbox, verified bool, body []byte) (stored []byte, modified bool, release func(), refused *ingestResult) {
+	release = func() {}
+	before := sha256.Sum256(body)
+	dec, err := func() (dec inbox.BodyDecision, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				s.log.LogAttrs(ctx, slog.LevelError, "panic in body screener",
+					inboxAttrs(in, slog.String("panic_type", fmt.Sprintf("%T", rec)))...)
+				err = errors.New("panic in body screener")
+			}
+		}()
+		return s.screener.ScreenBody(ctx, &inbox.BodyScreenRequest{Inbox: in, Verified: verified, Body: body})
+	}()
+	fail := func(res ingestResult) ([]byte, bool, func(), *ingestResult) { return nil, false, release, &res }
+	if err != nil {
+		res := s.refusedBy(ctx, in, err, "body screener")
+		res.bodyRefused = res.status != http.StatusInternalServerError
+		return fail(res)
+	}
+	if !dec.Replace {
+		if sha256.Sum256(body) != before {
+			return fail(s.internalFailure(ctx, "body screener", errors.New("it changed the body it was given and said to keep it; return a replacement instead"), inboxAttrs(in)...))
+		}
+		return body, false, release, nil
+	}
+	repl := dec.Body
+	if repl == nil {
+		repl = []byte{}
+	}
+	if int64(len(repl)) > in.MaxBodyBytes {
+		return fail(s.internalFailure(ctx, "body screener", fmt.Errorf("its replacement is %d bytes, over the inbox's limit of %d", len(repl), in.MaxBodyBytes), inboxAttrs(in)...))
+	}
+	if sha256.Sum256(repl) == before {
+		// What was received, whatever the screener did to the slice it was handed; the
+		// hash is of the bytes as they arrived.
+		return repl, false, release, nil
+	}
+	n := int64(len(repl))
+	if !s.ingestBudget.add(in.ID, s.ingestBudget.perInbox(in.MaxBodyBytes), n) {
+		return fail(refuse(http.StatusServiceUnavailable, "overloaded", "too many deliveries are being received at once; retry shortly"))
+	}
+	return repl, true, func() { s.ingestBudget.sub(in.ID, n) }, nil
+}
+
 // rejected is the answer to a delivery that BeforeIngest refused.
 func (s *Server) rejected(ctx context.Context, in *inbox.Inbox, err error) ingestResult {
+	return s.refusedBy(ctx, in, err, hookBeforeIngest)
+}
+
+// hookBeforeIngest names BeforeIngest in a refusal's log lines, which say nothing
+// more for it than they always have; any other hook is named in them.
+const hookBeforeIngest = "before-ingest hook"
+
+// refusedBy is the answer to a delivery that a hook, named for the log, refused.
+func (s *Server) refusedBy(ctx context.Context, in *inbox.Inbox, err error, hook string) ingestResult {
 	var res ingestResult
 	switch {
 	case errors.Is(err, inbox.ErrNotFound):
 		// Answered as an unknown ingest key is, with nothing of the hook's: no
 		// Retry-After, and nothing logged above debug (an unknown key logs nothing).
-		s.log.LogAttrs(ctx, slog.LevelDebug, "delivery refused by hook as not found",
-			inboxAttrs(in, slog.String("reason", err.Error()))...)
+		s.log.LogAttrs(ctx, slog.LevelDebug, "delivery refused by hook as not found", refusalAttrs(in, err, hook)...)
 		return refuse(http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, inbox.ErrRateLimited):
 		res = refuse(http.StatusTooManyRequests, "rate_limited", "too many requests")
@@ -436,12 +530,19 @@ func (s *Server) rejected(ctx context.Context, in *inbox.Inbox, err error) inges
 	case errors.Is(err, inbox.ErrForbidden):
 		res = refuse(http.StatusForbidden, "forbidden", "this delivery is not allowed")
 	default:
-		return s.internalFailure(ctx, "before-ingest hook", err, inboxAttrs(in)...)
+		return s.internalFailure(ctx, hook, err, inboxAttrs(in)...)
 	}
 	res.retryAfter = retryAfterOf(err)
-	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery refused by hook",
-		inboxAttrs(in, slog.String("reason", err.Error()))...)
+	s.log.LogAttrs(ctx, slog.LevelInfo, "delivery refused by hook", refusalAttrs(in, err, hook)...)
 	return res
+}
+
+func refusalAttrs(in *inbox.Inbox, err error, hook string) []slog.Attr {
+	attrs := inboxAttrs(in, slog.String("reason", err.Error()))
+	if hook != hookBeforeIngest {
+		attrs = append(attrs, slog.String("hook", hook))
+	}
+	return attrs
 }
 
 // afterCommit runs the post-commit notifications. A panic in an embedder's

@@ -4,6 +4,7 @@
 package inboxtest
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/ast"
@@ -98,6 +99,80 @@ func expectFailure(t *testing.T, want string, check func(rec testing.TB)) {
 		t.Errorf("unexpected failure: %s", got)
 	case want != "" && !strings.Contains(got, want):
 		t.Errorf("failures %q do not mention %q", rec.errs, want)
+	}
+}
+
+// ---- BodyScreener ----
+
+type goodScreener struct{}
+
+// It redacts digits, within the limit, and refuses empty bodies.
+func (goodScreener) ScreenBody(_ context.Context, req *inbox.BodyScreenRequest) (inbox.BodyDecision, error) {
+	if len(req.Body) == 0 {
+		return inbox.BodyDecision{}, fmt.Errorf("%w: empty", inbox.ErrForbidden)
+	}
+	out := bytes.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return 'X'
+		}
+		return r
+	}, req.Body)
+	return inbox.BodyDecision{Replace: len(out) <= int(req.Inbox.MaxBodyBytes), Body: out}, nil
+}
+
+func TestBodyScreenerSuite(t *testing.T) {
+	BodyScreenerSuite(t, func(*testing.T) inbox.BodyScreener { return goodScreener{} })
+}
+
+type blockingScreener struct{ release chan struct{} }
+
+func (s blockingScreener) ScreenBody(context.Context, *inbox.BodyScreenRequest) (inbox.BodyDecision, error) {
+	<-s.release
+	return inbox.BodyDecision{}, nil
+}
+
+type editingScreener struct{}
+
+// It edits the body in place and says to keep it.
+func (editingScreener) ScreenBody(_ context.Context, req *inbox.BodyScreenRequest) (inbox.BodyDecision, error) {
+	if len(req.Body) > 0 {
+		req.Body[0] = 'X'
+	}
+	return inbox.BodyDecision{}, nil
+}
+
+type growingScreener struct{}
+
+// It replaces every body with one longer than any inbox allows.
+func (growingScreener) ScreenBody(_ context.Context, req *inbox.BodyScreenRequest) (inbox.BodyDecision, error) {
+	return inbox.BodyDecision{Replace: true, Body: make([]byte, req.Inbox.MaxBodyBytes+1)}, nil
+}
+
+type panickingScreener struct{}
+
+func (panickingScreener) ScreenBody(context.Context, *inbox.BodyScreenRequest) (inbox.BodyDecision, error) {
+	panic("a bug in the screener")
+}
+
+func TestTheScreenerChecksCatchWhatTheyAreFor(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	for _, c := range []struct {
+		name  string
+		check func(testing.TB, inbox.BodyScreener)
+		s     inbox.BodyScreener
+		want  string
+	}{
+		{"a good screener returns", checkScreenerReturns, goodScreener{}, ""},
+		{"a good screener leaves the body", checkScreenerLeavesTheBody, goodScreener{}, ""},
+		{"a good screener's replacements fit", checkScreenerReplacementsFit, goodScreener{}, ""},
+		{"a good screener is concurrent", checkScreenerConcurrent, goodScreener{}, ""},
+		{"one that blocks", checkScreenerReturns, blockingScreener{release}, "must not block"},
+		{"one that panics", checkScreenerReturns, panickingScreener{}, "panicked"},
+		{"one that edits the body in place", checkScreenerLeavesTheBody, editingScreener{}, "changed the body"},
+		{"one that grows the body past the limit", checkScreenerReplacementsFit, growingScreener{}, "over the inbox's MaxBodyBytes"},
+	} {
+		t.Run(c.name, func(t *testing.T) { expectFailure(t, c.want, func(rec testing.TB) { c.check(rec, c.s) }) })
 	}
 }
 

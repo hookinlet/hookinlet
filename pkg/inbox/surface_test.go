@@ -64,6 +64,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"EpochRenewer":      {"RenewEpochs(context.Context) error"},
 		"RetryAfterer":      {"RetryAfter() time.Duration"},
 		"IngestObserver":    {"ObserveIngest(context.Context, *inbox.IngestEvent)"},
+		"BodyScreener":      {"ScreenBody(context.Context, *inbox.BodyScreenRequest) (inbox.BodyDecision, error)"},
 		"UnverifiedLimiter": {"MaxUnverified(context.Context, *inbox.Inbox) int"},
 		"UnverifiedCounter": {"CountUnverified(context.Context, inbox.ID, int64) (int64, error)"},
 		"ReaderTracker": {
@@ -98,6 +99,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"EpochRenewer":      reflect.TypeFor[inbox.EpochRenewer](),
 		"RetryAfterer":      reflect.TypeFor[inbox.RetryAfterer](),
 		"IngestObserver":    reflect.TypeFor[inbox.IngestObserver](),
+		"BodyScreener":      reflect.TypeFor[inbox.BodyScreener](),
 		"UnverifiedLimiter": reflect.TypeFor[inbox.UnverifiedLimiter](),
 		"UnverifiedCounter": reflect.TypeFor[inbox.UnverifiedCounter](),
 		"ReaderTracker":     reflect.TypeFor[inbox.ReaderTracker](),

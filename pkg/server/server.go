@@ -269,6 +269,7 @@ type Server struct {
 	readers         inbox.ReaderTracker     // nil when the Store cannot remember named readers
 	limiter         inbox.UnverifiedLimiter // nil unless the Hooks set the cap per inbox
 	observer        inbox.IngestObserver    // nil unless the Hooks observe how deliveries end
+	screener        inbox.BodyScreener      // nil unless the Hooks may refuse or replace a verified body
 	unverifiedLocks inboxLocks              // an inbox's is held from counting its unverified messages to storing one
 	capLog          *logThrottle            // the refusal an inbox at its unverified cap gives every delivery, logged once a minute
 
@@ -428,6 +429,7 @@ func New(opts Options) (*Server, error) {
 	s.secretsCheckTimeout = secretsTimeout
 	s.limiter, _ = opts.Hooks.(inbox.UnverifiedLimiter)
 	s.observer, _ = opts.Hooks.(inbox.IngestObserver)
+	s.screener, _ = opts.Hooks.(inbox.BodyScreener)
 	if uc, ok := opts.Store.(inbox.UnverifiedCounter); ok {
 		s.unverified = uc
 	} else if opts.MaxUnverified > 0 || s.limiter != nil {

@@ -42,9 +42,12 @@ type Message struct {
 	Verified    bool        `json:"verified"`
 	Verifier    string      `json:"verifier"`
 	VerifyError *string     `json:"verify_error"`
-	DeliveryID  *string     `json:"delivery_id"`
-	EventType   *string     `json:"event_type"`
-	SourceIP    *string     `json:"source_ip"`
+	// Modified is set, only when true, on a message whose stored body is not what the
+	// sender sent because a BodyScreener replaced it.
+	Modified   bool    `json:"modified,omitempty"`
+	DeliveryID *string `json:"delivery_id"`
+	EventType  *string `json:"event_type"`
+	SourceIP   *string `json:"source_ip"`
 
 	// BodyTruncated is set, only when a size cap applies, on a message whose body
 	// was left out for being larger than the cap. Size gives its true length.
@@ -72,6 +75,7 @@ func FromStored(m *inbox.Message, slug, verifier string, withBody bool) Message 
 		Verified:    m.Verified,
 		Verifier:    verifier,
 		VerifyError: optional(m.VerifyError),
+		Modified:    m.Modified,
 		DeliveryID:  optional(m.DeliveryID),
 		EventType:   optional(m.EventType),
 		SourceIP:    optional(m.SourceIP),
