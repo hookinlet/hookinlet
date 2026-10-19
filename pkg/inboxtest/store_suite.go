@@ -30,12 +30,22 @@ var baseTime = time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 // clock: the Store must use now for every timestamp it assigns. The suite
 // closes each Store itself, so newStore must not register its own Close.
 //
-// Two checks need something only the Store's own test can supply, and run under
-// StoreSuiteWith: a Store that is full (StoreOptions.MakeFull), and a second Store
-// value on the same backend (StoreOptions.Peer).
-func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) inbox.Store) {
+// Checks that need something only the Store's own test can supply take a
+// StoreOptions: a Store that is full (MakeFull), a second Store value on the same
+// backend (Peer), and a Store that must be told of a tenant before it holds
+// inboxes for it (PrepareTenant). Pass at most one; with none, those cases run
+// without the extra help (or are skipped). StoreSuiteWith is the same call with the
+// options not optional.
+func StoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) inbox.Store, opts ...StoreOptions) {
 	t.Helper()
-	runStoreSuite(t, newStore, StoreOptions{})
+	if len(opts) > 1 {
+		t.Fatalf("StoreSuite takes at most one StoreOptions, got %d", len(opts))
+	}
+	var o StoreOptions
+	if len(opts) == 1 {
+		o = opts[0]
+	}
+	runStoreSuite(t, newStore, o)
 }
 
 func runStoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Time) inbox.Store, opts StoreOptions) {
@@ -67,8 +77,10 @@ func runStoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Tim
 		{"UpdateInboxVersioning", testUpdateVersioning},
 		{"Epochs", testEpochs},
 		{"UIDs", testUIDs},
-		{"Tenants", testTenants},
-		{"TokensAreNotScopedByTenant", testTokensAreNotScopedByTenant},
+		{"Tenants", func(t *testing.T, s inbox.Store, clk *Clock) { testTenants(t, s, clk, newTenantPrep(opts)) }},
+		{"TokensAreNotScopedByTenant", func(t *testing.T, s inbox.Store, clk *Clock) {
+			testTokensAreNotScopedByTenant(t, s, clk, newTenantPrep(opts))
+		}},
 		{"OldestSeqInAPage", testOldestSeqInAPage},
 		{"Tokens", testTokens},
 		{"TokensOfADeletedInbox", testTokensOfADeletedInbox},

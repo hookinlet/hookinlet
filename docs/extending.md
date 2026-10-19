@@ -28,7 +28,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `StatusReporter` (optional) | The schema version, the size of the data and the free space, for `GET /v1/admin/status` and the console. | the SQLite store | none |
 | `Challenger` (optional, of the error `Authenticate` returns) | `WWWAuthenticate() string`: the `WWW-Authenticate` value for the `401`, in place of `Bearer realm="hookinlet"`. See [Choosing the 401 challenge](#choosing-the-401-challenge). | none: the server sends its own | `ChallengerSuite` (the value is one the server sends; the rest is the server's tests) |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. `InboxIDs(ctx)` may look the list up, and may fail. | the agent principal | checked by `AuthenticatorSuite` |
-| `TenantPrincipal` (optional) | A `Principal` that belongs to one tenant. After authenticating, the server scopes the request's context to it (`inbox.WithTenant`), so slugs are looked up in that tenant and nothing outside it is reachable. See [Tenants](#tenants). | none: the shipped principals are not in a tenant | `StoreSuite` (the `Tenants` case) and the server's tests |
+| `TenantPrincipal` (optional) | A `Principal` that belongs to one tenant. After authenticating, the server scopes the request's context to it (`inbox.WithTenant`), so slugs are looked up in that tenant and nothing outside it is reachable. See [Tenants](#tenants). | none: the shipped principals are not in a tenant | `StoreSuite` (the `Tenants` case) for the Store, and `servertest.ServerSuite` for what the server scopes |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they
@@ -365,7 +365,49 @@ are these. Check them in your own tests:
   a panic in it does not change the response.
 - A `Principal` that belongs to a tenant implements `TenantPrincipal` with the same
   `Tenant` for its life; one that does not is unscoped, and reaches the default tenant.
-  `StoreSuite` checks what a Store does with a scoped context.
+  `StoreSuite` checks what a Store does with a scoped context, and
+  `servertest.ServerSuite` checks which requests the server scopes (see
+  [Checking what the server does with tenants](#checking-what-the-server-does-with-tenants)).
+
+### Checking what the server does with tenants
+
+Four behaviours belong to the server and not to one interface, and they are part of the
+contract: which requests a `TenantPrincipal` scopes (the read API, streams, MCP, the admin
+API and the delivery to an ingest key), including that a tenant's principal cannot name
+another tenant's slug and that a principal in no tenant sees only the default tenant;
+`Options.RequireTenant`; the readiness check's sample of stored secrets across tenants; and
+`Options.Fallback`. `servertest.ServerSuite` (package
+`github.com/hookinlet/hookinlet/pkg/server/servertest`, separate from `inboxtest` because the
+server's own tests import `inboxtest`) builds a real server over your `Store` and
+`Authenticator` and sends it requests, so that you can check them where you embed it:
+
+```go
+func TestMyServer(t *testing.T) {
+	servertest.ServerSuite(t, servertest.Harness{
+		NewStore: func(t *testing.T, now func() time.Time) inbox.Store { return openMyStore(t, now) },
+		PrepareTenant: func(t *testing.T, s inbox.Store, tenant string) { registerTenant(t, s, tenant) }, // or nil
+		NewAuthenticator: func(t *testing.T, s inbox.Store) (inbox.Authenticator, servertest.Callers) {
+			return myAuthenticator(s), servertest.Callers{
+				ReaderA:  bearer(tokenFor(t, s, "org-a")), // a TenantPrincipal of org-a that reads its inboxes
+				ReaderB:  bearer(tokenFor(t, s, "org-b")),
+				AdminA:   bearer(adminTokenFor(t, s, "org-a")), // optional
+				Operator: bearer(operatorToken(t, s)),          // an admin in no tenant
+				NoTenant: bearer(carelessToken(t, s)),          // optional: reads everything, in no tenant, not an admin
+			}
+		},
+	})
+}
+```
+
+The suite makes inboxes in `org-a`, `org-b` and the default tenant (`PrepareTenant` is
+called for the first two, as it is for `StoreSuite`), calls `NewAuthenticator`, and starts
+the server. `ReaderA` and `ReaderB` must be `TenantPrincipal`s of those tenants that read
+every inbox in them and cannot admin; the `Operator` is an admin that reads every inbox
+and is in no tenant. `AdminA` and `NoTenant` are optional, and the cases that need them are
+skipped without them. The groups are `Tenants`, `RequireTenant`, `Readiness` (which seals
+secrets with the `SecretBox` from `Harness.NewSecretBox`, or the `secretbox` package's, and
+makes one tenant's fail to open) and `Fallback`. It is a separate function, so an
+`Authenticator` or `Store` that passes its own suites does not start failing on upgrade.
 
 ## Writing a Store
 
@@ -448,8 +490,16 @@ func TestMyStore(t *testing.T) {
 }
 ```
 
-The suite closes each Store itself. Two checks need something only your test can do,
-and run when you use `inboxtest.StoreSuiteWith(t, newStore, inboxtest.StoreOptions{...})`:
+The suite closes each Store itself. Three things need something only your test can do,
+and are given as a `StoreOptions` after `newStore`
+(`inboxtest.StoreSuite(t, newStore, inboxtest.StoreOptions{...})`, or the same call as
+`inboxtest.StoreSuiteWith`):
+
+- `PrepareTenant` makes a Store ready to hold inboxes for a tenant, for a Store that has
+  to be told of its tenants first. The suite calls it once for each of `org-a`, `org-b`
+  and `org-c` on each Store it makes, before the first call that names the tenant; it is
+  not called for the default tenant, which every Store has, nor for a tenant key the
+  Store must refuse. A Store that needs no registration leaves it nil.
 
 - `MakeFull` makes the Store unable to take another message (a size limit lowered to
   what it holds, say) and returns a function that gives it room again. The suite then

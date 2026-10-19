@@ -88,7 +88,7 @@ took it and later ones.
 
 `pkg/inbox` (the interfaces and types), `pkg/inboxtest` (their conformance suites),
 `pkg/auth/token`, `pkg/secretbox`, `pkg/store/sqlite`, `pkg/notify/local`,
-`pkg/verify`, `pkg/server`, and `docs` (which embeds `openapi.json` as `docs.OpenAPI`,
+`pkg/verify`, `pkg/server`, `pkg/server/servertest`, and `docs` (which embeds `openapi.json` as `docs.OpenAPI`,
 for an embedder to serve, validate against, or generate from; the document is the
 contract and is stable as described above) are public. Until 1.0 they can change in
 breaking ways, every change is in `CHANGELOG.md`, and after 1.0 semantic versioning
@@ -106,7 +106,16 @@ conform to beyond not blocking, such as `IngestObserver`, `UnverifiedLimiter` an
 `Challenger`, has a short suite for that (it returns at once, leaves what it is given
 alone, is safe to call concurrently, and for a challenge is a value the server sends),
 and what the server does with their answers is covered by the server's own tests. A
-behaviour that is in neither a suite nor a test is not part of the contract. A suite may
+behaviour that is in neither a suite nor a test is not part of the contract.
+
+Four behaviours belong to the server, not to one interface, and they are part of the
+contract: which requests a `TenantPrincipal` scopes (the read API, streams, MCP, the admin
+API and ingest), `Options.RequireTenant`, how the readiness check samples stored secrets
+across tenants, and `Options.Fallback`. `servertest.ServerSuite` is how an embedder checks
+them: it builds a server over the embedder's `Store` and `Authenticator` and sends it
+requests (see [extending](extending.md#checking-what-the-server-does-with-tenants)). It is
+a separate function, so that an implementation that passes the suites of its interfaces
+does not start failing on upgrade; its cases are listed in `CHANGELOG.md` when they grow. A suite may
 grow cases; the new cases of an existing suite are listed in `CHANGELOG.md`, with whether
 an implementation that passed before can fail them.
 

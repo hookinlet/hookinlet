@@ -23,10 +23,39 @@ func tenantInbox(t *testing.T, ctx context.Context, s inbox.Store, slug, key str
 	return in
 }
 
-func testTenants(t *testing.T, s inbox.Store, _ *Clock) {
+// tenantPrep calls StoreOptions.PrepareTenant once for each tenant a case uses.
+// A case makes one per Store, so the set of prepared tenants is per Store.
+type tenantPrep struct {
+	fn   func(t *testing.T, s inbox.Store, tenant string)
+	done map[string]bool
+}
+
+func newTenantPrep(opts StoreOptions) *tenantPrep {
+	return &tenantPrep{fn: opts.PrepareTenant, done: map[string]bool{}}
+}
+
+// ctx returns ctx scoped to the tenant, after preparing the tenant on s if it has
+// not been. The default tenant needs no preparing.
+func (p *tenantPrep) ctx(t *testing.T, s inbox.Store, ctx context.Context, tenant string) context.Context { //nolint:revive // ctx first would hide that it is the point
+	t.Helper()
+	p.ready(t, s, tenant)
+	return inbox.WithTenant(ctx, tenant)
+}
+
+// ready prepares the tenant on s if it has not been.
+func (p *tenantPrep) ready(t *testing.T, s inbox.Store, tenant string) {
+	t.Helper()
+	if tenant == "" || p.fn == nil || p.done[tenant] {
+		return
+	}
+	p.done[tenant] = true
+	p.fn(t, s, tenant)
+}
+
+func testTenants(t *testing.T, s inbox.Store, _ *Clock, prep *tenantPrep) {
 	ctx := t.Context()
-	ctxA := inbox.WithTenant(ctx, "org-a")
-	ctxB := inbox.WithTenant(ctx, "org-b")
+	ctxA := prep.ctx(t, s, ctx, "org-a")
+	ctxB := prep.ctx(t, s, ctx, "org-b")
 
 	// An inbox made without a scope is in the default tenant, and so is one made
 	// in a context scoped to it.
@@ -60,6 +89,7 @@ func testTenants(t *testing.T, s inbox.Store, _ *Clock) {
 	isErr(t, "a slug used twice in one tenant", s.CreateInbox(ctxA, dup), inbox.ErrConflict)
 
 	// Without a scope an inbox can be made for a tenant by naming it.
+	prep.ready(t, s, "org-c")
 	named := mkInbox("named", func(in *inbox.Inbox) { in.Tenant = "org-c" })
 	if err := s.CreateInbox(ctx, named); err != nil || named.Tenant != "org-c" {
 		t.Errorf("CreateInbox naming a tenant: %q, %v", named.Tenant, err)
@@ -69,6 +99,8 @@ func testTenants(t *testing.T, s inbox.Store, _ *Clock) {
 	// With one, it can only be for that tenant, and the key has to be valid.
 	wrong := mkInbox("wrong", func(in *inbox.Inbox) { in.Tenant = "org-b" })
 	isErr(t, "an inbox for another tenant than the scope", s.CreateInbox(ctxA, wrong), inbox.ErrInvalid)
+	// A key that is too long is refused whether or not the tenant is registered, so it is
+	// never prepared.
 	long := mkInbox("long", func(in *inbox.Inbox) { in.Tenant = strings.Repeat("t", inbox.MaxTenantLen+1) })
 	isErr(t, "a tenant key that is too long", s.CreateInbox(ctx, long), inbox.ErrInvalid)
 
@@ -190,10 +222,10 @@ func testTenants(t *testing.T, s inbox.Store, _ *Clock) {
 // Whether tokens should instead belong to a tenant is an open design question. This
 // case checks only the current contract, so that a Store does not quietly differ
 // from it; if the contract changes, this case changes with it.
-func testTokensAreNotScopedByTenant(t *testing.T, s inbox.Store, _ *Clock) {
+func testTokensAreNotScopedByTenant(t *testing.T, s inbox.Store, _ *Clock, prep *tenantPrep) {
 	ctx := t.Context()
-	ctxA := inbox.WithTenant(ctx, "org-a")
-	ctxB := inbox.WithTenant(ctx, "org-b")
+	ctxA := prep.ctx(t, s, ctx, "org-a")
+	ctxB := prep.ctx(t, s, ctx, "org-b")
 	a := tenantInbox(t, ctxA, s, "tokens", "tokens-key-a")
 	b := tenantInbox(t, ctxB, s, "tokens", "tokens-key-b")
 

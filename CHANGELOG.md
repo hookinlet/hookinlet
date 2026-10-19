@@ -6,6 +6,10 @@ applies.
 
 ## Unreleased
 
+The conformance suites cover more of what embedders rely on: a `Store` that has to be told of its tenants can now pass
+`StoreSuite`, and the server's tenant behaviours have a suite of their own. Nothing to migrate, and nothing that passed
+before can fail: both additions are opt-in.
+
 **Go API**
 
 - **`inbox.AccessInfo` has a `ClientIP` field, and an `Authenticator` can read `AccessInfo`.** `ClientIP` is the
@@ -15,6 +19,27 @@ applies.
   `Authenticate` (it used to attach it only afterwards, for the hooks), on every path that checks a credential,
   including the rechecks of a stream and of an MCP wait. The `Authenticator` interface is unchanged, and so is the
   shipped token authenticator. Only code that builds an `AccessInfo` with an unkeyed literal needs a change.
+- **`inboxtest.StoreSuite` takes an optional `StoreOptions`**: `StoreSuite(t, newStore, opts ...StoreOptions)`. Every
+  existing call compiles and behaves as before (the one exception is code that assigns `StoreSuite` to a variable of
+  the old function type). `StoreOptions.PrepareTenant(t, s, tenant)` is new: for a `Store` that must register a tenant
+  before it holds inboxes for it, the suite calls it once per Store for each of `org-a`, `org-b` and `org-c` before the
+  first use of that tenant (in the `Tenants` and `TokensAreNotScopedByTenant` cases). It is not called for the default
+  tenant or for the over-long key the `Tenants` case expects the `Store` to refuse. Nil does nothing, so a `Store` that
+  needs no registration is checked exactly as before.
+- **`servertest.ServerSuite`**, in the new package `pkg/server/servertest`, checks what the server does with an
+  embedder's `Store` and `Authenticator` by building a server over them (a separate package, because the server's own
+  tests import `inboxtest`). `servertest.Harness` supplies the Store, the Authenticator and the credentials to send. The
+  groups are: `Tenants` (which requests a `TenantPrincipal` scopes: the read API, streams, MCP, the admin API and
+  ingest; a tenant's principal cannot name another tenant's slug; a principal in no tenant sees only the default
+  tenant), `RequireTenant`, `Readiness` (the readiness sample of stored secrets across tenants) and `Fallback`
+  (`Options.Fallback` and `Options.FallbackMaxBodyBytes`). It is a new function, not new cases in an existing
+  suite. The core passes it over the SQLite store.
+
+**Documentation**
+
+- `docs/stability.md` now says these four behaviours are part of the contract and that `servertest.ServerSuite` is how
+  an embedder checks them; it used to say that behaviour covered only by the server's own tests is not. `docs/extending.md`
+  describes the suite and `StoreOptions.PrepareTenant`.
 
 ## 0.10.0 - 2026-10-18
 
