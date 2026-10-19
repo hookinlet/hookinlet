@@ -35,6 +35,13 @@ func (s *Server) challengeFor(err error) string {
 	return defaultChallenge
 }
 
+// unroutedHost reports whether the error an Authenticator refused with, which
+// wraps inbox.ErrUnauthenticated, asks for a 404 (see inbox.Unrouted).
+func unroutedHost(err error) bool {
+	var u inbox.Unrouted
+	return errors.As(err, &u) && u.UnroutedHost()
+}
+
 // validChallenge reports whether v can be sent as a WWW-Authenticate value: one
 // line of printable ASCII (space allowed; no control character, so no CR, LF or
 // tab), not empty, no longer than maxChallengeBytes, that starts with an
