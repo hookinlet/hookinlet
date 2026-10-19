@@ -167,7 +167,7 @@ type mcpTools struct {
 // also tells the hooks which tool this is ("mcp." and its name) and the request's id
 // (inbox.AccessFrom).
 func (t *mcpTools) bind(ctx context.Context, tool string) (context.Context, context.CancelFunc) {
-	ctx = inbox.WithAccess(ctx, inbox.AccessInfo{Operation: "mcp." + tool, RequestID: RequestID(t.caller.req.Context())})
+	ctx = inbox.WithAccess(ctx, t.s.accessInfo(t.caller.req, "mcp."+tool))
 	ctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(t.caller.req.Context(), cancel)
 	return ctx, func() { stop(); cancel() }

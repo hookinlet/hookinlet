@@ -4,6 +4,18 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## Unreleased
+
+**Go API**
+
+- **`inbox.AccessInfo` has a `ClientIP` field, and an `Authenticator` can read `AccessInfo`.** `ClientIP` is the
+  address the request came from, the value ingest stores as `SourceIP`: the connection's peer, or, when the peer is
+  in `Options.TrustedProxies`, the client its `X-Forwarded-For` names. It may be empty, and an allowlist built on it
+  must treat empty as not allowed. The server now attaches `AccessInfo` to the request's context before it calls
+  `Authenticate` (it used to attach it only afterwards, for the hooks), on every path that checks a credential,
+  including the rechecks of a stream and of an MCP wait. The `Authenticator` interface is unchanged, and so is the
+  shipped token authenticator. Only code that builds an `AccessInfo` with an unkeyed literal needs a change.
+
 ## 0.10.0 - 2026-10-18
 
 More of the contract is written down and checked by the conformance suites: what `Prune` does when several `Store`

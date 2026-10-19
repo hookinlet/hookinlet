@@ -225,6 +225,12 @@ func (rr *readRequest) context(ctx context.Context) context.Context {
 	return context.WithValue(ctx, readKey, rr)
 }
 
+// accessInfo is what the hooks, and the Authenticator, are told about the request r,
+// which is for the operation named op (see inbox.AccessInfo).
+func (s *Server) accessInfo(r *http.Request, op string) inbox.AccessInfo {
+	return inbox.AccessInfo{Operation: op, RequestID: RequestID(r.Context()), ClientIP: clientIP(r, s.opts.TrustedProxies)}
+}
+
 // need is what an operation asks of the caller besides a valid credential.
 type need int
 
@@ -255,7 +261,10 @@ const msgOperatorOnly = "this operation acts on the whole store and is not avail
 // operator's (an admin in no tenant). opID names the operation in the log. It reports
 // false after answering.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, need need, opID string) (inbox.Principal, bool) {
-	principal, err := s.opts.Authenticator.Authenticate(r)
+	// The Authenticator is told which request it is looking at (inbox.AccessFrom), as
+	// the hooks are after it.
+	ar := r.WithContext(inbox.WithAccess(r.Context(), s.accessInfo(r, opID)))
+	principal, err := s.opts.Authenticator.Authenticate(ar)
 	switch {
 	case errors.Is(err, inbox.ErrUnauthenticated):
 		w.Header().Set("WWW-Authenticate", s.challengeFor(err))
@@ -385,7 +394,7 @@ func (s *Server) enforce(next http.Handler) http.Handler {
 		}()
 		// The hooks are told which operation this is and the id the access log has for
 		// it (inbox.AccessFrom). An MCP tool call names its tool instead (mcpTools.bind).
-		ctx := inbox.WithAccess(r.Context(), inbox.AccessInfo{Operation: op.ID, RequestID: RequestID(r.Context())})
+		ctx := inbox.WithAccess(r.Context(), s.accessInfo(r, op.ID))
 		next.ServeHTTP(w, r.WithContext(rr.context(ctx)))
 	})
 }

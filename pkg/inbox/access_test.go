@@ -17,10 +17,18 @@ func TestAccessFromIsFalseOutsideARequest(t *testing.T) {
 	if a, ok := inbox.AccessFrom(context.Background()); ok || a != (inbox.AccessInfo{}) {
 		t.Errorf("AccessFrom(Background) = %+v, %v; want nothing", a, ok)
 	}
-	want := inbox.AccessInfo{Operation: "listMessages", RequestID: "abc"}
+	want := inbox.AccessInfo{Operation: "listMessages", RequestID: "abc", ClientIP: "203.0.113.7"}
 	got, ok := inbox.AccessFrom(inbox.WithAccess(context.Background(), want))
 	if !ok || got != want {
 		t.Errorf("AccessFrom(WithAccess(%+v)) = %+v, %v", want, got, ok)
+	}
+}
+
+func TestAccessInfoClientIPMayBeEmpty(t *testing.T) {
+	// An empty address is carried as it is, so an embedder can tell "unknown" from a value.
+	got, ok := inbox.AccessFrom(inbox.WithAccess(context.Background(), inbox.AccessInfo{Operation: "ingest"}))
+	if !ok || got.ClientIP != "" {
+		t.Errorf("AccessFrom = %+v, %v; want an empty ClientIP", got, ok)
 	}
 }
 
