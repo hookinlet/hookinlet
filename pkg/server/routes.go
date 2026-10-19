@@ -47,6 +47,7 @@ import (
 type apiServer struct {
 	*adminAPI
 	*readAPI
+	*readerAPI
 	*healthAPI
 	*ingestAPI
 	*streamAPI
@@ -57,6 +58,7 @@ func (s *Server) newAPI() *apiServer {
 	return &apiServer{
 		adminAPI:  &adminAPI{s: s},
 		readAPI:   &readAPI{s: s},
+		readerAPI: &readerAPI{s: s},
 		healthAPI: &healthAPI{s: s},
 		ingestAPI: &ingestAPI{s: s},
 		streamAPI: &streamAPI{s: s},

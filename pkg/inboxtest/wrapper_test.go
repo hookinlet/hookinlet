@@ -58,6 +58,18 @@ func (f forwardsAll) TouchToken(ctx context.Context, id inbox.TokenID, at time.T
 	return f.Store.(inbox.TokenUseRecorder).TouchToken(ctx, id, at)
 }
 
+func (f forwardsAll) AckReader(ctx context.Context, id inbox.ID, name, epoch string, seq int64, maxReaders int) (inbox.ReaderPosition, error) {
+	return f.Store.(inbox.ReaderTracker).AckReader(ctx, id, name, epoch, seq, maxReaders)
+}
+
+func (f forwardsAll) Readers(ctx context.Context, id inbox.ID) ([]inbox.ReaderPosition, error) {
+	return f.Store.(inbox.ReaderTracker).Readers(ctx, id)
+}
+
+func (f forwardsAll) ForgetReader(ctx context.Context, id inbox.ID, name string) error {
+	return f.Store.(inbox.ReaderTracker).ForgetReader(ctx, id, name)
+}
+
 func openSQLite(t *testing.T) *sqlite.Store {
 	t.Helper()
 	s, err := sqlite.Open(t.Context(), t.TempDir())

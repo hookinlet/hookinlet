@@ -147,6 +147,7 @@ func TestShippedMigrationsAreUnchanged(t *testing.T) {
 		"0009_inbox_uid.sql":                 "93180556e6b9d4edeb0d073f8b4e2afeea06d691ae07f16e69eafe2057d9b567",
 		"0010_tenants.sql":                   "bc3c9a9f32616c114c3d960cb518cf0c9afb0a0c5329d36602cedf051c0e4177",
 		"0011_token_expiry_last_used.sql":    "9c54e2808c6739ef82838e9f3bc9cc3171ef2b3f10e84ba0cc26084a2f2840c0",
+		"0012_readers.sql":                   "3c2e1d7424de791d570bb0212a3d392fa8f736c5d1af1063a455f3d3e24bc0b6",
 	}
 	entries, err := os.ReadDir("migrations")
 	if err != nil {
@@ -622,6 +623,12 @@ func TestQueueingForTheWriterIsNotAClockStep(t *testing.T) {
 
 func TestEpochRenewerSuite(t *testing.T) {
 	inboxtest.EpochRenewerSuite(t, func(t *testing.T, now func() time.Time) inbox.Store {
+		return openAt(t, t.TempDir(), sqlite.WithClock(now))
+	})
+}
+
+func TestReaderTrackerSuite(t *testing.T) {
+	inboxtest.ReaderTrackerSuite(t, func(t *testing.T, now func() time.Time) inbox.Store {
 		return openAt(t, t.TempDir(), sqlite.WithClock(now))
 	})
 }

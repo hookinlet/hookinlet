@@ -204,6 +204,16 @@ type Options struct {
 	// inbox.UnverifiedCounter (the built-in SQLite store does). Hooks that
 	// implement inbox.UnverifiedLimiter can set it per inbox instead.
 	MaxUnverified int
+	// MaxReadersPerInbox is the most named readers one inbox keeps (see
+	// inbox.ReaderTracker and "Named readers" in docs/api.md). A new name beyond it
+	// is refused with 409 too_many_readers; one that exists can always be
+	// acknowledged. Zero means DefaultMaxReadersPerInbox, and a value above
+	// inbox.MaxNamedReaders (1000, the maximum the API document states) is
+	// lowered to it. A negative value turns named readers off: the reader
+	// operations answer 400 unsupported, as they do when the Store cannot remember
+	// readers (it does not implement inbox.ReaderTracker; the built-in SQLite store
+	// does).
+	MaxReadersPerInbox int
 	// SkipReadinessSecretCheck stops /readyz from opening any stored verifier secret.
 	// By default readiness opens a bounded sample of them, a few of each tenant's, to
 	// catch a master key that is not the one the data was sealed under, and fails only
@@ -256,6 +266,7 @@ type Server struct {
 	ingestBudget byteBudget  // body bytes held by deliveries being received
 
 	unverified      inbox.UnverifiedCounter // nil when the Store cannot count
+	readers         inbox.ReaderTracker     // nil when the Store cannot remember named readers
 	limiter         inbox.UnverifiedLimiter // nil unless the Hooks set the cap per inbox
 	observer        inbox.IngestObserver    // nil unless the Hooks observe how deliveries end
 	unverifiedLocks inboxLocks              // an inbox's is held from counting its unverified messages to storing one
@@ -381,6 +392,10 @@ func New(opts Options) (*Server, error) {
 	if opts.MaxUnverified == 0 {
 		opts.MaxUnverified = DefaultMaxUnverified
 	}
+	if opts.MaxReadersPerInbox == 0 {
+		opts.MaxReadersPerInbox = DefaultMaxReadersPerInbox
+	}
+	opts.MaxReadersPerInbox = min(opts.MaxReadersPerInbox, inbox.MaxNamedReaders)
 	if opts.Version == "" {
 		opts.Version = "dev"
 	}
@@ -417,6 +432,9 @@ func New(opts Options) (*Server, error) {
 		s.unverified = uc
 	} else if opts.MaxUnverified > 0 || s.limiter != nil {
 		opts.Logger.Warn("the Store cannot count unverified messages, so they are not capped; see inbox.UnverifiedCounter")
+	}
+	if rt, ok := opts.Store.(inbox.ReaderTracker); ok {
+		s.readers = rt
 	}
 	s.adm = &admin.Service{Store: opts.Store, Box: opts.SecretBox, Verifiers: opts.Verifiers, Now: opts.Now, Log: opts.Logger, GuardClock: realClock}
 	if err := s.checkMCPTools(); err != nil {

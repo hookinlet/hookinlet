@@ -342,6 +342,39 @@ type UnverifiedCounter interface {
 	CountUnverified(ctx context.Context, inboxID ID, limit int64) (int64, error)
 }
 
+// ReaderTracker is an optional capability of a Store: remembering how far each
+// named reader of an inbox has read, so that a reader's lag can be shown. The
+// server finds it with a type assertion; without it the reader operations answer 400
+// "unsupported", so that nobody takes a reader to be tracked when it is not.
+//
+// A position is set only by an explicit call (AckReader), never by reading, so a
+// read stays a read. It belongs to one epoch of its inbox: the sequence numbers of
+// another epoch mean something else. A Store therefore drops every position when an
+// inbox's epoch changes (RenewEpochs, and the epochs a Backupper snapshot is given),
+// and never returns or counts a position whose epoch is not the inbox's current
+// one. Deleting an inbox deletes its positions. Positions follow the tenant rules
+// of the Store: an inbox outside the tenant of the context is ErrNotFound.
+type ReaderTracker interface {
+	// AckReader sets the position of the named reader of an inbox, creating the
+	// reader if it is new, and returns it. epoch must be the inbox's current epoch or
+	// the error wraps ErrEpochChanged and nothing is stored. seq must be from 0 to
+	// the inbox's newest sequence number (a reader cannot have read what does not
+	// exist yet) or the error wraps ErrInvalid; it may be lower than the last
+	// position, which is how a reader starts over. A name that fails
+	// ValidateReaderName is ErrInvalid. If the reader is new and the inbox already
+	// has maxReaders of them, the error wraps ErrConflict and nothing is stored;
+	// setting an existing reader never fails for the cap. maxReaders is checked and the
+	// position written as one step, so concurrent calls cannot exceed it; zero or
+	// less means no cap. An inbox that does not exist is ErrNotFound.
+	AckReader(ctx context.Context, inboxID ID, name, epoch string, seq int64, maxReaders int) (ReaderPosition, error)
+	// Readers returns the named readers of an inbox that have a position in its
+	// current epoch, ordered by name. An inbox that does not exist is ErrNotFound.
+	Readers(ctx context.Context, inboxID ID) ([]ReaderPosition, error)
+	// ForgetReader deletes the named reader of an inbox. A reader that has no
+	// position, and an inbox that does not exist, are ErrNotFound.
+	ForgetReader(ctx context.Context, inboxID ID, name string) error
+}
+
 // Notifier tells interested parties that an inbox may have new messages. It
 // carries no payload: a subscriber wakes up and reads from the Store at its own
 // cursor. Replay, reconnects, and slow consumers therefore share one code

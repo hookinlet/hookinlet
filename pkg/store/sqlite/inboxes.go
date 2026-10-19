@@ -381,6 +381,10 @@ var _ inbox.EpochRenewer = (*Store)(nil)
 // has new epochs.) It adds one to each inbox's Version.
 func (s *Store) RenewEpochs(ctx context.Context) error {
 	return s.writeTx(ctx, func(tx *sql.Tx) error {
+		// A reader's position is a sequence number of the epoch it was set in.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM readers`); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE inboxes SET epoch = lower(hex(randomblob(16))), version = version + 1`)
 		return err
 	})

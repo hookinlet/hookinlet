@@ -198,6 +198,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inboxes/{slug}/readers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Named readers and their lag
+         * @description An agent token reads the inboxes it was issued for (or all of them); the admin token reads all. An inbox the credential may not read is a 404, the same as one that does not exist. A reader is a name a client gives itself and acknowledges positions under (`PUT /v1/inboxes/{slug}/readers/{name}`); the server never records a position because of a read. A server whose store cannot remember readers answers `400` with the code `unsupported`.
+         */
+        get: operations["listReaders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inboxes/{slug}/readers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Acknowledge a position as a named reader
+         * @description An agent token reads the inboxes it was issued for (or all of them); the admin token reads all. An inbox the credential may not read is a 404, the same as one that does not exist. Records that the reader has handled every message up to `seq` in the given `epoch`, creating the reader if the name is new, and returns it. This is the only way a position is stored: reading never stores one. Positions are kept only within an epoch (see `epoch_changed`) and are dropped when the inbox's epoch changes. The server keeps at most `max_readers` named readers per inbox (see the reader list); a new name beyond that is a `409` with the code `too_many_readers`. A server whose store cannot remember readers answers `400` with the code `unsupported`.
+         */
+        put: operations["ackReader"];
+        post?: never;
+        /**
+         * Forget a named reader
+         * @description An agent token reads the inboxes it was issued for (or all of them); the admin token reads all. An inbox the credential may not read is a 404, the same as one that does not exist. Frees one of the inbox's `max_readers` places. A reader that does not exist is a `404`. A server whose store cannot remember readers answers `400` with the code `unsupported`.
+         */
+        delete: operations["forgetReader"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp": {
         parameters: {
             query?: never;
@@ -434,10 +478,10 @@ export interface components {
         ErrorBadRequest: {
             error: {
                 /**
-                 * @description A stable, machine-readable code.
+                 * @description A stable, machine-readable code. `unsupported` is the answer of the reader operations when this server's store cannot remember named readers.
                  * @enum {string}
                  */
-                code: "invalid_parameter" | "invalid_request" | "bad_request";
+                code: "invalid_parameter" | "invalid_request" | "bad_request" | "unsupported";
                 /** @description Safe to show to a person. Never contains a secret, a token, or any part of a request. */
                 message: string;
             };
@@ -911,6 +955,48 @@ export interface components {
             /** @description How many messages that run deleted. Absent until it has run. */
             last_retention_deleted?: number;
         };
+        ErrorReaderConflict: {
+            error: {
+                /**
+                 * @description A stable, machine-readable code.
+                 * @enum {string}
+                 */
+                code: "epoch_changed" | "too_many_readers";
+                /** @description Safe to show to a person. Never contains a secret, a token, or any part of a request. */
+                message: string;
+            };
+        };
+        Reader: {
+            name: string;
+            /** @description The last sequence number the reader acknowledged. `0` if none yet. */
+            seq: number;
+            /**
+             * Format: date-time
+             * @description When the reader last acknowledged.
+             */
+            updated_at: string;
+            /** @description `latest_seq` minus `seq`: how many sequence numbers the reader is behind. Counts numbers, not stored messages: some of them may have been removed by retention. */
+            lag: number;
+            /** @description `true` if retention removed messages after the reader's position before it acknowledged them, so a reader that continues from `seq` will not see every message. `false` for a reader at `0`, which has no history it could have missed. */
+            gap: boolean;
+        };
+        ReaderList: {
+            /** @description The inbox's current epoch. Every position listed belongs to it. */
+            epoch: string;
+            latest_seq: number;
+            /** @description The lowest sequence number still stored, or `0` if none is. */
+            oldest_seq: number;
+            /** @description The most named readers this server keeps for one inbox: 100 unless the operator set another, and never more than 1000. */
+            max_readers: number;
+            /** @description The named readers of the inbox, ordered by name. All of them, since there are at most `max_readers`. */
+            readers: components["schemas"]["Reader"][];
+        };
+        AckReader: {
+            /** @description The last sequence number the reader has handled. At most the inbox's `latest_seq`. It may be lower than the reader's last acknowledgement: that is how a reader starts over. */
+            seq: number;
+            /** @description The `epoch` the sequence number came from (every page and message carries it). */
+            epoch: string;
+        };
     };
     responses: {
         /** @description A missing or wrong credential. */
@@ -1210,6 +1296,25 @@ export interface components {
                 "application/json": components["schemas"]["ErrorForbidden"];
             };
         };
+        /** @description Either `epoch_changed`: the `epoch` in the request is not the inbox's current one, so the position is for an earlier life of the inbox (read `epoch` from `GET /v1/inboxes/{slug}` and acknowledge again from a position you know in that epoch); or `too_many_readers`: the inbox already has the most named readers the server allows (see `max_readers` in the reader list), and this name is a new one. Delete a reader that is no longer used, or acknowledge one that exists. */
+        ReaderConflict: {
+            headers: {
+                /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                "X-Request-Id": string;
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "too_many_readers",
+                 *         "message": "this inbox already has the most named readers (100); delete one that is not used"
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["ErrorReaderConflict"];
+            };
+        };
     };
     parameters: {
         /** @description The inbox's slug. */
@@ -1218,6 +1323,8 @@ export interface components {
         Seq: number;
         /** @description The token's id, from creating or listing tokens. */
         TokenId: number;
+        /** @description The reader's name: 1 to 64 characters of ASCII letters, digits, `.`, `_` and `-`, starting with a letter or digit. A name that does not fit is a 404, like any path parameter that cannot name anything. */
+        ReaderName: string;
     };
     requestBodies: never;
     headers: never;
@@ -2728,6 +2835,153 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             409: components["responses"]["EpochChanged"];
+            429: components["responses"]["AccessRateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Overloaded"];
+            /** @description Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text. */
+            default: {
+                headers: {
+                    /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                    "X-Request-Id"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    listReaders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The inbox's slug. */
+                slug: components["parameters"]["Slug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The inbox's named readers, each with how far behind it is. */
+            200: {
+                headers: {
+                    /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                    "X-Request-Id": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReaderList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["AccessRateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Overloaded"];
+            /** @description Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text. */
+            default: {
+                headers: {
+                    /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                    "X-Request-Id"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    ackReader: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The inbox's slug. */
+                slug: components["parameters"]["Slug"];
+                /** @description The reader's name: 1 to 64 characters of ASCII letters, digits, `.`, `_` and `-`, starting with a letter or digit. A name that does not fit is a 404, like any path parameter that cannot name anything. */
+                name: components["parameters"]["ReaderName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AckReader"];
+            };
+        };
+        responses: {
+            /** @description The reader, with its new position and lag. */
+            200: {
+                headers: {
+                    /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                    "X-Request-Id": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Reader"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            409: components["responses"]["ReaderConflict"];
+            413: components["responses"]["TooLarge"];
+            415: components["responses"]["Unsupported"];
+            429: components["responses"]["AccessRateLimited"];
+            500: components["responses"]["Internal"];
+            503: components["responses"]["Overloaded"];
+            /** @description Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text. */
+            default: {
+                headers: {
+                    /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                    "X-Request-Id"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    forgetReader: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The inbox's slug. */
+                slug: components["parameters"]["Slug"];
+                /** @description The reader's name: 1 to 64 characters of ASCII letters, digits, `.`, `_` and `-`, starting with a letter or digit. A name that does not fit is a 404, like any path parameter that cannot name anything. */
+                name: components["parameters"]["ReaderName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reader is forgotten. Its position is gone; acknowledging the name again starts it afresh. */
+            204: {
+                headers: {
+                    /** @description Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated. */
+                    "X-Request-Id": string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            402: components["responses"]["AccessQuotaExceeded"];
+            403: components["responses"]["AccessForbidden"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
             429: components["responses"]["AccessRateLimited"];
             500: components["responses"]["Internal"];
             503: components["responses"]["Overloaded"];
