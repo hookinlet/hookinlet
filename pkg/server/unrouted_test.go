@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -77,7 +78,7 @@ func answer(rec *httptest.ResponseRecorder) string {
 }
 
 func serveHost(s *Server, method, path, host string, hdr ...string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, strings.NewReader(""))
+	req := httptest.NewRequestWithContext(context.Background(), method, path, strings.NewReader(""))
 	if host != "" {
 		req.Host = host
 	}
@@ -190,7 +191,7 @@ func TestAStreamEndsWhenItsHostBecomesUnrouted(t *testing.T) {
 	// The stream's periodic re-check treats any ErrUnauthenticated as "no longer
 	// allowed", so an Unrouted error needs no case of its own: this guards that.
 	ok, err := (&Server{opts: Options{Authenticator: refusingAuth{unroutedError{true}}}}).
-		stillAllowed(httptest.NewRequest("GET", "/v1/inboxes/alerts/stream", nil), 1)(t.Context())
+		stillAllowed(httptest.NewRequestWithContext(t.Context(), "GET", "/v1/inboxes/alerts/stream", nil), 1)(t.Context())
 	if ok || err != nil {
 		t.Errorf("stillAllowed = %v, %v; want false, nil", ok, err)
 	}
