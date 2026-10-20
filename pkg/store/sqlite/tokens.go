@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 )
@@ -22,11 +23,21 @@ func (s *Store) CreateToken(ctx context.Context, t *inbox.Token) error {
 		return inbox.Invalidf("token is required")
 	}
 	cp := *t
-	if err := cp.Validate(); err != nil {
+	now := inbox.NormalizeTime(s.now())
+	if err := cp.ValidateAt(now); err != nil {
 		return err
 	}
 	cp.InboxIDs = sortedIDs(cp.InboxIDs)
-	now := inbox.NormalizeTime(s.now())
+	var expires any
+	if cp.ExpiresAt != nil {
+		e := inbox.NormalizeTime(*cp.ExpiresAt)
+		if !e.After(now) { // it was in the future only by less than the precision kept
+			return inbox.Invalidf("a token's expiry must be in the future")
+		}
+		cp.ExpiresAt = &e
+		expires = formatTime(e)
+	}
+	cp.LastUsedAt = nil
 
 	var id int64
 	err := s.writeTx(ctx, func(tx *sql.Tx) error {
@@ -43,8 +54,8 @@ func (s *Store) CreateToken(ctx context.Context, t *inbox.Token) error {
 				return notFound(fmt.Errorf("sqlite: check inbox of token: %w", err), "inbox")
 			}
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO tokens (name, hash, all_inboxes, created_at) VALUES (?, ?, ?, ?)`,
-			cp.Name, []byte(cp.Hash), boolInt(cp.AllInboxes), formatTime(now))
+		res, err := tx.ExecContext(ctx, `INSERT INTO tokens (name, hash, all_inboxes, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+			cp.Name, []byte(cp.Hash), boolInt(cp.AllInboxes), formatTime(now), expires)
 		if err != nil {
 			return fmt.Errorf("sqlite: insert token: %w", err)
 		}
@@ -77,7 +88,7 @@ func sortedIDs(ids []inbox.ID) []inbox.ID {
 }
 
 // GetTokenByHash implements inbox.Store. One statement reads the token and its
-// inboxes, so the two agree.
+// inboxes, so the two agree. A token that has expired is not found.
 func (s *Store) GetTokenByHash(ctx context.Context, hash []byte) (*inbox.Token, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -85,9 +96,10 @@ func (s *Store) GetTokenByHash(ctx context.Context, hash []byte) (*inbox.Token, 
 	if len(hash) == 0 {
 		return nil, fmt.Errorf("%w: token", inbox.ErrNotFound)
 	}
-	rows, err := s.rdb.QueryContext(ctx, `SELECT t.id, t.name, t.hash, t.all_inboxes, t.created_at, ti.inbox_id
+	rows, err := s.rdb.QueryContext(ctx, `SELECT t.id, t.name, t.hash, t.all_inboxes, t.created_at, t.expires_at, t.last_used_at, ti.inbox_id
 		FROM tokens t LEFT JOIN token_inboxes ti ON ti.token_id = t.id
-		WHERE t.hash = ? ORDER BY ti.inbox_id`, hash)
+		WHERE t.hash = ? AND (t.expires_at IS NULL OR t.expires_at > ?) ORDER BY ti.inbox_id`,
+		hash, formatTime(inbox.NormalizeTime(s.now())))
 	if err != nil {
 		return nil, s.ctxErr(ctx, fmt.Errorf("sqlite: look up token: %w", err))
 	}
@@ -99,14 +111,22 @@ func (s *Store) GetTokenByHash(ctx context.Context, hash []byte) (*inbox.Token, 
 			h         []byte
 			all       int
 			createdAt string
+			expires   sql.NullString
+			lastUsed  sql.NullString
 			inboxID   sql.NullInt64
 		)
-		if err := rows.Scan(&t.ID, &t.Name, &h, &all, &createdAt, &inboxID); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &h, &all, &createdAt, &expires, &lastUsed, &inboxID); err != nil {
 			return nil, s.ctxErr(ctx, fmt.Errorf("sqlite: look up token: %w", err))
 		}
 		if out == nil {
 			t.Hash, t.AllInboxes = h, all != 0
 			if t.CreatedAt, err = parseTime(createdAt); err != nil {
+				return nil, err
+			}
+			if t.ExpiresAt, err = parseNullTime(expires); err != nil {
+				return nil, err
+			}
+			if t.LastUsedAt, err = parseNullTime(lastUsed); err != nil {
 				return nil, err
 			}
 			out = &t
@@ -129,7 +149,7 @@ func (s *Store) ListTokens(ctx context.Context, p inbox.TokenListParams) ([]*inb
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	query := `SELECT id, name, hash, all_inboxes, created_at FROM tokens WHERE id > ?`
+	query := `SELECT id, name, hash, all_inboxes, created_at, expires_at, last_used_at FROM tokens WHERE id > ?`
 	args := []any{int64(p.AfterID)}
 	if p.InboxID != 0 {
 		query += ` AND (all_inboxes = 1 OR id IN (SELECT token_id FROM token_inboxes WHERE inbox_id = ?))`
@@ -151,12 +171,20 @@ func (s *Store) ListTokens(ctx context.Context, p inbox.TokenListParams) ([]*inb
 			h         []byte
 			all       int
 			createdAt string
+			expires   sql.NullString
+			lastUsed  sql.NullString
 		)
-		if err := rows.Scan(&t.ID, &t.Name, &h, &all, &createdAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &h, &all, &createdAt, &expires, &lastUsed); err != nil {
 			return nil, s.ctxErr(ctx, fmt.Errorf("sqlite: list tokens: %w", err))
 		}
 		t.Hash, t.AllInboxes = h, all != 0
 		if t.CreatedAt, err = parseTime(createdAt); err != nil {
+			return nil, err
+		}
+		if t.ExpiresAt, err = parseNullTime(expires); err != nil {
+			return nil, err
+		}
+		if t.LastUsedAt, err = parseNullTime(lastUsed); err != nil {
 			return nil, err
 		}
 		out = append(out, &t)
@@ -209,5 +237,41 @@ func (s *Store) DeleteToken(ctx context.Context, id inbox.TokenID) error {
 			return fmt.Errorf("%w: token", inbox.ErrNotFound)
 		}
 		return nil
+	})
+}
+
+func parseNullTime(v sql.NullString) (*time.Time, error) {
+	if !v.Valid {
+		return nil, nil
+	}
+	t, err := parseTime(v.String)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+var _ inbox.TokenUseRecorder = (*Store)(nil)
+
+// TouchToken implements inbox.TokenUseRecorder. The time only moves forward.
+func (s *Store) TouchToken(ctx context.Context, id inbox.TokenID, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	at = inbox.NormalizeTime(at)
+	return s.writeTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE tokens SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)`,
+			formatTime(at), int64(id), formatTime(at))
+		if err != nil {
+			return fmt.Errorf("sqlite: record token use: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			return nil
+		}
+		var one int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM tokens WHERE id = ?`, int64(id)).Scan(&one); err != nil {
+			return notFound(fmt.Errorf("sqlite: record token use: %w", err), "token")
+		}
+		return nil // recorded already, at this time or a later one
 	})
 }

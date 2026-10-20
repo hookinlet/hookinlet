@@ -839,6 +839,16 @@ export interface components {
             inboxes: string[];
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When the token stops working: from then on it is refused like a token that does not exist. Absent for a token that never expires. The token stays in the list so that it can be revoked.
+             */
+            expires_at?: string;
+            /**
+             * Format: date-time
+             * @description When the token was last seen authenticating a request. Approximate, since a use is noted at most once every few minutes. Absent if it has not been used, or if the store does not record it.
+             */
+            last_used_at?: string;
         };
         CreateToken: {
             /** @description For people to tell tokens apart by. Not a secret and not unique. */
@@ -847,6 +857,11 @@ export interface components {
             inboxes?: string[];
             /** @description Read every inbox. Give this or `inboxes`. */
             all_inboxes?: boolean;
+            /**
+             * Format: date-time
+             * @description When the token stops working. It must be in the future. Omit it for a token that does not expire. It cannot be changed afterwards: to extend a token's life, issue another and revoke this one.
+             */
+            expires_at?: string;
         };
         TokenCreated: {
             record: components["schemas"]["Token"];

@@ -62,8 +62,8 @@ shown exactly once is a new agent token, in the response that creates it.
 | `PUT /v1/admin/inboxes/{slug}/secret` | Set or replace the verifier secret. |
 | `POST /v1/admin/inboxes/{slug}/rotate-ingest-key` | A new random ingest key. The old URL stops working at once; give senders the new one. |
 | `DELETE /v1/admin/inboxes/{slug}` | Delete the inbox and all of its messages (`204`). The inbox is gone as far as readers, senders and tokens are concerned the moment the call starts; its messages are then removed in small batches so that other inboxes keep receiving. If the server stops part way, the retention sweep finishes the job (`hookinlet retention run` does it at once, and is the way to do it if the sweep is off); until then the slug and ingest key are still taken. |
-| `POST /v1/admin/tokens` | Issue an agent token for some inboxes (`inboxes`: a list of slugs) or all of them (`all_inboxes`). Returns the token once. |
-| `GET /v1/admin/tokens` | List tokens, never their secrets (`?inbox=slug` for those that can read an inbox; `?limit=`; follow `next`). |
+| `POST /v1/admin/tokens` | Issue an agent token for some inboxes (`inboxes`: a list of slugs) or all of them (`all_inboxes`), optionally one that expires (`expires_at`). Returns the token once. |
+| `GET /v1/admin/tokens` | List tokens, never their secrets, with each one's `expires_at` and `last_used_at` when it has them (`?inbox=slug` for those that can read an inbox; `?limit=`; follow `next`). |
 | `DELETE /v1/admin/tokens/{id}` | Revoke a token (`204`). It stops working at once. |
 | `POST /v1/admin/retention/run` | Apply retention now. Returns `{"deleted": N}`. |
 | `GET /v1/admin/backup` | Download a consistent copy of the database. |
@@ -186,6 +186,32 @@ be unique and is not a secret.
 
 An agent token can never use the admin API, however many inboxes it reads.
 
+#### Expiry and last use
+
+A token can be given a lifetime, for an agent or a job that should not hold a standing credential. Give
+`expires_at` (a time in the future, RFC 3339) when you issue it, or on the command line `--expires-in 30d` (a
+duration such as `720h`, or a number of days) or `--expires-at 2027-01-31T00:00:00Z`. From that moment the token is
+refused with the same `401` as a token that never existed, with nothing in the answer or its timing that says it
+once worked. A token issued without an expiry never expires, which is how every token made before this existed
+behaves. The expiry is set once and cannot be changed: to extend a token's life, issue a new one, give it to the
+agent, and revoke the old one, as for any replacement.
+
+An expired token stays in the list, marked `(expired)` by `hookinlet token list`, so that you can see it and revoke
+it; it does nothing until you do, and a restore from a backup brings back tokens with the expiry they had.
+
+A stream or MCP wait that was open when its token expired ends at the next re-check, within about 30 seconds
+(`StreamRevalidateInterval`), exactly as when a token is revoked: the stream is re-authenticated with the same
+credential, which is now refused. A re-check that cannot be made does not end it (see
+[What can end a stream](api.md#what-can-end-a-stream)).
+
+`last_used_at` (the **LAST USED** column of `hookinlet token list`) is when the token last authenticated a request,
+to help you find tokens that nothing uses any more and are safe to revoke. It is approximate on purpose: a use is
+noted at most once every five minutes for each token, in the background, so that reading does not turn into
+writing. A stream that stays open keeps its token's time current through its re-checks. A failure to note a use is
+logged and does not affect the request. It is empty for a token that has not been used since the upgrade that
+introduced it, and for a Store that does not record it. A `last_used_at` that lags by a few minutes is the
+design, not a fault.
+
 ### Why the ingest URL is not the slug
 
 The ingest endpoint takes requests from anywhere, and the key in the URL is the
@@ -247,6 +273,7 @@ hookinlet inbox show stripe-prod
 hookinlet inbox update stripe-prod --retention-days 30 --disabled=false
 echo whsec_example | hookinlet inbox set-secret stripe-prod --secret-stdin
 hookinlet token create --name billing-agent --inbox stripe-prod
+hookinlet token create --name nightly-job --inbox stripe-prod --expires-in 30d
 hookinlet token list --inbox stripe-prod
 hookinlet inbox rotate-ingest-key stripe-prod
 hookinlet inbox delete stripe-prod --yes

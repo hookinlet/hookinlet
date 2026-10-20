@@ -31,6 +31,12 @@ type AuthFixture struct {
 	// implementation. The suite checks that the very next Authenticate refuses it: an
 	// Authenticator that remembers who it has seen would not.
 	Revoke func(token string)
+	// Expire, if set, makes a token (one of TokenA, TokenB, TokenBoth, TokenAll) expire,
+	// as the passage of time past its Token.ExpiresAt does for the default
+	// implementation; an implementation with no expiry leaves it nil. The suite checks
+	// that the very next Authenticate refuses it in exactly the way it refuses a token
+	// that never existed, so that a caller cannot tell the two apart.
+	Expire func(token string)
 	// AdminToken, if non-empty, can read every inbox and administer. An
 	// implementation without an admin credential leaves it empty.
 	AdminToken string
@@ -270,6 +276,33 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 		}
 		if _, err := authenticate(t, f, bearer(f.TokenB)...); err != nil {
 			t.Errorf("revoking one token stopped another: %v", err)
+		}
+	})
+
+	t.Run("AnExpiredTokenIsRefusedLikeAnUnknownOne", func(t *testing.T) {
+		f := newFixture(t)
+		if f.Expire == nil {
+			t.Skip("this implementation cannot expire a token through the fixture")
+		}
+		for range 2 { // the first use must not make it remembered
+			if _, err := authenticate(t, f, bearer(f.TokenA)...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, unknown := authenticate(t, f, bearer("not-a-real-token-"+strings.Repeat("x", 30))...)
+		f.Expire(f.TokenA)
+		p, err := authenticate(t, f, bearer(f.TokenA)...)
+		if p != nil || !errors.Is(err, inbox.ErrUnauthenticated) {
+			t.Fatalf("an expired token: principal %v, error %v; want a nil principal and ErrUnauthenticated", p, err)
+		}
+		if unknown == nil || err.Error() != unknown.Error() {
+			t.Errorf("an expired token is refused with %q, an unknown one with %q; the difference would tell a caller which it was", err, unknown)
+		}
+		if strings.Contains(err.Error(), f.TokenA) {
+			t.Error("the error contains the token")
+		}
+		if _, err := authenticate(t, f, bearer(f.TokenB)...); err != nil {
+			t.Errorf("one token expiring stopped another: %v", err)
 		}
 	})
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
@@ -51,6 +52,10 @@ func (f forwardsAll) CountUnverified(ctx context.Context, id inbox.ID, limit int
 
 func (f forwardsAll) RenewEpochs(ctx context.Context) error {
 	return f.Store.(inbox.EpochRenewer).RenewEpochs(ctx)
+}
+
+func (f forwardsAll) TouchToken(ctx context.Context, id inbox.TokenID, at time.Time) error {
+	return f.Store.(inbox.TokenUseRecorder).TouchToken(ctx, id, at)
 }
 
 func openSQLite(t *testing.T) *sqlite.Store {

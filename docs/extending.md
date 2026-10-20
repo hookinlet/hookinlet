@@ -21,6 +21,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Hooks` | Runs before and after ingest: reject a delivery, count it. | `inbox.NopHooks` | none: the default does nothing |
 | `Admitter` (optional, of `Hooks`) | Asked before every read, stream and MCP wait, with the caller, the inbox and an `AccessKind`; may refuse (`ErrRateLimited` 429, `ErrQuotaExceeded` 402, `ErrForbidden` 403) or return a release function, called when the access ends. | none: without it everything is admitted | `AdmitterSuite` |
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. A Store that holds several tenants refuses a tenant-scoped context. | the SQLite store | `BackupperSuite` |
+| `TokenUseRecorder` (optional) | `TouchToken(ctx, id, at)` records when a token was last used, shown as `Token.LastUsedAt` and in the admin API's `last_used_at`. The default `Authenticator` calls it at most once per token per interval (five minutes), in the background, with a context of its own, and ignores its failure, so it may be slow or refuse under load. The time only moves forward; an unknown token is `ErrNotFound`. | the SQLite store | `StoreSuite` (the `TokenLastUsed` case, skipped without the interface) |
 | `EpochRenewer` (optional) | `RenewEpochs(ctx)` gives every inbox a new epoch and changes nothing else, for a Store restored by means that are not part of the interface (a copied database file, a point-in-time recovery). The server does not call it; a restore procedure does. See [A restore is a new epoch](#writing-a-store). | the SQLite store (`hookinlet renew-epochs` runs it) | `EpochRenewerSuite` |
 | `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | `UnverifiedLimiterSuite` (it returns at once and leaves the inbox alone; the cap itself is the server's tests) |
 | `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, the host it was addressed to, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | `IngestObserverSuite` (it returns at once for every outcome and leaves the event alone; what the server reports is the server's tests) |
@@ -522,19 +523,31 @@ more rows than the limit), implement `inbox.UnverifiedCounter` and add
 `inboxtest.UnverifiedCounterSuite(t, newStore)`; the server then caps the unverified
 messages an inbox keeps (see [verifiers](verifiers.md#unverified-messages-are-capped)).
 
+**Token expiry and last use.** An `inbox.Token` may have an `ExpiresAt` and a `LastUsedAt`. A Store that keeps
+`ExpiresAt` must refuse an expiry that is not after its own clock at `CreateToken` (call `Token.ValidateAt` with that
+clock; `Validate` reads the system clock) and must not return a token from `GetTokenByHash` once its expiry has
+passed, by that clock: it is `ErrNotFound`, so an Authenticator built on the Store cannot serve it or tell it
+from one that never existed. `ListTokens` still returns it, so an operator can revoke it. The default
+`Authenticator` checks the expiry again, so a Store that does not enforce it is still safe with that
+Authenticator, but a different one would be wrong. A Store that does not keep `ExpiresAt` at all returns the token
+without one and the `TokenExpiry` case is skipped; the admin API will accept an `expires_at` for it and it will
+have no effect, so a Store that cannot keep it should say so to the people who run it. `LastUsedAt` is optional
+and comes with `inbox.TokenUseRecorder`, whose case skips without it.
+
 ## Wrapping a Store
 
 To add something around a Store (tenancy, a quota, a byte count per tenant), wrap it
 in a type of your own and give the server the wrapper. Besides the 19 methods of
 `inbox.Store`, the server looks on the Store it is given for three optional
-interfaces, by type assertion, and does without each one it does not find. A fourth,
-`inbox.EpochRenewer`, is not looked for by the server but by a restore procedure of your own:
+interfaces, by type assertion, and does without each one it does not find. `inbox.TokenUseRecorder` is found the
+same way by the default `Authenticator`, and a fifth, `inbox.EpochRenewer`, is not looked for by the server but by a restore procedure of your own:
 
 | Optional interface | Without it |
 |---|---|
 | `inbox.UnverifiedCounter` | Unverified messages are not capped: `Options.MaxUnverified` and an `UnverifiedLimiter` on your `Hooks` have no effect. Every delivery stored unverified (with `on_verify_fail=store`, or the verifier `none`) is accepted with `200`. The only sign is a warning in the log when the server starts. |
 | `inbox.Backupper` | `GET /v1/admin/backup` answers `501 not_implemented`, and `hookinlet backup` says the store does not support backups. |
 | `inbox.StatusReporter` | `GET /v1/admin/status` reports `schema_version` and `database_bytes` as `0` and leaves out `free_bytes`. |
+| `inbox.TokenUseRecorder` | No token's last use is recorded: `Token.LastUsedAt` stays unset and the admin API leaves out `last_used_at`. Nothing fails. |
 | `inbox.EpochRenewer` | Nothing in the server. Your restore procedure, which asserts the Store it holds to `EpochRenewer`, finds no way to renew the epochs and cannot tell readers holding old cursors to start again. |
 
 The core grows by adding optional interfaces like these ([Stability](stability.md#the-go-packages)), so
@@ -750,6 +763,10 @@ be a `404` is for a host that serves no org: see
 ```go
 inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture { … })
 ```
+
+If your credentials can expire, set `AuthFixture.Expire`: it makes one of the fixture's tokens expire, and the suite
+checks that the next call refuses it with the same error text as a token that never existed (a caller must not be
+able to tell the two apart). Left nil, that case is skipped.
 
 ### Choosing the 401 challenge
 

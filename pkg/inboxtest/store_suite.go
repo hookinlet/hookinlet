@@ -84,6 +84,8 @@ func runStoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Tim
 		{"OldestSeqInAPage", testOldestSeqInAPage},
 		{"Tokens", testTokens},
 		{"TokensOfADeletedInbox", testTokensOfADeletedInbox},
+		{"TokenExpiry", testTokenExpiry},
+		{"TokenLastUsed", testTokenLastUsed},
 		{"DeleteInbox", testDeleteInbox},
 		{"DeleteInboxRacingAppendsAndTokens", testDeleteRacesWrites},
 		{"ListInboxes", testListInboxes},

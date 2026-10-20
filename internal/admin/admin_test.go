@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hookinlet/hookinlet/internal/admin"
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
@@ -318,5 +319,39 @@ func TestListingTokensSurvivesAnInboxDeletedMeanwhile(t *testing.T) {
 	}
 	if !seen {
 		t.Errorf("the token for both inboxes is missing from %+v", views)
+	}
+}
+
+func TestATokenCanExpire(t *testing.T) {
+	svc, _, _ := newService(t, 0)
+	ctx := t.Context()
+	for name, at := range map[string]time.Time{"now": time.Now(), "the past": time.Now().Add(-time.Hour)} {
+		if _, err := svc.CreateToken(ctx, admin.TokenParams{Name: "x", AllInboxes: true, ExpiresAt: &at}); !errors.Is(err, inbox.ErrInvalid) {
+			t.Errorf("an expiry of %s: %v, want ErrInvalid", name, err)
+		}
+	}
+	if views, _, _ := svc.ListTokens(ctx, 0, 0, ""); len(views) != 1 {
+		t.Errorf("a refused token was stored: %+v", views)
+	}
+	at := time.Now().Add(48 * time.Hour)
+	c, err := svc.CreateToken(ctx, admin.TokenParams{Name: "short-lived", AllInboxes: true, ExpiresAt: &at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Record.ExpiresAt == nil || c.Record.LastUsedAt != nil {
+		t.Fatalf("the created record: expires %v, last used %v", c.Record.ExpiresAt, c.Record.LastUsedAt)
+	}
+	got, err := time.Parse(admin.TimeLayout, *c.Record.ExpiresAt)
+	if err != nil || got.Sub(at).Abs() > time.Second {
+		t.Errorf("expires_at = %q (%v), want about %v", *c.Record.ExpiresAt, err, at)
+	}
+	views, _, err := svc.ListTokens(ctx, 0, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range views {
+		if (v.Name == "short-lived") != (v.ExpiresAt != nil) {
+			t.Errorf("token %q lists expires_at %v", v.Name, v.ExpiresAt)
+		}
 	}
 }

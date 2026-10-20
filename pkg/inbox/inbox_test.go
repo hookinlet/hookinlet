@@ -229,3 +229,42 @@ func TestNewMessageValidate(t *testing.T) {
 		t.Errorf("valid message: %v", err)
 	}
 }
+
+func TestATokenExpiryMustBeInTheFuture(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	valid := func(exp *time.Time) *inbox.Token {
+		return &inbox.Token{Name: "t", Hash: []byte{1}, AllInboxes: true, ExpiresAt: exp}
+	}
+	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
+	for name, tc := range map[string]struct {
+		exp *time.Time
+		ok  bool
+	}{
+		"none":            {nil, true},
+		"an hour ahead":   {at(time.Hour), true},
+		"a nanosecond on": {at(time.Nanosecond), true},
+		"now":             {at(0), false},
+		"a moment ago":    {at(-time.Nanosecond), false},
+		"long ago":        {at(-1000 * time.Hour), false},
+	} {
+		err := valid(tc.exp).ValidateAt(now)
+		if tc.ok && err != nil || !tc.ok && !errors.Is(err, inbox.ErrInvalid) {
+			t.Errorf("%s: ValidateAt = %v, want ok=%v", name, err, tc.ok)
+		}
+	}
+	// Validate reads the clock itself.
+	soon, gone := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
+	if err := valid(&soon).Validate(); err != nil {
+		t.Errorf("Validate with an expiry an hour ahead: %v", err)
+	}
+	if err := valid(&gone).Validate(); !errors.Is(err, inbox.ErrInvalid) {
+		t.Errorf("Validate with an expiry in the past: %v", err)
+	}
+	// LastUsedAt is not the caller's to set, and does not make a token invalid.
+	last := now
+	tk := valid(nil)
+	tk.LastUsedAt = &last
+	if err := tk.ValidateAt(now); err != nil {
+		t.Errorf("a token with LastUsedAt: %v", err)
+	}
+}

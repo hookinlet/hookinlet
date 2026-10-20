@@ -161,7 +161,21 @@ func created(c *admin.Created, base string) api.Created {
 
 func tokenView(v admin.TokenView) api.Token {
 	at, _ := time.Parse(admin.TimeLayout, v.CreatedAt)
-	return api.Token{AllInboxes: v.AllInboxes, CreatedAt: at, Id: int(v.ID), Inboxes: v.Inboxes, Name: v.Name}
+	return api.Token{
+		AllInboxes: v.AllInboxes, CreatedAt: at, Id: int(v.ID), Inboxes: v.Inboxes, Name: v.Name,
+		ExpiresAt: parseOptionalTime(v.ExpiresAt), LastUsedAt: parseOptionalTime(v.LastUsedAt),
+	}
+}
+
+func parseOptionalTime(s *string) *time.Time {
+	if s == nil {
+		return nil
+	}
+	t, err := time.Parse(admin.TimeLayout, *s)
+	if err != nil {
+		return nil
+	}
+	return &t
 }
 
 func rawConfig(m *map[string]any) json.RawMessage {
@@ -321,7 +335,7 @@ func (a *adminAPI) SetVerifierSecret(ctx context.Context, req api.SetVerifierSec
 
 func (a *adminAPI) CreateToken(ctx context.Context, req api.CreateTokenRequestObject) (api.CreateTokenResponseObject, error) {
 	b := req.Body
-	c, err := a.s.adm.CreateToken(ctx, admin.TokenParams{Name: b.Name, Inboxes: orZero(b.Inboxes), AllInboxes: orZero(b.AllInboxes)})
+	c, err := a.s.adm.CreateToken(ctx, admin.TokenParams{Name: b.Name, Inboxes: orZero(b.Inboxes), AllInboxes: orZero(b.AllInboxes), ExpiresAt: b.ExpiresAt})
 	if err != nil {
 		f := a.s.classify(ctx, "create token", err)
 		switch f.status {

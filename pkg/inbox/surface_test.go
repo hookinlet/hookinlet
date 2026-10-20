@@ -67,6 +67,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"UnverifiedLimiter": {"MaxUnverified(context.Context, *inbox.Inbox) int"},
 		"UnverifiedCounter": {"CountUnverified(context.Context, inbox.ID, int64) (int64, error)"},
 		"StatusReporter":    {"Status(context.Context) (inbox.StoreStatus, error)"},
+		"TokenUseRecorder":  {"TouchToken(context.Context, inbox.TokenID, time.Time) error"},
 		"ScopedPrincipal":   {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "InboxIDs(context.Context) ([]inbox.ID, error)"},
 		"TenantPrincipal":   {"CanAdmin() bool", "CanReadInbox(*inbox.Inbox) bool", "Tenant() string"},
 		"ContextSecretBox": {
@@ -95,6 +96,7 @@ func TestTheCoreInterfacesOnlyChangeOnPurpose(t *testing.T) {
 		"UnverifiedLimiter": reflect.TypeFor[inbox.UnverifiedLimiter](),
 		"UnverifiedCounter": reflect.TypeFor[inbox.UnverifiedCounter](),
 		"StatusReporter":    reflect.TypeFor[inbox.StatusReporter](),
+		"TokenUseRecorder":  reflect.TypeFor[inbox.TokenUseRecorder](),
 		"ScopedPrincipal":   reflect.TypeFor[inbox.ScopedPrincipal](),
 		"ContextSecretBox":  reflect.TypeFor[inbox.ContextSecretBox](),
 		"Verifier":          reflect.TypeFor[verify.Verifier](),

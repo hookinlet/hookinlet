@@ -440,6 +440,80 @@ type tokenCreatedJSON struct {
 	Token string `json:"token"`
 }
 
+type tokenLifeJSON struct {
+	Name       string  `json:"name"`
+	ExpiresAt  *string `json:"expires_at"`
+	LastUsedAt *string `json:"last_used_at"`
+}
+
+func TestTokenExpiryAndLastUseThroughTheAdminAPI(t *testing.T) {
+	a := newAdminEnv(t)
+	read := func(tok string) (int, string) {
+		return do2(t, "GET", a.base+"/v1/inboxes/agent-a", http.Header{"Authorization": {"Bearer " + tok}}, "")
+	}
+	for name, at := range map[string]string{
+		"now": time.Now().UTC().Format(time.RFC3339), "the past": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), "not a time": "tomorrow",
+	} {
+		if status, _ := a.admin("POST", "/v1/admin/tokens", map[string]any{"name": "x", "all_inboxes": true, "expires_at": at}); status != 400 {
+			t.Errorf("an expiry of %s: status %d, want 400", name, status)
+		}
+	}
+
+	at := time.Now().Add(1500 * time.Millisecond).UTC()
+	c := unjson[struct {
+		Record tokenLifeJSON `json:"record"`
+		Token  string        `json:"token"`
+	}](t, a.mustAdmin("POST", "/v1/admin/tokens", map[string]any{"name": "brief", "inboxes": []string{"agent-a"}, "expires_at": at.Format(time.RFC3339Nano)}, 201))
+	if c.Record.ExpiresAt == nil || c.Record.LastUsedAt != nil {
+		t.Fatalf("created record: %+v", c.Record)
+	}
+	if got, err := time.Parse(time.RFC3339Nano, *c.Record.ExpiresAt); err != nil || got.Sub(at).Abs() > time.Millisecond {
+		t.Errorf("expires_at = %q (%v), want %v", *c.Record.ExpiresAt, err, at)
+	}
+	forever := unjson[struct {
+		Record tokenLifeJSON `json:"record"`
+	}](t, a.mustAdmin("POST", "/v1/admin/tokens", map[string]any{"name": "forever", "all_inboxes": true}, 201))
+	if forever.Record.ExpiresAt != nil {
+		t.Errorf("a token made without an expiry has one: %v", *forever.Record.ExpiresAt)
+	}
+
+	// Using the token shows up as a last use, without anyone waiting for it.
+	if status, _ := read(c.Token); status != 200 {
+		t.Fatalf("the token before it expires: %d", status)
+	}
+	listed := func() map[string]tokenLifeJSON {
+		l := unjson[struct {
+			Tokens []tokenLifeJSON `json:"tokens"`
+		}](t, a.mustAdmin("GET", "/v1/admin/tokens", nil, 200))
+		m := map[string]tokenLifeJSON{}
+		for _, tk := range l.Tokens {
+			m[tk.Name] = tk
+		}
+		return m
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for listed()["brief"].LastUsedAt == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the token's last use never appeared in the list")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if listed()["forever"].LastUsedAt != nil {
+		t.Error("a token that was never used has a last use")
+	}
+
+	// Once expired it is refused exactly as a token that never existed is, and listed still.
+	time.Sleep(time.Until(at) + 100*time.Millisecond)
+	status, body := read(c.Token)
+	unknownStatus, unknownBody := read(token.Prefix + strings.Repeat("x", 40))
+	if status != 401 || status != unknownStatus || body != unknownBody {
+		t.Errorf("an expired token: %d %q; an unknown one: %d %q", status, body, unknownStatus, unknownBody)
+	}
+	if listed()["brief"].ExpiresAt == nil {
+		t.Error("an expired token is no longer listed")
+	}
+}
+
 func TestTokensAreIssuedScopedAndRevoked(t *testing.T) {
 	a := newAdminEnv(t)
 	a.newInbox("agent-b", "trusted", "")

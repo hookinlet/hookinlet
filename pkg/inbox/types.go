@@ -480,11 +480,29 @@ type Token struct {
 	// order and empty for an AllInboxes token.
 	InboxIDs  []ID
 	CreatedAt time.Time
+	// ExpiresAt, when set, is the moment the token stops working: from then on
+	// the Store does not return it from GetTokenByHash, and an Authenticator
+	// refuses it exactly as it refuses an unknown token. Nil means it never
+	// expires, which is what every token made before expiry existed does. It is
+	// set at creation and does not change; to extend a token's life, issue
+	// another and revoke this one. ListTokens still lists an expired token, so
+	// that an operator can see it and revoke it.
+	ExpiresAt *time.Time
+	// LastUsedAt is when the token last authenticated a request, as far as the
+	// Store knows, or nil if it has not or the Store does not record it (see
+	// TokenUseRecorder). It is approximate by design: a use is recorded at most
+	// once per interval, not on every request. CreateToken ignores it.
+	LastUsedAt *time.Time
 }
 
-// Validate checks the fields a Store cannot sensibly default. Errors wrap
-// ErrInvalid.
-func (t *Token) Validate() error {
+// Validate checks the fields a Store cannot sensibly default, against the
+// current time. Errors wrap ErrInvalid. A Store with a clock of its own calls
+// ValidateAt with it instead.
+func (t *Token) Validate() error { return t.ValidateAt(time.Now()) }
+
+// ValidateAt is Validate as of now: an ExpiresAt that is not after now is
+// refused, since a token that is already expired could never be used.
+func (t *Token) ValidateAt(now time.Time) error {
 	if t == nil {
 		return Invalidf("token is required")
 	}
@@ -499,6 +517,8 @@ func (t *Token) Validate() error {
 		return Invalidf("a token needs at least one inbox, or all of them")
 	case len(t.InboxIDs) > MaxTokenInboxes:
 		return Invalidf("a token can be scoped to at most %d inboxes", MaxTokenInboxes)
+	case t.ExpiresAt != nil && !t.ExpiresAt.After(now):
+		return Invalidf("a token's expiry must be in the future")
 	}
 	seen := make(map[ID]bool, len(t.InboxIDs))
 	for _, id := range t.InboxIDs {

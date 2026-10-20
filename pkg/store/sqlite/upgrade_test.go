@@ -6,10 +6,12 @@ package sqlite_test
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/store/sqlite"
@@ -538,5 +540,59 @@ func TestOpeningTightensTheModeOfADatabaseThatCameFromElsewhere(t *testing.T) {
 		if fi.Mode().Perm()&0o077 != 0 {
 			t.Errorf("%s is %v", filepath.Base(p), fi.Mode().Perm())
 		}
+	}
+}
+
+// A token made before expiry existed never expires and has no last use, and one made
+// after the upgrade can have both.
+func TestTokensMadeBeforeExpiryNeverExpire(t *testing.T) {
+	dir := t.TempDir()
+	raw, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(t.Context(), `CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	// The schema as migrations 1 to 10 left it.
+	for v := 1; v <= 10; v++ {
+		matches, err := filepath.Glob(filepath.Join("migrations", fmt.Sprintf("%04d_*.sql", v)))
+		if err != nil || len(matches) != 1 {
+			t.Fatalf("migration %d: %v %v", v, matches, err)
+		}
+		b, err := os.ReadFile(matches[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := raw.ExecContext(t.Context(), string(b)); err != nil {
+			t.Fatalf("%s: %v", matches[0], err)
+		}
+		if _, err := raw.ExecContext(t.Context(), `INSERT INTO schema_migrations VALUES (?, 'then')`, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.ExecContext(t.Context(), `INSERT INTO tokens (name, hash, all_inboxes, created_at) VALUES ('old', x'0a0b', 1, '2026-01-01T00:00:00.000000Z')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+
+	later := time.Date(2090, 1, 1, 0, 0, 0, 0, time.UTC) // long after the token was made
+	s, err := sqlite.Open(t.Context(), dir, sqlite.WithExclusiveLock(), sqlite.WithClock(func() time.Time { return later }))
+	if err != nil {
+		t.Fatalf("opening the earlier database: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	got, err := s.GetTokenByHash(t.Context(), []byte{0x0a, 0x0b})
+	if err != nil {
+		t.Fatalf("a token from before the upgrade, long after: %v", err)
+	}
+	if got.ExpiresAt != nil || got.LastUsedAt != nil {
+		t.Errorf("an old token has expires %v, last used %v; want neither", got.ExpiresAt, got.LastUsedAt)
+	}
+	if err := s.TouchToken(t.Context(), got.ID, later); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.GetTokenByHash(t.Context(), []byte{0x0a, 0x0b}); again == nil || again.LastUsedAt == nil {
+		t.Errorf("after a touch: %+v", again)
 	}
 }
