@@ -4,7 +4,7 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
-## Unreleased
+## 0.11.0 - 2026-10-19
 
 The conformance suites cover more of what embedders rely on: a `Store` that has to be told of its tenants can now pass
 `StoreSuite`, and the server's tenant behaviours have a suite of their own. Nothing to migrate, and nothing that passed
