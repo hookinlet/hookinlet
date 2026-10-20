@@ -102,7 +102,19 @@ func renewEpochs(ctx context.Context, path string) error {
 	}
 	defer func() { _ = conn.Close() }()
 	conn.SetMaxOpenConns(1)
-	if _, err := conn.ExecContext(ctx, `UPDATE inboxes SET epoch = lower(hex(randomblob(16)))`); err != nil {
+	// The readers go with the old epochs: a position is a sequence number of one epoch.
+	// Both statements are one transaction, so a snapshot never has one without the other.
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("renew epochs: %w", err)
+	}
+	for _, stmt := range []string{`DELETE FROM readers`, `UPDATE inboxes SET epoch = lower(hex(randomblob(16)))`} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("renew epochs: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("renew epochs: %w", err)
 	}
 	// Back to a single self-contained file, as VACUUM INTO left it.

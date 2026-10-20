@@ -20,6 +20,13 @@ migration (see [Deploying](docs/deploying.md#upgrading)), and that copy is the w
 that wrote its own `Store` or `Authenticator` should read **Go API**: the new `StoreSuite` and `AuthenticatorSuite`
 cases skip themselves for an implementation that does not offer the new behaviour, so one that passed before still passes.
 
+**Named readers: the server can remember how far a reader has read, so its lag can be shown.** A reader that gives itself
+a name acknowledges positions explicitly, and `GET /v1/inboxes/{slug}/readers` lists each reader with its `lag` (the
+inbox's `latest_seq` minus its position) and a `gap` flag (retention removed messages after its position). Nothing is
+recorded by a read, a page or a stream, so reads are still reads, and a reader that does not opt in sees no change. This
+replaces the documented statement that the server holds no per-reader state; `docs/api.md` now says what it does hold,
+and when. Nothing in the existing API changes. **Upgrading needs attention in one place** (see **Changed**).
+
 **Added**
 
 - **An `Authenticator` can ask for a `404` for a host that serves no org.** If the error `Authenticate` returns
@@ -45,6 +52,30 @@ cases skip themselves for an implementation that does not offer the new behaviou
   background, so reading does not become a write on every request; a failure to record it is logged and never fails the
   request. `last_used_at` can therefore lag by a few minutes, and is empty for a token not used since this upgrade.
 - **Migration 0011** adds `expires_at` and `last_used_at` (nullable) to `tokens`.
+
+**Changed**
+
+- **The SQLite schema gains a migration, and it only moves forward.** Migration 12 adds a `readers` table. It runs on
+  the first start of the new version like the earlier ones, after the usual copy of the database is kept (see
+  `docs/deploying.md`). A database that has had it is refused by an earlier release ("newer than this build supports"),
+  so after the first start you cannot go back to 0.10.0 on the same data directory without restoring the copy that was kept.
+  Nothing is stored in the table until a reader acknowledges a position.
+- **A snapshot from `GET /v1/admin/backup`, and `RenewEpochs` (`hookinlet renew-epochs`), also drop every reader position.**
+  A position is a sequence number of one epoch, so after a restore the readers list is empty and each reader
+  acknowledges again, as any client holding a cursor from before the restore must start again.
+
+**HTTP API** (all additive; see `docs/api.md#named-readers-and-lag`)
+
+- **`PUT /v1/inboxes/{slug}/readers/{name}`** acknowledges a position (`{"seq": n, "epoch": "..."}`, both required) and
+  creates the reader; **`GET /v1/inboxes/{slug}/readers`** lists them with `lag` and `gap`; **`DELETE .../readers/{name}`**
+  forgets one. Same credentials as the other read operations (an agent token for the inbox, or the admin token); another
+  inbox's token gets `404`. A name is 1 to 64 characters of `A-Za-z0-9._-`, starting with a letter or digit. `seq` may be
+  from 0 to the inbox's `latest_seq`, and may move backwards.
+- An inbox keeps at most 100 named readers by default, and never more than 1000 (`max_readers` in the list tells you). A
+  new name beyond it is `409 too_many_readers`; an acknowledgement for another epoch is `409 epoch_changed`.
+- A new `400` code, `unsupported`: a server whose store cannot remember readers (or has them turned off) refuses the
+  three operations instead of accepting a position that is not kept.
+- No new query parameter, and no change to the MCP tools. Metrics do not carry a reader's name.
 
 **Go API**
 
@@ -98,11 +129,27 @@ cases skip themselves for an implementation that does not offer the new behaviou
   and one that does not is not failed. `AuthenticatorSuite` has `AnExpiredTokenIsRefusedLikeAnUnknownOne`, which runs only
   when the new optional field `AuthFixture.Expire` is set.
 
+- **`inbox.ReaderTracker` is an optional interface of a `Store`**: `AckReader(ctx, inboxID, name, epoch, seq, maxReaders)`,
+  `Readers(ctx, inboxID)` and `ForgetReader(ctx, inboxID, name)`, with `inbox.ReaderPosition`, `inbox.ValidateReaderName`,
+  `inbox.MaxReaderNameLen` (64) and `inbox.MaxNamedReaders` (1000). `inbox.Store` itself is unchanged. `sqlite.Store`
+  implements it. A `Store` that does not is not affected: the server answers `400 unsupported` on the reader operations.
+  `inboxtest.ReaderTrackerSuite` checks an implementation (ordering, bounds, another epoch refused, the cap under
+  concurrent calls, tenants, positions dropped by a renewal and by deleting the inbox). A wrapper around a `Store` that has it
+  must forward the three methods; `inboxtest.AssertStoreWrapperForwards` now fails one that hides them.
+- **`server.Options.MaxReadersPerInbox`** is the cap per inbox: zero means `server.DefaultMaxReadersPerInbox` (100), a
+  value above `inbox.MaxNamedReaders` is lowered to it, and a negative value turns named readers off.
+- **Who can fail what.** Only `AssertStoreWrapperForwards`, for a wrapper around a `Store` that has `ReaderTracker`
+  (that is, around the SQLite store). Nothing else fails an existing `Store`, `Notifier` or `Hooks`.
+
 **Documentation**
 
 - `docs/stability.md` now says these four behaviours are part of the contract and that `servertest.ServerSuite` is how
   an embedder checks them; it used to say that behaviour covered only by the server's own tests is not. `docs/extending.md`
   describes the suite and `StoreOptions.PrepareTenant`.
+
+- `docs/api.md` replaces "the server holds no per-reader state" with the named-readers section; `docs/extending.md`
+  lists `ReaderTracker` among the optional interfaces and in the wrapper table; `docs/admin.md` says a snapshot holds no
+  reader positions.
 
 ## 0.10.0 - 2026-10-18
 

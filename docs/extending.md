@@ -26,6 +26,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | `UnverifiedLimiterSuite` (it returns at once and leaves the inbox alone; the cap itself is the server's tests) |
 | `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, the host it was addressed to, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | `IngestObserverSuite` (it returns at once for every outcome and leaves the event alone; what the server reports is the server's tests) |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
+| `ReaderTracker` (optional) | Remembers how far each named reader of an inbox has read, so the lag can be shown (`PUT`, `GET` and `DELETE` on `/v1/inboxes/{slug}/readers`, see [api](api.md#named-readers-and-lag)): `AckReader` sets a position for `(inbox, name)` in the inbox's current epoch, within a cap given per call (`Options.MaxReadersPerInbox`), `Readers` lists them, `ForgetReader` deletes one. A position is set only by an explicit acknowledgement, never by a read, and belongs to one epoch: the Store drops every position when an inbox's epoch changes (`RenewEpochs`, and the epochs a `Backupper` snapshot is given) and deletes an inbox's with the inbox. Without it the three operations answer `400 unsupported`. | the SQLite store | `ReaderTrackerSuite` |
 | `StatusReporter` (optional) | The schema version, the size of the data and the free space, for `GET /v1/admin/status` and the console. | the SQLite store | none |
 | `Challenger` (optional, of the error `Authenticate` returns) | `WWWAuthenticate() string`: the `WWW-Authenticate` value for the `401`, in place of `Bearer realm="hookinlet"`. See [Choosing the 401 challenge](#choosing-the-401-challenge). | none: the server sends its own | `ChallengerSuite` (the value is one the server sends; the rest is the server's tests) |
 | `Unrouted` (optional, of the error `Authenticate` returns) | `UnroutedHost() bool`: when true, the server answers `404` in place of `401`, for a request for a host that serves no org. See [Answering 404 for a host that serves no org](#answering-404-for-a-host-that-serves-no-org). | none: the server answers `401` | `AuthenticatorSuite` (`AuthFixture.UnroutedHost`; the rest is the server's tests) |
@@ -442,7 +443,10 @@ suite is what makes it testable. The points that are easy to get wrong:
   different epoch, so that a client holding a cursor from the old one gets `409
   epoch_changed`; the messages, their sequence numbers, the tokens and the inboxes'
   settings are as they were; and a second call is safe and renews again. The SQLite
-  store has it, and `hookinlet renew-epochs` runs it.
+  store has it, and `hookinlet renew-epochs` runs it. A Store that also implements
+  `inbox.ReaderTracker` drops every named reader's position in the same step, in
+  `RenewEpochs` and in the snapshot a `Backupper` makes: a position is a sequence number of one
+  epoch, and `ReaderTrackerSuite` checks that none survives a renewal.
 - **Scope by tenant, except tokens.** A context scoped with `inbox.WithTenant` limits
   every method to that tenant's inboxes (see [Tenants](#tenants)). The token methods
   are the operator's: `GetTokenByHash`, `ListTokens` and `DeleteToken` ignore the
@@ -522,6 +526,13 @@ restores by other means than a snapshot, add `inboxtest.EpochRenewerSuite(t, new
 more rows than the limit), implement `inbox.UnverifiedCounter` and add
 `inboxtest.UnverifiedCounterSuite(t, newStore)`; the server then caps the unverified
 messages an inbox keeps (see [verifiers](verifiers.md#unverified-messages-are-capped)).
+If it can remember how far a named reader has read, implement `inbox.ReaderTracker` and add
+`inboxtest.ReaderTrackerSuite(t, newStore)`: it checks the ordering, the bounds on `seq`
+and the name, that another epoch is refused and a cap holds under concurrent calls (the
+count and the write are one step), that an unknown inbox is `ErrNotFound`, that renewing the
+epochs and deleting the inbox drop the positions, and, for a Store that keeps tenants, that
+one tenant's readers are invisible to another. The server then offers the reader operations
+of the [read API](api.md#named-readers-and-lag).
 
 **Token expiry and last use.** An `inbox.Token` may have an `ExpiresAt` and a `LastUsedAt`. A Store that keeps
 `ExpiresAt` must refuse an expiry that is not after its own clock at `CreateToken` (call `Token.ValidateAt` with that
@@ -538,14 +549,15 @@ and comes with `inbox.TokenUseRecorder`, whose case skips without it.
 
 To add something around a Store (tenancy, a quota, a byte count per tenant), wrap it
 in a type of your own and give the server the wrapper. Besides the 19 methods of
-`inbox.Store`, the server looks on the Store it is given for three optional
+`inbox.Store`, the server looks on the Store it is given for four optional
 interfaces, by type assertion, and does without each one it does not find. `inbox.TokenUseRecorder` is found the
-same way by the default `Authenticator`, and a fifth, `inbox.EpochRenewer`, is not looked for by the server but by a restore procedure of your own:
+same way by the default `Authenticator`, and a sixth, `inbox.EpochRenewer`, is not looked for by the server but by a restore procedure of your own:
 
 | Optional interface | Without it |
 |---|---|
 | `inbox.UnverifiedCounter` | Unverified messages are not capped: `Options.MaxUnverified` and an `UnverifiedLimiter` on your `Hooks` have no effect. Every delivery stored unverified (with `on_verify_fail=store`, or the verifier `none`) is accepted with `200`. The only sign is a warning in the log when the server starts. |
 | `inbox.Backupper` | `GET /v1/admin/backup` answers `501 not_implemented`, and `hookinlet backup` says the store does not support backups. |
+| `inbox.ReaderTracker` | The named-reader operations (`GET`, `PUT` and `DELETE` on `/v1/inboxes/{slug}/readers`) answer `400 unsupported`, and no consumer lag is shown. Nothing is stored and nothing breaks: a reader still keeps its own cursor. |
 | `inbox.StatusReporter` | `GET /v1/admin/status` reports `schema_version` and `database_bytes` as `0` and leaves out `free_bytes`. |
 | `inbox.TokenUseRecorder` | No token's last use is recorded: `Token.LastUsedAt` stays unset and the admin API leaves out `last_used_at`. Nothing fails. |
 | `inbox.EpochRenewer` | Nothing in the server. Your restore procedure, which asserts the Store it holds to `EpochRenewer`, finds no way to renew the epochs and cannot tell readers holding old cursors to start again. |
@@ -596,6 +608,18 @@ func (s *metered) Status(ctx context.Context) (inbox.StoreStatus, error) {
 
 func (s *metered) RenewEpochs(ctx context.Context) error {
 	return s.Store.(inbox.EpochRenewer).RenewEpochs(ctx)
+}
+
+func (s *metered) AckReader(ctx context.Context, id inbox.ID, name, epoch string, seq int64, maxReaders int) (inbox.ReaderPosition, error) {
+	return s.Store.(inbox.ReaderTracker).AckReader(ctx, id, name, epoch, seq, maxReaders)
+}
+
+func (s *metered) Readers(ctx context.Context, id inbox.ID) ([]inbox.ReaderPosition, error) {
+	return s.Store.(inbox.ReaderTracker).Readers(ctx, id)
+}
+
+func (s *metered) ForgetReader(ctx context.Context, id inbox.ID, name string) error {
+	return s.Store.(inbox.ReaderTracker).ForgetReader(ctx, id, name)
 }
 ```
 

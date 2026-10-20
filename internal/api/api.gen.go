@@ -59,6 +59,7 @@ const (
 	ErrorBadRequestErrorCodeBadRequest       ErrorBadRequestErrorCode = "bad_request"
 	ErrorBadRequestErrorCodeInvalidParameter ErrorBadRequestErrorCode = "invalid_parameter"
 	ErrorBadRequestErrorCodeInvalidRequest   ErrorBadRequestErrorCode = "invalid_request"
+	ErrorBadRequestErrorCodeUnsupported      ErrorBadRequestErrorCode = "unsupported"
 )
 
 // Valid indicates whether the value is a known member of the ErrorBadRequestErrorCode enum.
@@ -69,6 +70,8 @@ func (e ErrorBadRequestErrorCode) Valid() bool {
 	case ErrorBadRequestErrorCodeInvalidParameter:
 		return true
 	case ErrorBadRequestErrorCodeInvalidRequest:
+		return true
+	case ErrorBadRequestErrorCodeUnsupported:
 		return true
 	default:
 		return false
@@ -246,6 +249,24 @@ func (e ErrorRateLimitedErrorCode) Valid() bool {
 	}
 }
 
+// Defines values for ErrorReaderConflictErrorCode.
+const (
+	ErrorReaderConflictErrorCodeEpochChanged   ErrorReaderConflictErrorCode = "epoch_changed"
+	ErrorReaderConflictErrorCodeTooManyReaders ErrorReaderConflictErrorCode = "too_many_readers"
+)
+
+// Valid indicates whether the value is a known member of the ErrorReaderConflictErrorCode enum.
+func (e ErrorReaderConflictErrorCode) Valid() bool {
+	switch e {
+	case ErrorReaderConflictErrorCodeEpochChanged:
+		return true
+	case ErrorReaderConflictErrorCodeTooManyReaders:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorTooLargeErrorCode.
 const (
 	PayloadTooLarge ErrorTooLargeErrorCode = "payload_too_large"
@@ -380,6 +401,15 @@ func (e HeadListMessagesParamsFields) Valid() bool {
 
 // Accepted defines model for Accepted.
 type Accepted struct {
+	Seq int `json:"seq"`
+}
+
+// AckReader defines model for AckReader.
+type AckReader struct {
+	// Epoch The `epoch` the sequence number came from (every page and message carries it).
+	Epoch string `json:"epoch"`
+
+	// Seq The last sequence number the reader has handled. At most the inbox's `latest_seq`. It may be lower than the reader's last acknowledgement: that is how a reader starts over.
 	Seq int `json:"seq"`
 }
 
@@ -530,7 +560,7 @@ type Error struct {
 // ErrorBadRequest defines model for ErrorBadRequest.
 type ErrorBadRequest struct {
 	Error struct {
-		// Code A stable, machine-readable code.
+		// Code A stable, machine-readable code. `unsupported` is the answer of the reader operations when this server's store cannot remember named readers.
 		Code ErrorBadRequestErrorCode `json:"code"`
 
 		// Message Safe to show to a person. Never contains a secret, a token, or any part of a request.
@@ -538,7 +568,7 @@ type ErrorBadRequest struct {
 	} `json:"error"`
 }
 
-// ErrorBadRequestErrorCode A stable, machine-readable code.
+// ErrorBadRequestErrorCode A stable, machine-readable code. `unsupported` is the answer of the reader operations when this server's store cannot remember named readers.
 type ErrorBadRequestErrorCode string
 
 // ErrorConflict defines model for ErrorConflict.
@@ -694,6 +724,20 @@ type ErrorRateLimited struct {
 
 // ErrorRateLimitedErrorCode A stable, machine-readable code.
 type ErrorRateLimitedErrorCode string
+
+// ErrorReaderConflict defines model for ErrorReaderConflict.
+type ErrorReaderConflict struct {
+	Error struct {
+		// Code A stable, machine-readable code.
+		Code ErrorReaderConflictErrorCode `json:"code"`
+
+		// Message Safe to show to a person. Never contains a secret, a token, or any part of a request.
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// ErrorReaderConflictErrorCode A stable, machine-readable code.
+type ErrorReaderConflictErrorCode string
 
 // ErrorTooLarge defines model for ErrorTooLarge.
 type ErrorTooLarge struct {
@@ -937,6 +981,38 @@ type PatchInbox struct {
 // PatchInboxOnVerifyFail What happens to a delivery that fails verification: `reject` (the default for a new inbox) answers 401 and stores nothing; `store` keeps it, marked unverified, and answers 200 so that the sender stops retrying. Omitted, it is left alone.
 type PatchInboxOnVerifyFail string
 
+// Reader defines model for Reader.
+type Reader struct {
+	// Gap `true` if retention removed messages after the reader's position before it acknowledged them, so a reader that continues from `seq` will not see every message. `false` for a reader at `0`, which has no history it could have missed.
+	Gap bool `json:"gap"`
+
+	// Lag `latest_seq` minus `seq`: how many sequence numbers the reader is behind. Counts numbers, not stored messages: some of them may have been removed by retention.
+	Lag  int    `json:"lag"`
+	Name string `json:"name"`
+
+	// Seq The last sequence number the reader acknowledged. `0` if none yet.
+	Seq int `json:"seq"`
+
+	// UpdatedAt When the reader last acknowledged.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ReaderList defines model for ReaderList.
+type ReaderList struct {
+	// Epoch The inbox's current epoch. Every position listed belongs to it.
+	Epoch     string `json:"epoch"`
+	LatestSeq int    `json:"latest_seq"`
+
+	// MaxReaders The most named readers this server keeps for one inbox: 100 unless the operator set another, and never more than 1000.
+	MaxReaders int `json:"max_readers"`
+
+	// OldestSeq The lowest sequence number still stored, or `0` if none is.
+	OldestSeq int `json:"oldest_seq"`
+
+	// Readers The named readers of the inbox, ordered by name. All of them, since there are at most `max_readers`.
+	Readers []Reader `json:"readers"`
+}
+
 // SetSecret defines model for SetSecret.
 type SetSecret struct {
 	Secret string `json:"secret"`
@@ -991,6 +1067,9 @@ type TokenList struct {
 	Tokens []Token `json:"tokens"`
 }
 
+// ReaderName defines model for ReaderName.
+type ReaderName = string
+
 // Seq defines model for Seq.
 type Seq = int
 
@@ -1035,6 +1114,9 @@ type NotImplemented = ErrorNotImplemented
 
 // Overloaded defines model for Overloaded.
 type Overloaded = ErrorOverloaded
+
+// ReaderConflict defines model for ReaderConflict.
+type ReaderConflict = ErrorReaderConflict
 
 // TooLarge defines model for TooLarge.
 type TooLarge = ErrorTooLarge
@@ -1195,6 +1277,9 @@ type SetVerifierSecretJSONRequestBody = SetSecret
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = CreateToken
 
+// AckReaderJSONRequestBody defines body for AckReader for application/json ContentType.
+type AckReaderJSONRequestBody = AckReader
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Healthz Liveness
@@ -1290,6 +1375,15 @@ type ServerInterface interface {
 	// HeadGetMessageRaw Headers only: The exact bytes received
 	// (HEAD /v1/inboxes/{slug}/messages/{seq}/raw)
 	HeadGetMessageRaw(w http.ResponseWriter, r *http.Request, slug Slug, seq Seq, params HeadGetMessageRawParams)
+	// ListReaders Named readers and their lag
+	// (GET /v1/inboxes/{slug}/readers)
+	ListReaders(w http.ResponseWriter, r *http.Request, slug Slug)
+	// ForgetReader Forget a named reader
+	// (DELETE /v1/inboxes/{slug}/readers/{name})
+	ForgetReader(w http.ResponseWriter, r *http.Request, slug Slug, name ReaderName)
+	// AckReader Acknowledge a position as a named reader
+	// (PUT /v1/inboxes/{slug}/readers/{name})
+	AckReader(w http.ResponseWriter, r *http.Request, slug Slug, name ReaderName)
 	// StreamMessages Follow an inbox live (Server-Sent Events)
 	// (GET /v1/inboxes/{slug}/stream)
 	StreamMessages(w http.ResponseWriter, r *http.Request, slug Slug, params StreamMessagesParams)
@@ -2415,6 +2509,102 @@ func (siw *ServerInterfaceWrapper) HeadGetMessageRaw(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListReaders operation middleware
+func (siw *ServerInterfaceWrapper) ListReaders(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug Slug
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReaders(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ForgetReader operation middleware
+func (siw *ServerInterfaceWrapper) ForgetReader(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug Slug
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name ReaderName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ForgetReader(w, r, slug, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AckReader operation middleware
+func (siw *ServerInterfaceWrapper) AckReader(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug Slug
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name ReaderName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AckReader(w, r, slug, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StreamMessages operation middleware
 func (siw *ServerInterfaceWrapper) StreamMessages(w http.ResponseWriter, r *http.Request) {
 
@@ -2668,6 +2858,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/v1/inboxes/{slug}/messages/{seq}", wrapper.HeadGetMessage)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/inboxes/{slug}/messages/{seq}/raw", wrapper.GetMessageRaw)
 	m.HandleFunc(http.MethodHead+" "+options.BaseURL+"/v1/inboxes/{slug}/messages/{seq}/raw", wrapper.HeadGetMessageRaw)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/inboxes/{slug}/readers", wrapper.ListReaders)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/inboxes/{slug}/readers/{name}", wrapper.ForgetReader)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/inboxes/{slug}/readers/{name}", wrapper.AckReader)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/inboxes/{slug}/stream", wrapper.StreamMessages)
 
 	return m
@@ -2784,6 +2977,15 @@ type OverloadedJSONResponse struct {
 	Body ErrorOverloaded
 
 	Headers OverloadedResponseHeaders
+}
+
+type ReaderConflictResponseHeaders struct {
+	XRequestId string
+}
+type ReaderConflictJSONResponse struct {
+	Body ErrorReaderConflict
+
+	Headers ReaderConflictResponseHeaders
 }
 
 type TooLargeResponseHeaders struct {
@@ -9195,6 +9397,747 @@ func (response HeadGetMessageRawdefaultTextResponse) VisitHeadGetMessageRawRespo
 	return err
 }
 
+type ListReadersRequestObject struct {
+	Slug Slug `json:"slug"`
+}
+
+type ListReadersResponseObject interface {
+	VisitListReadersResponse(w http.ResponseWriter) error
+}
+
+type ListReaders200ResponseHeaders struct {
+	XRequestId string
+}
+
+type ListReaders200JSONResponse struct {
+	Body    ReaderList
+	Headers ListReaders200ResponseHeaders
+}
+
+func (response ListReaders200JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListReaders400JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListReaders401JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response ListReaders402JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response ListReaders403JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListReaders404JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response ListReaders405JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response ListReaders429JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListReaders500JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReaders503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response ListReaders503JSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReadersdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type ListReadersdefaultJSONResponse struct {
+	Body       Error
+	Headers    ListReadersdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response ListReadersdefaultJSONResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListReadersdefaultTextResponse struct {
+	Body       string
+	Headers    ListReadersdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response ListReadersdefaultTextResponse) VisitListReadersResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type ForgetReaderRequestObject struct {
+	Slug Slug       `json:"slug"`
+	Name ReaderName `json:"name"`
+}
+
+type ForgetReaderResponseObject interface {
+	VisitForgetReaderResponse(w http.ResponseWriter) error
+}
+
+type ForgetReader204ResponseHeaders struct {
+	XRequestId string
+}
+
+type ForgetReader204Response struct {
+	Headers ForgetReader204ResponseHeaders
+}
+
+func (response ForgetReader204Response) VisitForgetReaderResponse(w http.ResponseWriter) error {
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	w.WriteHeader(204)
+	return nil
+}
+
+type ForgetReader400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ForgetReader400JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReader401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ForgetReader401JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReader402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response ForgetReader402JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReader403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response ForgetReader403JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReader404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ForgetReader404JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReader405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response ForgetReader405JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReader429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response ForgetReader429JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReader500JSONResponse struct{ InternalJSONResponse }
+
+func (response ForgetReader500JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReader503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response ForgetReader503JSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReaderdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type ForgetReaderdefaultJSONResponse struct {
+	Body       Error
+	Headers    ForgetReaderdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response ForgetReaderdefaultJSONResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetReaderdefaultTextResponse struct {
+	Body       string
+	Headers    ForgetReaderdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response ForgetReaderdefaultTextResponse) VisitForgetReaderResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
+type AckReaderRequestObject struct {
+	Slug Slug       `json:"slug"`
+	Name ReaderName `json:"name"`
+	Body *AckReaderJSONRequestBody
+}
+
+type AckReaderResponseObject interface {
+	VisitAckReaderResponse(w http.ResponseWriter) error
+}
+
+type AckReader200ResponseHeaders struct {
+	XRequestId string
+}
+
+type AckReader200JSONResponse struct {
+	Body    Reader
+	Headers AckReader200ResponseHeaders
+}
+
+func (response AckReader200JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AckReader400JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AckReader401JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprint(response.Headers.WWWAuthenticate))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader402JSONResponse struct {
+	AccessQuotaExceededJSONResponse
+}
+
+func (response AckReader402JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader403JSONResponse struct{ AccessForbiddenJSONResponse }
+
+func (response AckReader403JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AckReader404JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader405JSONResponse struct{ MethodNotAllowedJSONResponse }
+
+func (response AckReader405JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Allow", fmt.Sprint(response.Headers.Allow))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(405)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader409JSONResponse struct{ ReaderConflictJSONResponse }
+
+func (response AckReader409JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader413JSONResponse struct{ TooLargeJSONResponse }
+
+func (response AckReader413JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader415JSONResponse struct{ UnsupportedJSONResponse }
+
+func (response AckReader415JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(415)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader429JSONResponse struct{ AccessRateLimitedJSONResponse }
+
+func (response AckReader429JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader500JSONResponse struct{ InternalJSONResponse }
+
+func (response AckReader500JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReader503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response AckReader503JSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReaderdefaultResponseHeaders struct {
+	XRequestId *string
+}
+
+type AckReaderdefaultJSONResponse struct {
+	Body       Error
+	Headers    AckReaderdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response AckReaderdefaultJSONResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	setContentLength(w, &buf)
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AckReaderdefaultTextResponse struct {
+	Body       string
+	Headers    AckReaderdefaultResponseHeaders
+	StatusCode int
+}
+
+func (response AckReaderdefaultTextResponse) VisitAckReaderResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	if response.Headers.XRequestId != nil {
+		w.Header().Set("X-Request-Id", fmt.Sprint(*response.Headers.XRequestId))
+	}
+	w.WriteHeader(response.StatusCode)
+
+	_, err := w.Write([]byte(fmt.Sprint(response.Body)))
+	return err
+}
+
 type StreamMessagesRequestObject struct {
 	Slug   Slug `json:"slug"`
 	Params StreamMessagesParams
@@ -9566,6 +10509,15 @@ type StrictServerInterface interface {
 	// HeadGetMessageRaw Headers only: The exact bytes received
 	// (HEAD /v1/inboxes/{slug}/messages/{seq}/raw)
 	HeadGetMessageRaw(ctx context.Context, request HeadGetMessageRawRequestObject) (HeadGetMessageRawResponseObject, error)
+	// ListReaders Named readers and their lag
+	// (GET /v1/inboxes/{slug}/readers)
+	ListReaders(ctx context.Context, request ListReadersRequestObject) (ListReadersResponseObject, error)
+	// ForgetReader Forget a named reader
+	// (DELETE /v1/inboxes/{slug}/readers/{name})
+	ForgetReader(ctx context.Context, request ForgetReaderRequestObject) (ForgetReaderResponseObject, error)
+	// AckReader Acknowledge a position as a named reader
+	// (PUT /v1/inboxes/{slug}/readers/{name})
+	AckReader(ctx context.Context, request AckReaderRequestObject) (AckReaderResponseObject, error)
 	// StreamMessages Follow an inbox live (Server-Sent Events)
 	// (GET /v1/inboxes/{slug}/stream)
 	StreamMessages(ctx context.Context, request StreamMessagesRequestObject) (StreamMessagesResponseObject, error)
@@ -10446,6 +11398,93 @@ func (sh *strictHandler) HeadGetMessageRaw(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(HeadGetMessageRawResponseObject); ok {
 		if err := validResponse.VisitHeadGetMessageRawResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListReaders operation middleware
+func (sh *strictHandler) ListReaders(w http.ResponseWriter, r *http.Request, slug Slug) {
+	var request ListReadersRequestObject
+
+	request.Slug = slug
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReaders(ctx, request.(ListReadersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReaders")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReadersResponseObject); ok {
+		if err := validResponse.VisitListReadersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ForgetReader operation middleware
+func (sh *strictHandler) ForgetReader(w http.ResponseWriter, r *http.Request, slug Slug, name ReaderName) {
+	var request ForgetReaderRequestObject
+
+	request.Slug = slug
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ForgetReader(ctx, request.(ForgetReaderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ForgetReader")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ForgetReaderResponseObject); ok {
+		if err := validResponse.VisitForgetReaderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AckReader operation middleware
+func (sh *strictHandler) AckReader(w http.ResponseWriter, r *http.Request, slug Slug, name ReaderName) {
+	var request AckReaderRequestObject
+
+	request.Slug = slug
+	request.Name = name
+
+	var body AckReaderJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AckReader(ctx, request.(AckReaderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AckReader")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AckReaderResponseObject); ok {
+		if err := validResponse.VisitAckReaderResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

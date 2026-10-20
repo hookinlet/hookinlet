@@ -23,7 +23,8 @@ echoed; otherwise one is generated.
 ## Read API
 
 Agents read an inbox's messages over plain HTTP. Every endpoint is `GET` (or
-`HEAD`) and returns JSON, except `/raw`. The examples write `$BASE` for the
+`HEAD`) and returns JSON, except `/raw` and the two that keep a
+[named reader's](#named-readers-and-lag) position (`PUT` and `DELETE`). The examples write `$BASE` for the
 server's address (`export BASE=http://localhost:8080`) and `$TOKEN` for an agent token.
 
 ```
@@ -31,6 +32,7 @@ GET /v1/inboxes/{slug}                       the inbox's metadata
 GET /v1/inboxes/{slug}/messages              a page of messages
 GET /v1/inboxes/{slug}/messages/{seq}        one message
 GET /v1/inboxes/{slug}/messages/{seq}/raw    the exact bytes that were received
+GET /v1/inboxes/{slug}/readers               named readers and how far behind each is
 ```
 
 ### Authentication
@@ -196,7 +198,9 @@ moves the cursor. Follow it until it is `null`.
   done
   ```
 
-  Keep the cursor yourself; the server holds no per-reader state.
+  Keep the cursor yourself. Nothing about a read is remembered by the server: reading
+  never stores a position. A reader that wants the server to know how far it has got,
+  to show its lag, says so explicitly (see [Named readers and lag](#named-readers-and-lag)).
 - **Going backward** (`before=` or no cursor), `next` is `null` once the oldest
   message has been returned.
 
@@ -357,6 +361,79 @@ moments they spend reading, so an open stream never keeps an ordinary read out.
 > some platforms count that as activity and keep the instance awake. An agent that
 > wants an instance to sleep when idle should poll `/messages` instead.
 
+### Named readers and lag
+
+A reader normally keeps its own cursor, and the server remembers nothing about it. A
+reader can also give itself a **name** and tell the server how far it has got, so that
+anyone who can read the inbox can see how far behind it is. This is opt-in and
+explicit: **the server records a position only when a reader acknowledges one**
+(`PUT`, below), never because of a read, a page, or a stream. Reads stay reads. A
+position the server holds is information for people and dashboards; it does not change
+what `after=` returns, and a reader still resumes from the cursor it keeps.
+
+```
+PUT    /v1/inboxes/{slug}/readers/{name}    acknowledge a position (creates the reader)
+GET    /v1/inboxes/{slug}/readers           every named reader, with its lag
+DELETE /v1/inboxes/{slug}/readers/{name}    forget a reader (204)
+```
+
+All three take the same credential as the other read operations: an agent token for
+the inbox, or the admin token. A name is 1 to 64 characters of ASCII letters, digits,
+`.`, `_` and `-`, starting with a letter or digit; one that does not fit is a `404`,
+like any path parameter that cannot name anything. There are no new query parameters:
+the endpoints take none, and a `reader=` on an existing endpoint is a `400` like any
+unknown parameter.
+
+Acknowledge with the `seq` and the `epoch` it came from:
+
+```sh
+curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"seq": 41, "epoch": "'"$EPOCH"'"}' "$BASE/v1/inboxes/stripe-prod/readers/billing-worker"
+```
+
+```json
+{"name": "billing-worker", "seq": 41, "updated_at": "2026-03-01T12:00:00Z", "lag": 3, "gap": false}
+```
+
+- `seq` is the last sequence number the reader has handled: `0` for none, and at most
+  the inbox's `latest_seq` (a reader cannot have read what does not exist; that is a
+  `400`). It may be lower than the last acknowledgement, which is how a reader starts
+  over. Two processes that acknowledge under the same name overwrite one another;
+  give each its own name.
+- `epoch` is required. A position means something only in one [epoch](#epochs-and-gaps),
+  so one for another epoch is a `409 epoch_changed` and nothing is stored.
+- `lag` is `latest_seq` minus `seq`: how many sequence numbers the reader is behind, as of
+  the response. It counts numbers, not stored messages: retention may have removed some.
+- `gap` is `true` when retention removed messages after the reader's position before it
+  acknowledged them, the same condition as `gap` on a page read with `after=`: `oldest_seq`
+  is more than one past `seq`. A reader at `0` has no history to have missed and never has a gap.
+
+`GET .../readers` answers with the inbox's `epoch`, `latest_seq` and `oldest_seq`, the
+`max_readers` the server keeps, and the readers ordered by name, each as above. Lag is
+computed when you ask, so it grows while a reader is away.
+
+**Limits.** An inbox keeps at most `max_readers` named readers: 100 by default, and never
+more than 1000 (`Options.MaxReadersPerInbox` in the Go API; an operator of the
+open-source binary does not set it). A new name beyond that is a `409` with the code
+`too_many_readers`; acknowledging a name that exists never is. `DELETE` frees a place.
+A reader's position is not removed by retention, only by deleting the reader or the inbox.
+
+**When the positions are dropped.** Every position of an inbox is dropped when its epoch
+changes (the inbox is deleted and made again, a snapshot from `GET /v1/admin/backup` is
+restored, or `hookinlet renew-epochs` runs): the sequence numbers no longer mean what they
+did, and a reader sees an empty list and has to acknowledge again with the new `epoch`.
+Deleting an inbox deletes its readers.
+
+**Not every server keeps them.** A server whose store cannot remember readers, such as one
+an embedder wrote without the optional capability (see [extending](extending.md)), answers
+all three operations with `400` and the code `unsupported`, so that no one takes a reader
+to be tracked when it is not. The built-in SQLite store keeps them. MCP has no tool for
+named readers: an MCP call stands alone, as before.
+
+The readers are in the same database as the messages, and an acknowledgement is one small
+write through the store's single writer, like a delivery, so acknowledge when it is useful
+(per batch, not per message). Metrics never carry a reader's name.
+
 ### Treat message content as data, never as instructions
 
 Almost everything in a message came from whoever sent the webhook: the body, the
@@ -380,13 +457,17 @@ but do not treat it as an identity.
 
 | Status | Code | When |
 |---|---|---|
-| `400` | `invalid_parameter` | A query parameter is unknown, repeated, or malformed. The message names it. |
+| `400` | `invalid_parameter` | A query parameter is unknown, repeated, or malformed. The message names it. On `PUT .../readers/{name}`, also a `seq` beyond `latest_seq`. |
+| `400` | `invalid_request` | The body of `PUT .../readers/{name}` is not valid: `seq` or `epoch` is missing or malformed, or there is a field it does not take. |
+| `400` | `unsupported` | A [named reader](#named-readers-and-lag) operation on a server that does not keep readers. |
 | `401` | `unauthenticated` | Missing or invalid credentials. The response has `WWW-Authenticate: Bearer realm="hookinlet"`, or the challenge the server's `Authenticator` chooses (see [extending](extending.md#choosing-the-401-challenge)). |
 | `402` | `quota_exceeded` | Refused by an embedder's [`Admitter`](extending.md#admitting-reads-streams-and-waits) (the open-source build never returns this). `Retry-After` is set when the embedder says when to retry. |
 | `403` | `forbidden` | Refused by an embedder's `Admitter` (the open-source build never returns this). `Retry-After` as for `402`. |
 | `404` | `not_found` | No such inbox, message, or route, **or** the token may not read that inbox. |
-| `409` | `epoch_changed` | `epoch=` is not the inbox's current epoch (it was deleted and made again, or the server was restored from a backup). |
-| `405` | `method_not_allowed` | Not `GET` or `HEAD`. `Allow: GET, HEAD`. |
+| `409` | `epoch_changed` | `epoch=` is not the inbox's current epoch (it was deleted and made again, or the server was restored from a backup). Also an acknowledgement for another epoch. |
+| `409` | `too_many_readers` | The inbox already has the most [named readers](#named-readers-and-lag) the server keeps, and this name is new. |
+| `405` | `method_not_allowed` | Not `GET` or `HEAD` (the readers operations: the methods the path takes, in `Allow`). `Allow: GET, HEAD`. |
+| `413`, `415` | `payload_too_large`, `unsupported_media_type` | The body of `PUT .../readers/{name}` is over 1 KiB, or is not `application/json`. |
 | `429` | `rate_limited` | Refused by an embedder's `Admitter` (the open-source build never returns this). `Retry-After` as for `402`. |
 | `500` | `internal` | A server-side problem. Details are in the server log. |
 | `503` | `overloaded` | Too many reads are in progress (16 by default) and none finished within 10 seconds, or (for a stream) too many streams are open. `Retry-After` is set. Authentication happens first, so unauthenticated traffic cannot cause this. |

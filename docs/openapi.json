@@ -2876,6 +2876,308 @@
         ]
       }
     },
+    "/v1/inboxes/{slug}/readers": {
+      "get": {
+        "operationId": "listReaders",
+        "summary": "Named readers and their lag",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "The inbox's named readers, each with how far behind it is.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderList"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "An agent token reads the inboxes it was issued for (or all of them); the admin token reads all. An inbox the credential may not read is a 404, the same as one that does not exist. A reader is a name a client gives itself and acknowledges positions under (`PUT /v1/inboxes/{slug}/readers/{name}`); the server never records a position because of a read. A server whose store cannot remember readers answers `400` with the code `unsupported`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
+    "/v1/inboxes/{slug}/readers/{name}": {
+      "put": {
+        "operationId": "ackReader",
+        "summary": "Acknowledge a position as a named reader",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "200": {
+            "description": "The reader, with its new position and lag.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reader"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/ReaderConflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/Unsupported"
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "An agent token reads the inboxes it was issued for (or all of them); the admin token reads all. An inbox the credential may not read is a 404, the same as one that does not exist. Records that the reader has handled every message up to `seq` in the given `epoch`, creating the reader if the name is new, and returns it. This is the only way a position is stored: reading never stores one. Positions are kept only within an epoch (see `epoch_changed`) and are dropped when the inbox's epoch changes. The server keeps at most `max_readers` named readers per inbox (see the reader list); a new name beyond that is a `409` with the code `too_many_readers`. A server whose store cannot remember readers answers `400` with the code `unsupported`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/ReaderName"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AckReader"
+              }
+            }
+          },
+          "x-max-bytes": 1024
+        }
+      },
+      "delete": {
+        "operationId": "forgetReader",
+        "summary": "Forget a named reader",
+        "tags": [
+          "Read"
+        ],
+        "responses": {
+          "204": {
+            "description": "The reader is forgotten. Its position is gone; acknowledging the name again starts it afresh.",
+            "headers": {
+              "X-Request-Id": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "402": {
+            "$ref": "#/components/responses/AccessQuotaExceeded"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccessForbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/AccessRateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Overloaded"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "default": {
+            "description": "Any other failure. Errors the server writes itself are JSON in the shape of `Error`. Errors from the HTTP stack underneath it (for example `431 Request Header Fields Too Large`, or a request it cannot parse) are plain text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "X-Request-Id": {
+                "required": false,
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+              }
+            }
+          }
+        },
+        "description": "An agent token reads the inboxes it was issued for (or all of them); the admin token reads all. An inbox the credential may not read is a 404, the same as one that does not exist. Frees one of the inbox's `max_readers` places. A reader that does not exist is a `404`. A server whose store cannot remember readers answers `400` with the code `unsupported`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/ReaderName"
+          }
+        ],
+        "security": [
+          {
+            "agentToken": []
+          },
+          {
+            "adminToken": []
+          }
+        ]
+      }
+    },
     "/mcp": {
       "post": {
         "operationId": "mcp",
@@ -4348,9 +4650,10 @@
                 "enum": [
                   "invalid_parameter",
                   "invalid_request",
-                  "bad_request"
+                  "bad_request",
+                  "unsupported"
                 ],
-                "description": "A stable, machine-readable code."
+                "description": "A stable, machine-readable code. `unsupported` is the answer of the reader operations when this server's store cannot remember named readers."
               },
               "message": {
                 "type": "string",
@@ -5698,6 +6001,127 @@
             "minimum": 0
           }
         }
+      },
+      "ErrorReaderConflict": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "epoch_changed",
+                  "too_many_readers"
+                ],
+                "description": "A stable, machine-readable code."
+              },
+              "message": {
+                "type": "string",
+                "description": "Safe to show to a person. Never contains a secret, a token, or any part of a request."
+              }
+            }
+          }
+        }
+      },
+      "Reader": {
+        "type": "object",
+        "required": [
+          "name",
+          "seq",
+          "updated_at",
+          "lag",
+          "gap"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The last sequence number the reader acknowledged. `0` if none yet."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the reader last acknowledged."
+          },
+          "lag": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "`latest_seq` minus `seq`: how many sequence numbers the reader is behind. Counts numbers, not stored messages: some of them may have been removed by retention."
+          },
+          "gap": {
+            "type": "boolean",
+            "description": "`true` if retention removed messages after the reader's position before it acknowledged them, so a reader that continues from `seq` will not see every message. `false` for a reader at `0`, which has no history it could have missed."
+          }
+        }
+      },
+      "ReaderList": {
+        "type": "object",
+        "required": [
+          "epoch",
+          "latest_seq",
+          "oldest_seq",
+          "max_readers",
+          "readers"
+        ],
+        "properties": {
+          "epoch": {
+            "type": "string",
+            "description": "The inbox's current epoch. Every position listed belongs to it."
+          },
+          "latest_seq": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "oldest_seq": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The lowest sequence number still stored, or `0` if none is."
+          },
+          "max_readers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "The most named readers this server keeps for one inbox: 100 unless the operator set another, and never more than 1000."
+          },
+          "readers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reader"
+            },
+            "description": "The named readers of the inbox, ordered by name. All of them, since there are at most `max_readers`."
+          }
+        }
+      },
+      "AckReader": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "seq",
+          "epoch"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The last sequence number the reader has handled. At most the inbox's `latest_seq`. It may be lower than the reader's last acknowledgement: that is how a reader starts over."
+          },
+          "epoch": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{1,64}$",
+            "description": "The `epoch` the sequence number came from (every page and message carries it)."
+          }
+        }
       }
     },
     "responses": {
@@ -6115,6 +6539,31 @@
             "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
           }
         }
+      },
+      "ReaderConflict": {
+        "description": "Either `epoch_changed`: the `epoch` in the request is not the inbox's current one, so the position is for an earlier life of the inbox (read `epoch` from `GET /v1/inboxes/{slug}` and acknowledge again from a position you know in that epoch); or `too_many_readers`: the inbox already has the most named readers the server allows (see `max_readers` in the reader list), and this name is a new one. Delete a reader that is no longer used, or acknowledge one that exists.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorReaderConflict"
+            },
+            "example": {
+              "error": {
+                "code": "too_many_readers",
+                "message": "this inbox already has the most named readers (100); delete one that is not used"
+              }
+            }
+          }
+        },
+        "headers": {
+          "X-Request-Id": {
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the request in the server's log. Echoed from the request's `X-Request-Id` when it is well-formed, otherwise generated."
+          }
+        }
       }
     },
     "parameters": {
@@ -6147,6 +6596,18 @@
           "minimum": 1
         },
         "description": "The token's id, from creating or listing tokens."
+      },
+      "ReaderName": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "description": "The reader's name: 1 to 64 characters of ASCII letters, digits, `.`, `_` and `-`, starting with a letter or digit. A name that does not fit is a 404, like any path parameter that cannot name anything."
       }
     }
   },

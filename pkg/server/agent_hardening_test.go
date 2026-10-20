@@ -140,6 +140,20 @@ type blockingStore struct {
 	release chan struct{}
 }
 
+// A store that holds a read slot still remembers readers: the slot, not the missing
+// capability, is what the tests that use it are about.
+func (b blockingStore) AckReader(ctx context.Context, id inbox.ID, name, epoch string, seq int64, maxReaders int) (inbox.ReaderPosition, error) {
+	return b.Store.(inbox.ReaderTracker).AckReader(ctx, id, name, epoch, seq, maxReaders)
+}
+
+func (b blockingStore) Readers(ctx context.Context, id inbox.ID) ([]inbox.ReaderPosition, error) {
+	return b.Store.(inbox.ReaderTracker).Readers(ctx, id)
+}
+
+func (b blockingStore) ForgetReader(ctx context.Context, id inbox.ID, name string) error {
+	return b.Store.(inbox.ReaderTracker).ForgetReader(ctx, id, name)
+}
+
 func (b blockingStore) Query(ctx context.Context, id inbox.ID, q inbox.Query) (*inbox.Page, error) {
 	b.entered <- struct{}{}
 	select {

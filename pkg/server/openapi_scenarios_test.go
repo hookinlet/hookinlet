@@ -35,7 +35,7 @@ func TestOpenAPIMatchesTheServer(t *testing.T) {
 
 func ordinaryUse(t *testing.T, c *contract) {
 	c.t = t
-	a := newAdminEnv(t, func(o *Options) { o.PublicBaseURL = "https://hooks.example.com" })
+	a := newAdminEnv(t, func(o *Options) { o.PublicBaseURL = "https://hooks.example.com"; o.MaxReadersPerInbox = 2 })
 	cl := c.on(a.base)
 	admin, agent := testAdminToken, a.tokenA
 	addr := strings.TrimPrefix(a.base, "http://")
@@ -139,6 +139,44 @@ func ordinaryUse(t *testing.T, c *contract) {
 	cl.call("streamMessages", "GET", "/v1/inboxes/agent-a/stream?epoch=0badc0de", nil, agent) // another epoch
 	cl.call("streamMessages", "GET", "/v1/inboxes/no-such-inbox/stream", nil, agent)
 	cl.call("streamMessages", "POST", "/v1/inboxes/agent-a/stream", nil, agent)
+
+	// Named readers.
+	_, _, info := cl.call("getInbox", "GET", "/v1/inboxes/agent-a", nil, agent)
+	var epoch struct {
+		Epoch string `json:"epoch"`
+	}
+	_ = json.Unmarshal(info, &epoch)
+	ack := func(name string, seq int, tok string) {
+		cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/"+name, map[string]any{"seq": seq, "epoch": epoch.Epoch}, tok)
+	}
+	cl.call("listReaders", "GET", "/v1/inboxes/agent-a/readers", nil, agent)
+	ack("worker-1", 1, agent)
+	ack("worker-2", 0, agent)
+	ack("worker-1", 2, agent)
+	cl.call("listReaders", "GET", "/v1/inboxes/agent-a/readers", nil, agent)
+	ack("worker-3", 1, agent)                                                                                                          // the cap is 2: 409 too_many_readers
+	ack("worker-1", 9999, agent)                                                                                                       // beyond the newest seq: 400
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/worker-1", map[string]any{"seq": 1, "epoch": "0badc0de"}, agent)          // another epoch: 409
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/worker-1", map[string]any{"seq": 1}, agent)                               // no epoch: 400
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/worker-1", map[string]any{"seq": -1, "epoch": epoch.Epoch}, agent)        // 400
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/worker-1", map[string]any{"seq": 1, "epoch": epoch.Epoch, "x": 1}, agent) // unknown field: 400
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/worker-1?x=1", map[string]any{"seq": 1, "epoch": epoch.Epoch}, agent)     // unknown parameter: 400
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/worker-1", `{"seq":1,"epoch":"`+epoch.Epoch+`"}`, agent, "Content-Type", "text/plain")
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/worker-1", `{"seq":1,"epoch":"`+strings.Repeat("e", 4<<10)+`"}`, agent)
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/-not-a-name", map[string]any{"seq": 1, "epoch": epoch.Epoch}, agent) // a name that cannot exist: 404
+	cl.call("ackReader", "PUT", "/v1/inboxes/no-such-inbox/readers/worker-1", map[string]any{"seq": 1, "epoch": epoch.Epoch}, agent)
+	ack("worker-1", 1, "")
+	cl.call("ackReader", "GET", "/v1/inboxes/agent-a/readers/worker-1", nil, agent)
+	cl.call("listReaders", "GET", "/v1/inboxes/agent-a/readers?x=1", nil, agent)
+	cl.call("listReaders", "GET", "/v1/inboxes/agent-a/readers", nil, "")
+	cl.call("listReaders", "GET", "/v1/inboxes/no-such-inbox/readers", nil, agent)
+	cl.call("listReaders", "POST", "/v1/inboxes/agent-a/readers", nil, agent)
+	cl.call("forgetReader", "DELETE", "/v1/inboxes/agent-a/readers/worker-2?x=1", nil, agent)
+	cl.call("forgetReader", "DELETE", "/v1/inboxes/agent-a/readers/worker-2", nil, agent)
+	cl.call("forgetReader", "DELETE", "/v1/inboxes/agent-a/readers/worker-2", nil, agent)
+	cl.call("forgetReader", "DELETE", "/v1/inboxes/no-such-inbox/readers/worker-2", nil, agent)
+	cl.call("forgetReader", "DELETE", "/v1/inboxes/agent-a/readers/worker-1", nil, "")
+	cl.call("forgetReader", "PATCH", "/v1/inboxes/agent-a/readers/worker-1", nil, agent)
 
 	accept := []string{"Accept", "application/json, text/event-stream"}
 	cl.call("mcp", "POST", "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, agent, accept...)
@@ -306,6 +344,9 @@ func hooksRefuse(t *testing.T, c *contract) {
 			cl.call(id("getMessageRaw"), m, "/v1/inboxes/agent-a/messages/1/raw", nil, a.tokenA)
 		}
 		cl.call("streamMessages", "GET", "/v1/inboxes/agent-a/stream", nil, a.tokenA)
+		cl.call("listReaders", "GET", "/v1/inboxes/agent-a/readers", nil, a.tokenA)
+		cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/w", map[string]any{"seq": 0, "epoch": "0badc0de"}, a.tokenA)
+		cl.call("forgetReader", "DELETE", "/v1/inboxes/agent-a/readers/w", nil, a.tokenA)
 		a.hooks.mu.Lock()
 		a.hooks.admitErr = nil
 		a.hooks.mu.Unlock()
@@ -351,10 +392,12 @@ func storeFails(t *testing.T, c *contract) {
 	for _, p := range []struct{ id, path string }{
 		{"getInbox", "/v1/inboxes/agent-a"}, {"listMessages", "/v1/inboxes/agent-a/messages"},
 		{"getMessage", "/v1/inboxes/agent-a/messages/1"}, {"getMessageRaw", "/v1/inboxes/agent-a/messages/1/raw"},
-		{"streamMessages", "/v1/inboxes/agent-a/stream"},
+		{"streamMessages", "/v1/inboxes/agent-a/stream"}, {"listReaders", "/v1/inboxes/agent-a/readers"},
 	} {
 		cl.call(p.id, "GET", p.path, nil, agent)
 	}
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/w", map[string]any{"seq": 0, "epoch": "0badc0de"}, agent)
+	cl.call("forgetReader", "DELETE", "/v1/inboxes/agent-a/readers/w", nil, agent)
 	cl.call("mcp", "POST", "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, agent, accept...)
 	cl.call("createInbox", "POST", "/v1/admin/inboxes", map[string]any{"slug": "never-made", "verifier": "none"}, admin)
 	cl.call("listInboxes", "GET", "/v1/admin/inboxes", nil, admin)
@@ -414,9 +457,12 @@ func serverFull(t *testing.T, c *contract) {
 	for _, p := range []struct{ id, path string }{
 		{"getInbox", "/v1/inboxes/agent-a"}, {"listMessages", "/v1/inboxes/agent-a/messages"},
 		{"getMessage", "/v1/inboxes/agent-a/messages/1"}, {"getMessageRaw", "/v1/inboxes/agent-a/messages/1/raw"},
+		{"listReaders", "/v1/inboxes/agent-a/readers"},
 	} {
 		cl.call(p.id, "GET", p.path, nil, agent)
 	}
+	cl.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/w", map[string]any{"seq": 0, "epoch": "0badc0de"}, agent)
+	cl.call("forgetReader", "DELETE", "/v1/inboxes/agent-a/readers/w", nil, agent)
 
 	// One stream holds the only stream slot.
 	sctx, cancel := context.WithCancel(t.Context())
@@ -477,6 +523,11 @@ func cannotDoIt(t *testing.T, c *contract) {
 
 	b := newAdminEnv(t, func(o *Options) { o.Store = storeOnly{o.Store} }) // a store that cannot make backups
 	c.on(b.base).call("backup", "GET", "/v1/admin/backup", nil, testAdminToken)
+	// The same store cannot remember named readers either: they are refused, not ignored.
+	rc := c.on(b.base)
+	rc.call("listReaders", "GET", "/v1/inboxes/agent-a/readers", nil, b.tokenA)
+	rc.call("ackReader", "PUT", "/v1/inboxes/agent-a/readers/w", map[string]any{"seq": 0, "epoch": "0badc0de"}, b.tokenA)
+	rc.call("forgetReader", "DELETE", "/v1/inboxes/agent-a/readers/w", nil, b.tokenA)
 }
 
 // The HTTP stack answers some things before the server's code is reached, in

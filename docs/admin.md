@@ -532,7 +532,9 @@ keeps it private, as `hookinlet backup --out` does.
 ones the original handed out after the backup was taken, so cursors held from before
 must not be believed. Each snapshot from `GET /v1/admin/backup` or `hookinlet backup`
 therefore has a **new epoch** for every inbox, and readers using
-[`epoch`](api.md#epochs-and-gaps) are told to start again. Two cases the snapshot
+[`epoch`](api.md#epochs-and-gaps) are told to start again. The snapshot holds no
+[named readers'](api.md#named-readers-and-lag) positions either: a position is a sequence
+number of one epoch, so a restored server starts with none and its readers acknowledge again. Two cases the snapshot
 cannot cover: a **copy of the data directory** made with the server stopped, and
 **one snapshot restored more than once**. After restoring either, with the server
 stopped, run
