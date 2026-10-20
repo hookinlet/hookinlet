@@ -4,6 +4,7 @@
 package inboxtest
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +34,20 @@ type AuthFixture struct {
 	// AdminToken, if non-empty, can read every inbox and administer. An
 	// implementation without an admin credential leaves it empty.
 	AdminToken string
+	// UnroutedHost, if non-empty, is a host (as in Request.Host) that serves no org,
+	// for an Authenticator that answers a request for such a host with an error that
+	// implements inbox.Unrouted, so the server answers 404 instead of 401. The suite
+	// checks that every caller of that host, whatever its credential, is refused in
+	// the same way, and that a refusal on any other host is not a request for a 404.
+	// An implementation with no such host leaves it empty.
+	UnroutedHost string
+}
+
+// unroutedAnswer reports whether err asks the server for a 404 (inbox.Unrouted),
+// the way the server reads it.
+func unroutedAnswer(err error) bool {
+	var u inbox.Unrouted
+	return errors.As(err, &u) && u.UnroutedHost()
 }
 
 // AuthenticatorSuite runs the inbox.Authenticator and inbox.Principal
@@ -227,6 +242,18 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 		}
 	})
 
+	t.Run("AnUnroutedHostIsRefusedTheSameWayForEveryCaller", func(t *testing.T) {
+		f := newFixture(t)
+		if f.UnroutedHost == "" {
+			t.Skip("this implementation has no host that serves no org")
+		}
+		checkUnroutedHostIsTheSameForEveryCaller(t, f)
+	})
+
+	t.Run("ABadCredentialOnAServedHostIsNeverA404", func(t *testing.T) {
+		checkServedHostRefusalsAreNot404(t, newFixture(t))
+	})
+
 	t.Run("ARevokedTokenIsRefusedAtOnce", func(t *testing.T) {
 		f := newFixture(t)
 		if f.Revoke == nil {
@@ -254,4 +281,83 @@ func AuthenticatorSuite(t *testing.T, newFixture func(t *testing.T) AuthFixture)
 			}
 		}
 	})
+}
+
+// checkUnroutedHostIsTheSameForEveryCaller requires that every caller of the host
+// that serves no org, whatever it presents, is refused in one way: no principal,
+// ErrUnauthenticated, the same error text, and the same answer to inbox.Unrouted.
+// A valid token is refused too, since the host serves nothing to read.
+func checkUnroutedHostIsTheSameForEveryCaller(t testing.TB, f AuthFixture) {
+	t.Helper()
+	bearer := func(tok string) []string { return []string{"Authorization", "Bearer " + tok} }
+	callers := map[string][]string{
+		"no credential":       {},
+		"a valid agent token": bearer(f.TokenA),
+		"another agent token": bearer(f.TokenB),
+		"an unknown token":    bearer("not-a-real-token-" + strings.Repeat("x", 30)),
+		"a truncated token":   bearer(f.TokenA[:len(f.TokenA)-1]),
+		"another scheme":      {"Authorization", "Basic " + f.TokenA},
+		"a token in a cookie": {"Cookie", "token=" + f.TokenA},
+		"an empty header":     {"Authorization", ""},
+		"two Authorization":   {"Authorization", "Bearer " + f.TokenA, "Authorization", "Bearer " + f.TokenB},
+	}
+	if f.AdminToken != "" {
+		callers["the admin token"] = bearer(f.AdminToken)
+	}
+	if f.TokenAll != "" {
+		callers["a token for every inbox"] = bearer(f.TokenAll)
+	}
+	var firstName, firstText string
+	var firstUnrouted bool
+	for name, h := range callers {
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/inboxes/x/messages", nil)
+		r.Host = f.UnroutedHost
+		for i := 0; i+1 < len(h); i += 2 {
+			r.Header.Add(h[i], h[i+1])
+		}
+		p, err := f.Authenticator.Authenticate(r)
+		if p != nil || !errors.Is(err, inbox.ErrUnauthenticated) {
+			t.Errorf("%s on %s: principal %v, error %v; want a nil principal and ErrUnauthenticated, for a valid token too: the host serves no org", name, f.UnroutedHost, p, err)
+			continue
+		}
+		for _, secret := range []string{f.TokenA, f.TokenB, f.TokenAll, f.AdminToken} {
+			if secret != "" && strings.Contains(err.Error(), secret) {
+				t.Errorf("%s: the error contains a token", name)
+			}
+		}
+		un := unroutedAnswer(err)
+		if firstName == "" {
+			firstName, firstText, firstUnrouted = name, err.Error(), un
+			continue
+		}
+		if un != firstUnrouted {
+			t.Errorf("%s asks for a 404 = %v but %s = %v: the answer for a host that serves no org must not depend on the credential", name, un, firstName, firstUnrouted)
+		}
+		if err.Error() != firstText {
+			t.Errorf("%s: the error text differs from %s, which would tell a caller about its credential:\n %q\n %q", name, firstName, err.Error(), firstText)
+		}
+	}
+}
+
+// checkServedHostRefusalsAreNot404 requires that a bad credential on a host that does
+// serve an org is not answered with a request for a 404, which would tell the caller
+// that the credential, and not the host, was the problem.
+func checkServedHostRefusalsAreNot404(t testing.TB, f AuthFixture) {
+	t.Helper()
+	cases := map[string][]string{
+		"no header":         {},
+		"an unknown token":  {"Authorization", "Bearer not-a-real-token-" + strings.Repeat("x", 30)},
+		"a truncated token": {"Authorization", "Bearer " + f.TokenA[:len(f.TokenA)-1]},
+		"another scheme":    {"Authorization", "Basic " + f.TokenA},
+	}
+	for name, h := range cases {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/inboxes/x/messages", nil)
+		for i := 0; i+1 < len(h); i += 2 {
+			r.Header.Add(h[i], h[i+1])
+		}
+		_, err := f.Authenticator.Authenticate(r)
+		if errors.Is(err, inbox.ErrUnauthenticated) && unroutedAnswer(err) {
+			t.Errorf("%s: the error asks for a 404 on a host that serves an org. Every bad credential there must get the same 401; only a host that serves none may get a 404", name)
+		}
+	}
 }

@@ -90,6 +90,40 @@ func TestConformance(t *testing.T) {
 	})
 }
 
+// hostRouted wraps an Authenticator the way an embedder that serves orgs by host does: for
+// a host it serves not at all, whatever the credential, it refuses with an error that asks
+// the server for a 404 (inbox.Unrouted); for any other it defers to the wrapped one.
+type hostRouted struct {
+	inbox.Authenticator
+	unservedHost string
+}
+
+type unroutedRefusal struct{}
+
+func (unroutedRefusal) Error() string      { return "unauthenticated" }
+func (unroutedRefusal) Unwrap() error      { return inbox.ErrUnauthenticated }
+func (unroutedRefusal) UnroutedHost() bool { return true }
+
+func (h hostRouted) Authenticate(r *http.Request) (inbox.Principal, error) {
+	if r.Host == h.unservedHost {
+		return nil, unroutedRefusal{}
+	}
+	return h.Authenticator.Authenticate(r)
+}
+
+// An Authenticator that answers 404 for a host that serves no org still passes the whole
+// suite: bad credentials elsewhere are refused alike, and every caller of the unserved
+// host gets the same answer.
+func TestConformanceOfA404CapableAuthenticator(t *testing.T) {
+	inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture {
+		f := newFixture(t, adminToken)
+		return inboxtest.AuthFixture{
+			Authenticator: hostRouted{f.auth, "nowhere.example"}, InboxA: f.a, InboxB: f.b, TokenA: f.tokenA, TokenB: f.tokenB,
+			TokenBoth: f.tokenBoth, TokenAll: f.tokenAll, AdminToken: adminToken, Revoke: f.revoke, UnroutedHost: "nowhere.example",
+		}
+	})
+}
+
 func req(t *testing.T, headers ...string) *http.Request {
 	t.Helper()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/inboxes/x", nil)

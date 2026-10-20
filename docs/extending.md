@@ -27,6 +27,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
 | `StatusReporter` (optional) | The schema version, the size of the data and the free space, for `GET /v1/admin/status` and the console. | the SQLite store | none |
 | `Challenger` (optional, of the error `Authenticate` returns) | `WWWAuthenticate() string`: the `WWW-Authenticate` value for the `401`, in place of `Bearer realm="hookinlet"`. See [Choosing the 401 challenge](#choosing-the-401-challenge). | none: the server sends its own | `ChallengerSuite` (the value is one the server sends; the rest is the server's tests) |
+| `Unrouted` (optional, of the error `Authenticate` returns) | `UnroutedHost() bool`: when true, the server answers `404` in place of `401`, for a request for a host that serves no org. See [Answering 404 for a host that serves no org](#answering-404-for-a-host-that-serves-no-org). | none: the server answers `401` | `AuthenticatorSuite` (`AuthFixture.UnroutedHost`; the rest is the server's tests) |
 | `ScopedPrincipal` (optional) | A `Principal` that can read a known list of inboxes, so listing does not have to search. `InboxIDs(ctx)` may look the list up, and may fail. | the agent principal | checked by `AuthenticatorSuite` |
 | `TenantPrincipal` (optional) | A `Principal` that belongs to one tenant. After authenticating, the server scopes the request's context to it (`inbox.WithTenant`), so slugs are looked up in that tenant and nothing outside it is reachable. See [Tenants](#tenants). | none: the shipped principals are not in a tenant | `StoreSuite` (the `Tenants` case) for the Store, and `servertest.ServerSuite` for what the server scopes |
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
@@ -742,7 +743,9 @@ may see anything, so it must not reveal why it refused: every failure looks the
 same and wraps `inbox.ErrUnauthenticated`. A different error is taken to mean the
 credential could not be checked and becomes a 500. A `Principal` decides by inbox
 **ID**, never by slug or name, and a credential for one inbox must not reveal
-whether another exists (the server answers 404 for both).
+whether another exists (the server answers 404 for both). The one refusal that may
+be a `404` is for a host that serves no org: see
+[Answering 404 for a host that serves no org](#answering-404-for-a-host-that-serves-no-org).
 
 ```go
 inboxtest.AuthenticatorSuite(t, func(t *testing.T) inboxtest.AuthFixture { … })
@@ -784,6 +787,59 @@ is still a server error, whatever else it has.
 checks the value against these rules (so a mistake that would send the server's own
 challenge shows up in your tests, not in a warning in the log), that it is the same on every
 call, and that the error wraps `ErrUnauthenticated`.
+
+### Answering 404 for a host that serves no org
+
+An embedder that serves many parties from one process and tells them apart by the
+request's host has requests for hosts that serve nobody. A `401` there is the wrong
+answer: it invites the caller to authenticate to something that does not exist. If
+the error your `Authenticate` returns (or any error it wraps) also has an
+`UnroutedHost() bool` method (`inbox.Unrouted`) that returns true, the server answers
+`404` instead, with the body of its other `404`s
+(`{"error":{"code":"not_found","message":"not found"}}`) and no `WWW-Authenticate`
+header. It applies wherever the server would write a `401`: the read API, the admin
+API, a stream, the MCP endpoint, and the `405` that checks the credential first.
+
+```go
+type noSuchHost struct{}
+
+func (noSuchHost) Error() string      { return "unauthenticated" }
+func (noSuchHost) Unwrap() error      { return inbox.ErrUnauthenticated }
+func (noSuchHost) UnroutedHost() bool { return true }
+```
+
+- **The answer is about the host, not the credential.** Return it for every request
+  for such a host, whatever the request carries: a valid token, an invalid one, or
+  none. The `404` must be the same for all of them, so that it says nothing about
+  any token. On a host that does serve an org, a bad credential is still the same
+  `401` for every cause, and must not report true. A host that serves no org is
+  not told apart from a missing org by what the caller presents.
+- **It must wrap `ErrUnauthenticated`.** An error that only has the method is still
+  a server error, and so is a bare `inbox.ErrNotFound`: returning `ErrNotFound` from
+  `Authenticate` does not produce a `404`, so an `Authenticator` that returns it
+  today keeps getting a `500`.
+- **What it discloses.** The `404` tells anyone who can reach the server that a host
+  serves no org, where the `401` of a host that does serve one would tell them it
+  does. That is fine when host names are not secret (a wildcard DNS name tried by
+  anyone is guessable anyway); do not use it where the set of hosts that serve an
+  org is itself private. It must reveal nothing more: not whether a token exists,
+  expired, or belongs to another org.
+- **No challenge.** The `404` has no `WWW-Authenticate`, so a client that discovers
+  how to authenticate from the challenge (an OAuth client reading
+  `resource_metadata`) learns nothing on such a host.
+- **Rate limiting still applies.** `Authenticate` runs before the server knows
+  anything about the caller, and it still runs for these requests: put the same rate
+  limit in front of it, since a host that answers `404` is just as cheap for a
+  scanner to try as one that answers `401`.
+- **Ingest and the health checks do not authenticate**, so this does not change what
+  they answer for such a host. Route those yourself if they should not answer there.
+
+`inboxtest.AuthenticatorSuite` checks it when the fixture sets `UnroutedHost` (a host
+that serves no org): every caller of that host, valid token included, gets no
+principal, `ErrUnauthenticated`, the same error text, and the same answer to
+`Unrouted`. It also checks, with or without that field, that a bad credential on any
+other host never asks for a `404`, and that those refusals stay identical to each
+other.
 
 ## Serving other paths next to the API
 

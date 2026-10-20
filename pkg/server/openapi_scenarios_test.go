@@ -28,6 +28,7 @@ func TestOpenAPIMatchesTheServer(t *testing.T) {
 	t.Run("the server is full", func(t *testing.T) { serverFull(t, c) })
 	t.Run("work is already running", func(t *testing.T) { alreadyRunning(t, c) })
 	t.Run("the server cannot do it", func(t *testing.T) { cannotDoIt(t, c) })
+	t.Run("the host serves no org", func(t *testing.T) { unroutedHostScenario(t, c) })
 	t.Run("the HTTP stack answers", func(t *testing.T) { httpStack(t, c) })
 	c.requireCoverage(t)
 }

@@ -266,6 +266,12 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, need need,
 	ar := r.WithContext(inbox.WithAccess(r.Context(), s.accessInfo(r, opID)))
 	principal, err := s.opts.Authenticator.Authenticate(ar)
 	switch {
+	case errors.Is(err, inbox.ErrUnauthenticated) && unroutedHost(err):
+		// The host serves no org. Answer as for any address the server has no route
+		// for: the same bytes for every credential, and no challenge, since there is
+		// nothing here to authenticate to.
+		notFound(w, r)
+		return nil, false
 	case errors.Is(err, inbox.ErrUnauthenticated):
 		w.Header().Set("WWW-Authenticate", s.challengeFor(err))
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")

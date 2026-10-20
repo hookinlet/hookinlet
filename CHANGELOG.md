@@ -10,6 +10,19 @@ The conformance suites cover more of what embedders rely on: a `Store` that has 
 `StoreSuite`, and the server's tenant behaviours have a suite of their own. Nothing to migrate, and nothing that passed
 before can fail: both additions are opt-in.
 
+**Added**
+
+- **An `Authenticator` can ask for a `404` for a host that serves no org.** If the error `Authenticate` returns
+  wraps `inbox.ErrUnauthenticated` and also implements the new optional `inbox.Unrouted` (`UnroutedHost() bool`,
+  true), the server answers `404` with its ordinary not-found body and no `WWW-Authenticate` header, in place of
+  `401`, on every authenticated operation (read API, stream, admin API, MCP, and the `405` that checks the
+  credential first). The answer must be the same for every credential on that host. Nothing changes for an
+  `Authenticator` that does not use it, and returning `inbox.ErrNotFound` from `Authenticate` is still a `500`.
+  It reveals that a host serves no org, and rate limiting in front of `Authenticate` still applies: see
+  [Answering 404 for a host that serves no org](docs/extending.md#answering-404-for-a-host-that-serves-no-org).
+  `docs/openapi.json` now lists the `404` response for the operations that did not (`createInbox`, `listInboxes`,
+  `runRetention`, `adminStatus`, `backup`, `metrics`, `mcp`); the shipped token authenticator never produces it.
+
 **Go API**
 
 - **`inbox.AccessInfo` has a `ClientIP` field, and an `Authenticator` can read `AccessInfo`.** `ClientIP` is the
@@ -34,6 +47,11 @@ before can fail: both additions are opt-in.
   tenant), `RequireTenant`, `Readiness` (the readiness sample of stored secrets across tenants) and `Fallback`
   (`Options.Fallback` and `Options.FallbackMaxBodyBytes`). It is a new function, not new cases in an existing
   suite. The core passes it over the SQLite store.
+
+- **`inbox.Unrouted`** is a new optional interface of the error an `Authenticator` returns. `inboxtest.AuthFixture`
+  has a new optional field, `UnroutedHost`; when set, `AuthenticatorSuite` also checks that every caller of that
+  host is refused alike. The suite also now fails an `Authenticator` that asks for a `404` on a host that serves an
+  org. An `Authenticator` that does not implement `Unrouted` is unaffected.
 
 **Documentation**
 

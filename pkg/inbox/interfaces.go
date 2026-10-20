@@ -371,13 +371,19 @@ type Notifier interface {
 //
 // Authenticate runs before the server knows whether the caller is allowed to
 // see anything, on requests from anyone, so an implementation that consults a
-// database should be paired with rate limiting in front of it.
+// database should be paired with rate limiting in front of it. That holds for
+// every outcome, including the 404 an Unrouted error asks for.
 type Authenticator interface {
 	// Authenticate returns the caller's Principal, or an error wrapping
 	// ErrUnauthenticated if the credentials are missing or invalid. Every such
 	// failure must look the same to the caller: no error text, status, or
 	// timing that says whether a token once existed, expired, or belongs to a
 	// different inbox.
+	//
+	// The one exception is a request for a host that serves nobody: the error
+	// may also implement Unrouted, and the server then answers 404 instead of
+	// 401. Every request for that host, whatever its credential, gets that
+	// answer, and no request for a host that is served does.
 	//
 	// Any other error is taken to mean the credential could not be checked (the
 	// Store is down) and becomes a server error, not a 401. An implementation
@@ -405,6 +411,30 @@ type Authenticator interface {
 // credentials.
 type Challenger interface {
 	WWWAuthenticate() string
+}
+
+// Unrouted is an optional capability of the error an Authenticator returns for a
+// request it refuses. The server looks for it in the error chain (errors.As) of an
+// error that wraps ErrUnauthenticated, and if UnroutedHost reports true it answers
+// 404 in place of 401, with the same body as its other 404s and no
+// WWW-Authenticate header. It is for an embedder that serves many parties from
+// one process and tells them apart by the request's host: a request for a host
+// that serves nobody is answered as any other unknown address is, whatever
+// credential it carries.
+//
+// The answer is for the host, not the credential. Every request for such a host
+// must get it, whether it carries a valid token, an invalid one, or none, so that
+// the 404 says nothing about any token. A refusal on a host that does serve
+// someone must not report true: it stays a 401 that is the same for every bad
+// credential. Reporting true does reveal that the host serves nobody (see
+// docs/extending.md), and it does not replace rate limiting in front of
+// Authenticate.
+//
+// Only an error that wraps ErrUnauthenticated is looked at. Returning ErrNotFound
+// from Authenticate does not produce a 404: it is not ErrUnauthenticated, so it is
+// still a server error.
+type Unrouted interface {
+	UnroutedHost() bool
 }
 
 // Principal is an authenticated caller and what it may do.

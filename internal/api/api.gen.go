@@ -4284,6 +4284,22 @@ func (response Mcp401JSONResponse) VisitMcpResponse(w http.ResponseWriter) error
 	return err
 }
 
+type Mcp404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response Mcp404JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Mcp405JSONResponse struct{ MethodNotAllowedJSONResponse }
 
 func (response Mcp405JSONResponse) VisitMcpResponse(w http.ResponseWriter) error {
@@ -4464,6 +4480,22 @@ func (response Metrics403JSONResponse) VisitMetricsResponse(w http.ResponseWrite
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Metrics404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response Metrics404JSONResponse) VisitMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4827,6 +4859,22 @@ func (response Backup403JSONResponse) VisitBackupResponse(w http.ResponseWriter)
 	return err
 }
 
+type Backup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response Backup404JSONResponse) VisitBackupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type Backup405JSONResponse struct{ MethodNotAllowedJSONResponse }
 
 func (response Backup405JSONResponse) VisitBackupResponse(w http.ResponseWriter) error {
@@ -5016,6 +5064,22 @@ func (response ListInboxes403JSONResponse) VisitListInboxesResponse(w http.Respo
 	return err
 }
 
+type ListInboxes404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListInboxes404JSONResponse) VisitListInboxesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListInboxes405JSONResponse struct{ MethodNotAllowedJSONResponse }
 
 func (response ListInboxes405JSONResponse) VisitListInboxesResponse(w http.ResponseWriter) error {
@@ -5171,6 +5235,22 @@ func (response CreateInbox403JSONResponse) VisitCreateInboxResponse(w http.Respo
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInbox404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateInbox404JSONResponse) VisitCreateInboxResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6381,6 +6461,22 @@ func (response RunRetention403JSONResponse) VisitRunRetentionResponse(w http.Res
 	return err
 }
 
+type RunRetention404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RunRetention404JSONResponse) VisitRunRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RunRetention405JSONResponse struct{ MethodNotAllowedJSONResponse }
 
 func (response RunRetention405JSONResponse) VisitRunRetentionResponse(w http.ResponseWriter) error {
@@ -6533,6 +6629,22 @@ func (response AdminStatus403JSONResponse) VisitAdminStatusResponse(w http.Respo
 	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
 	setContentLength(w, &buf)
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdminStatus404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AdminStatus404JSONResponse) VisitAdminStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Request-Id", fmt.Sprint(response.Headers.XRequestId))
+	setContentLength(w, &buf)
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }

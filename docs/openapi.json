@@ -2942,6 +2942,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
           },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
           },
@@ -3054,6 +3057,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
           },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -3138,6 +3144,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -3604,6 +3613,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
           },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -3675,6 +3687,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -3771,6 +3786,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4228,6 +4246,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5724,7 +5745,7 @@
         }
       },
       "NotFound": {
-        "description": "No such resource, or one the credential may not see. The two are indistinguishable.",
+        "description": "No such resource, or one the credential may not see. The two are indistinguishable. On a server whose Authenticator serves several parties by host, an authenticated operation also answers this for a host that serves none of them, whatever credential the request carries.",
         "content": {
           "application/json": {
             "schema": {
