@@ -1,11 +1,10 @@
 # The admin console
 
-A Vue 3 + TypeScript + Vite single-page app. hookinlet embeds the built files and serves
-them at `/admin`, beside the admin API.
+A Vue 3 + TypeScript + Vite single-page app. hookinlet embeds the built files and serves them at `/admin`, next to
+the admin API.
 
-The built files are committed to `../internal/ui/dist`, so building or installing the Go
-program needs no Node. CI rebuilds them from `package-lock.json` and fails if they differ
-from what is committed.
+The built files are committed to `../internal/ui/dist`, so you do not need Node to build or install the Go
+program. CI rebuilds the files from `package-lock.json`. It fails if they differ from what is committed.
 
 ```sh
 cd web
@@ -20,13 +19,12 @@ SCREENSHOTS=1 npm run e2e -- e2e/screenshots.spec.ts   # regenerates ../docs/ima
 node licenses.mjs            # after a dependency change; then run ../scripts/third-party-licenses.sh
 ```
 
-Or `make web` from the repository root, which does all of it.
+Or run `make web` from the repository root. It does all of this.
 
-Rules the project holds this app to:
+The project holds this app to these rules:
 
-- Nothing a sender wrote is ever rendered as HTML: no `v-html`, no `innerHTML`.
-  CI fails on both.
-- No inline script or style, and nothing loaded from another origin: the content security
-  policy (`internal/ui/ui.go`) allows neither.
-- The admin token stays in memory. It is never put in a URL or written to storage.
-- Runtime dependencies are `vue` alone. A new one needs a reason.
+- The app never renders sender-written text as HTML. It uses no `v-html` and no `innerHTML`. CI fails on both.
+- The app has no inline script or style. It loads nothing from another origin. The content security policy
+  (`internal/ui/ui.go`) blocks both.
+- The admin token stays in memory. The app never puts it in a URL or writes it to storage.
+- `vue` is the only runtime dependency. A new one needs a reason.
