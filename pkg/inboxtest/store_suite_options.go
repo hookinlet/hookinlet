@@ -36,9 +36,20 @@ type StoreOptions struct {
 	// that each run the retention sweep do. When Peer is nil, that case calls Prune
 	// from several goroutines on s alone. The suite closes the peers itself.
 	Peer func(t *testing.T, s inbox.Store) inbox.Store
+
+	// PrepareTenant makes s ready to hold inboxes for the tenant, for a Store that
+	// has to be told of a tenant first (an embedder that registers each customer
+	// before it stores anything for it). The suite calls it once for each tenant it
+	// uses ("org-a", "org-b" and "org-c") on each Store it makes, before the first
+	// call that names that tenant, and not for the default tenant (the empty one),
+	// which every Store has. A Store that needs no registration leaves it nil, and the
+	// suite checks that such a Store passes as before. It is not called for a tenant
+	// key that the Store must refuse (one that is too long): a case about a tenant that
+	// does not exist or is not valid must be able to reach the Store without it.
+	PrepareTenant func(t *testing.T, s inbox.Store, tenant string)
 }
 
-// StoreSuiteWith is StoreSuite with options.
+// StoreSuiteWith is StoreSuite with a StoreOptions.
 func StoreSuiteWith(t *testing.T, newStore func(t *testing.T, now func() time.Time) inbox.Store, opts StoreOptions) {
 	t.Helper()
 	runStoreSuite(t, newStore, opts)
