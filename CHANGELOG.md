@@ -53,6 +53,24 @@ and when. Nothing in the existing API changes. **Upgrading needs attention in on
   request. `last_used_at` can therefore lag by a few minutes, and is empty for a token not used since this upgrade.
 - **Migration 0011** adds `expires_at` and `last_used_at` (nullable) to `tokens`.
 
+- **`inbox.BodyScreener`, an optional interface of `Hooks`**, for an embedder that redacts or checks what it stores.
+  `ScreenBody(ctx, *BodyScreenRequest) (BodyDecision, error)` is called after a delivery verified (or is kept unverified)
+  and before it is stored, and may allow it, refuse it with the errors `BeforeIngest` may return (`ErrRateLimited`,
+  `ErrQuotaExceeded`, `ErrForbidden`, `ErrNotFound`; any other error is a `500`), or replace the body to store. `Hooks`
+  itself does not change, and a server without a screener behaves exactly as before. What the server does around it:
+  the dedupe key is computed from the body received, so a redelivery still collapses; `event_type_pointer` reads the body
+  that is stored; a replacement longer than the inbox's `MaxBodyBytes` is a `500`, not truncated; a replacement counts
+  against `IngestMemoryBudget` while the delivery is in flight; a panic in the screener is answered `500` and stores
+  nothing (an observer's panic is swallowed, a screener that redacts must not fail open); and a screener that edits the
+  body in place and says to keep it is refused. It must not block. A wrapper that embeds the `Hooks` interface hides it, as
+  it hides the other optional interfaces. See [Redacting or checking a body](docs/extending.md#redacting-or-checking-a-body).
+- **`inbox.IngestBodyRefused`** (`"body_refused"`), a new `IngestOutcome` for a delivery a screener refused. Its status is
+  the refusal's (`402`, `403`, `404` or `429`); `/metrics` counts it as `refused_by_hook` (or `not_found`) like the
+  `BeforeIngest` refusals. An observer with an exhaustive `switch` over outcomes should add it.
+- **`inboxtest.BodyScreenerSuite`** checks a screener: it returns at once, leaves the body and the inbox alone, keeps a
+  replacement within `MaxBodyBytes`, and is safe to call concurrently.
+- `examples/custom-hooks` gains a `Redactor` (`EXAMPLE_REDACT_KEYS`).
+
 **Changed**
 
 - **The SQLite schema gains a migration, and it only moves forward.** Migration 12 adds a `readers` table. It runs on
@@ -76,6 +94,16 @@ and when. Nothing in the existing API changes. **Upgrading needs attention in on
 - A new `400` code, `unsupported`: a server whose store cannot remember readers (or has them turned off) refuses the
   three operations instead of accepting a position that is not kept.
 - No new query parameter, and no change to the MCP tools. Metrics do not carry a reader's name.
+
+- **A message can say its body was replaced.** `inbox.Message.Modified` and `inbox.NewMessage.Modified`, and a new optional
+  `modified` field of the message in the read API, on the stream and in the MCP tools, present and `true` only when a
+  `BodyScreener` replaced the body. The signature covered the original bytes and cannot be checked against what is stored,
+  though `verified` stays `true`. Every default install, and every existing message, is unchanged: the field is absent.
+  `docs/api.md`, `docs/verifiers.md` and the raw endpoint's description no longer promise the stored bytes are what the
+  sender sent without this caveat.
+- **SQLite schema: migration `0013_modified.sql`** adds a table `message_modified` that holds a row only for a modified
+  message (a column on `messages` would sit behind the body and make every read follow its overflow pages). Upgrading is
+  fast and needs no rebuild of `messages`.
 
 **Go API**
 
@@ -140,6 +168,11 @@ and when. Nothing in the existing API changes. **Upgrading needs attention in on
   value above `inbox.MaxNamedReaders` is lowered to it, and a negative value turns named readers off.
 - **Who can fail what.** Only `AssertStoreWrapperForwards`, for a wrapper around a `Store` that has `ReaderTracker`
   (that is, around the SQLite store). Nothing else fails an existing `Store`, `Notifier` or `Hooks`.
+
+- If you wrote your own `Store` and use a `BodyScreener`, it must keep `NewMessage.Modified` and return it as
+  `Message.Modified`. The new case `AppendKeepsModified` in `inboxtest.StoreSuite` checks it, and skips itself for a
+  `Store` that does not keep the field, so a `Store` that passed before still passes; such a `Store` shows no message as
+  modified.
 
 **Documentation**
 

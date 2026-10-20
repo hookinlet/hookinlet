@@ -284,6 +284,19 @@ curl -s 'localhost:8080/v1/inboxes/stripe/messages?after=0&fields=summary' \
 {"seq":5,"event_type":"invoice.paid","verified":true}
 ```
 
+### Verified is not unmodified
+
+The signature is checked over the bytes that arrived, before anything else is done with
+them. A server that an embedder has given a body screener (see
+[extending](extending.md#redacting-or-checking-a-body)) may then store a replacement, such as the
+body with a card number removed. That message is stored with `verified: true`, because the
+delivery did verify, and `modified: true`, because what is stored is not what was signed: a
+check of the signature against the stored body fails. The deduplication below goes by the
+bytes that arrived, so a redelivery still collapses. Refusing a verified delivery for its
+content is also possible there, and has a cost: many senders retry a delivery that was
+answered `4xx` or `5xx`, and some disable an endpoint after repeated failures, so a refusal on
+content can end with the webhook switched off.
+
 ## Duplicate deliveries
 
 A verified delivery with a delivery id is a duplicate of an earlier one, and is

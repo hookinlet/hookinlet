@@ -23,6 +23,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `Backupper` (optional) | A consistent snapshot of the Store, for `GET /v1/admin/backup`; the size may be -1 if the Store streams it. A Store that holds several tenants refuses a tenant-scoped context. | the SQLite store | `BackupperSuite` |
 | `TokenUseRecorder` (optional) | `TouchToken(ctx, id, at)` records when a token was last used, shown as `Token.LastUsedAt` and in the admin API's `last_used_at`. The default `Authenticator` calls it at most once per token per interval (five minutes), in the background, with a context of its own, and ignores its failure, so it may be slow or refuse under load. The time only moves forward; an unknown token is `ErrNotFound`. | the SQLite store | `StoreSuite` (the `TokenLastUsed` case, skipped without the interface) |
 | `EpochRenewer` (optional) | `RenewEpochs(ctx)` gives every inbox a new epoch and changes nothing else, for a Store restored by means that are not part of the interface (a copied database file, a point-in-time recovery). The server does not call it; a restore procedure does. See [A restore is a new epoch](#writing-a-store). | the SQLite store (`hookinlet renew-epochs` runs it) | `EpochRenewerSuite` |
+| `BodyScreener` (optional, of `Hooks`) | Shown the body of every delivery that is about to be stored, after it verified, and may refuse it (the errors `BeforeIngest` may return) or store something else in its place, for redaction or schema checks. A replaced message is marked `modified`. See [Redacting or checking a body](#redacting-or-checking-a-body). | none: bodies are stored as received | `BodyScreenerSuite` (it returns at once, leaves the body it is given alone, and survives concurrent calls; what it refuses or replaces is your own tests, and the server's tests cover what is done with the answer) |
 | `UnverifiedLimiter` (optional, of `Hooks`) | Says, per inbox, how many unverified messages it may keep, in place of `Options.MaxUnverified`: a positive number is the cap, 0 the server's limit, a negative number no cap. For caps that depend on something the server does not know, such as a plan. Needs a Store with `UnverifiedCounter`. | none: every inbox gets the server's limit | `UnverifiedLimiterSuite` (it returns at once and leaves the inbox alone; the cap itself is the server's tests) |
 | `IngestObserver` (optional, of `Hooks`) | Told how every delivery to a known inbox ended (`IngestEvent`: the inbox, an `IngestOutcome` such as `stored` or `verification_failed`, the status, size, source address, the host it was addressed to, for a stored message its `Seq` and whether it is verified, and for a failed signature a `VerifyFailure` kind), including refused and failed ones that `AfterIngest` never sees. For counts, audit or logs per inbox or tenant. See [Observing how deliveries end](#observing-how-deliveries-end). | none: nothing is observed | `IngestObserverSuite` (it returns at once for every outcome and leaves the event alone; what the server reports is the server's tests) |
 | `UnverifiedCounter` (optional) | How many unverified messages an inbox holds (bounded by a limit), so the server can cap them (`Options.MaxUnverified`). Without it the server does not cap, and says so when it starts. | the SQLite store | `UnverifiedCounterSuite` |
@@ -35,7 +36,7 @@ them is listed in `CHANGELOG.md`. After 1.0.0 semantic versioning applies.
 | `verify.Registry` | Maps verifier names to signature checks. | `verify.Default()` | the package's own tests |
 
 The optional ones are found with a type assertion, and the server copes when they
-are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, `Hooks` without `Admitter` admits every read, stream and wait, `Hooks` without `IngestObserver` is told nothing more than `AfterIngest` says, and a `SecretBox` without `ContextSecretBox` is called with `Seal` and `Open`, without a context. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
+are absent: no `Backupper` means `GET /v1/admin/backup` answers `501`, `Hooks` without `Admitter` admits every read, stream and wait, `Hooks` without `IngestObserver` is told nothing more than `AfterIngest` says, `Hooks` without `BodyScreener` stores every body as received, and a `SecretBox` without `ContextSecretBox` is called with `Seal` and `Open`, without a context. The server's own limits (`MaxConcurrentReads`, `MaxStreams`, `MaxStreamsPerInbox`) apply after `Admit`, whatever it says.
 
 `/readyz` opens a sample of the stored verifier secrets to catch a master key that is not the one the data was sealed under, and answers `503` only if none of them opens. The sample is up to 25 secrets, at most 3 of each tenant before more of any one, oldest first; it looks at no more than the 5000 oldest inboxes, and, once it has 25 secrets in hand, at no more than 500 further inboxes for other tenants; the answer is kept for 30 seconds (5 while it is failing). So with a `SecretBox` that keeps a key per tenant, one tenant whose key is gone is logged (with the tenant, how many of its secrets did not open, and a few slugs) but does not take the server out of rotation for the others, as long as another tenant has a secret among the inboxes it looks at (with many tenants, those of the oldest inboxes get the places). A server whose inboxes with a secret all belong to one tenant cannot tell that tenant's key being gone from a wrong master key, and answers `503` for both. A `SecretBox` whose opens are expensive, such as one that asks a key service, can turn the check off with `Options.SkipReadinessSecretCheck` and report its own health; if the sample takes more than 20 seconds, `/readyz` answers `503` saying that checking the secrets timed out, and checks again after 5. `Server.CheckSecrets`, which the `hookinlet` program runs before it listens, always opens every secret of every tenant, and fails for any one that does not open.
 
@@ -130,8 +131,8 @@ err = srv.Run(ctx)                              // returns after a clean shutdow
 ```
 
 `examples/custom-hooks` is a complete program built exactly this way, with a
-per-inbox rate limit as the hook and an `IngestObserver` that counts how deliveries
-ended, per inbox. It is compiled and tested in CI; copy it as a
+per-inbox rate limit as the hook, an `IngestObserver` that counts how deliveries
+ended, per inbox, and a `BodyScreener` that redacts chosen JSON keys. It is compiled and tested in CI; copy it as a
 starting point. `Options` has the rest (limits, timeouts, `TrustedProxies`,
 `PublicBaseURL`, a `Verifiers` registry); each field says what it does and what
 its default is.
@@ -292,6 +293,90 @@ wait sees that stream's operation or `mcp.` and the tool's name.
 It is false outside a request. `inbox.WithAccess` makes a context that carries one, for
 testing a hook.
 
+### Redacting or checking a body
+
+`BeforeIngest` runs before a delivery is verified, so it cannot trust what it sees, and
+`AfterIngest` runs after the message is committed, so it cannot change it. To refuse a
+verified delivery for what is in it, or to store it with something removed, also implement
+`inbox.BodyScreener` on the same value:
+
+```go
+func (r redactor) ScreenBody(ctx context.Context, req *inbox.BodyScreenRequest) (inbox.BodyDecision, error) {
+	if !validAgainstSchema(req.Inbox, req.Body) {
+		return inbox.BodyDecision{}, fmt.Errorf("%w: not a valid order", inbox.ErrForbidden) // 403
+	}
+	if clean, changed := redact(req.Body); changed {
+		return inbox.BodyDecision{Replace: true, Body: clean}, nil
+	}
+	return inbox.BodyDecision{}, nil // keep it as received
+}
+```
+
+It runs after verification and before the message is stored (after the handshake step, so a
+Slack `url_verification` is answered as before and never shown to it). It is asked about a
+delivery that verified, and about one that is kept unverified (`on_verify_fail=store`, or an
+inbox whose verifier is `none`); `req.Verified` says which. A delivery refused for its
+signature, a handshake and one that `BeforeIngest` refused never reach it. It is also asked
+about a repeat of a delivery already stored, because only the Store can tell it is one, so
+the work it does is paid for on redeliveries too. It is called concurrently, from every request.
+
+It answers in one of three ways:
+
+- **Allow:** the zero `inbox.BodyDecision`. The body is stored as received, and nothing about the
+  delivery differs from a server without a screener.
+- **Refuse:** an error wrapping `ErrRateLimited` (429), `ErrQuotaExceeded` (402), `ErrForbidden` (403),
+  or `ErrNotFound` (404, as for an unknown ingest key), as for `BeforeIngest`, with
+  `inbox.RefuseAfter` to say when to retry. Nothing is stored, and an `IngestObserver` is told
+  `body_refused` with the status. Any other error is a `500` and the observer is told `error`. The
+  text of the error is written to the log, so it must not hold the body.
+- **Replace:** `Replace: true` and the `Body` to store, which may be empty. The replacement may be at
+  most the inbox's `MaxBodyBytes`; a longer one is not truncated but is a `500`, with the cause in the log.
+  A replacement equal to what was received is not a modification.
+
+**What a replacement changes.** The signature covered the bytes that were received, so it cannot
+be checked against the stored body. The stored message is marked `modified` (`Message.Modified`;
+`modified: true` in the read API, on the stream and in the MCP tools, and absent otherwise),
+and its `verified` stays `true`, because the sender did send it and the signature did match.
+`GET .../raw` returns the stored, replaced bytes; code that re-verifies stored messages, or
+replays them to a downstream service with the original signature headers, must skip messages
+with `modified`. A `Store` you write must keep `NewMessage.Modified` and return it as
+`Message.Modified` if you use a `BodyScreener` (`StoreSuite` checks it, and skips the case for a `Store` that does not keep the field).
+
+**Which body each part uses.**
+
+| Part | Uses |
+|---|---|
+| Signature verification | The body received. |
+| `MaxBodyBytes`, enforced when the body is read | The body received. The replacement is held to the same limit. |
+| The ingest memory budget (`IngestMemoryBudget`) | The bytes received, as they arrive. A replacement is held beside the original until the delivery ends, so its bytes are counted too; if the budget has no room, the sender gets the `503` it would for a body, and should retry. |
+| The deduplication key | The body received, so a repeat collapses into the earlier message whatever the screener makes of it, even a screener that gives a different replacement each time. |
+| `event_type_pointer` | The body that is stored, so an event type never holds something the screener took out. |
+| The stored size (`size`), the stored bytes, `raw` | The body that is stored. |
+| `IngestEvent.Size` and the `size` in the delivery's log line | The bytes received. |
+
+**Time and failure.** `ScreenBody` runs on the request's goroutine and must not block, as
+`BeforeIngest` and `AfterIngest` must not: the sender waits for it, and senders give up on a slow
+endpoint. Give a call to a service of your own a short deadline and decide what happens when it fails
+(an error is a `500`, and the sender retries). A panic in it is logged, by the type of the value only
+since the value may hold the body, and answered `500` with nothing stored. That differs from a panic
+in `ObserveIngest`, which is swallowed because the outcome is decided: a screener that redacts must not
+fail open and store the unredacted body. The screener is given the body without a copy and must not
+modify it; one that edits it in place and says to keep it is refused with a `500`, since what is stored would no
+longer be what verified. Return a replacement instead.
+
+**Wrapping hooks hides it.** A wrapper that embeds the `inbox.Hooks` interface hides every optional
+interface of the value inside, `BodyScreener` included, and the server then stores every body as
+received, with nothing in the log to say a screener was skipped. Embed the concrete type, or forward
+`ScreenBody` with a method of your own, and test through the wrapper that a body is redacted.
+`examples/custom-hooks` has a `Redactor` that does it (set `EXAMPLE_REDACT_KEYS=card,email`).
+
+**Refusing has a cost.** Many senders retry a delivery that was answered `4xx` or `5xx`, and some disable an
+endpoint after repeated failures. A refusal on content turns a payload that does not fit your schema into a
+retry storm, or into a webhook that stops sending at all, and a `5xx` from a failing screener does the same for every
+delivery. Where you can, accept the delivery and replace what you cannot keep, or note it in your own records
+(from `AfterIngest`), and refuse only what you must never hold. A refusal with `RefuseAfter` tells a well-behaved
+sender when to come back.
+
 ### Observing how deliveries end
 
 `AfterIngest` sees only deliveries that were stored or recognised as duplicates, and
@@ -314,9 +399,9 @@ does not change.
 
 `ev.Outcome` is one of the `inbox.Ingest*` constants: `stored`, `duplicate`,
 `handshake`, `verification_failed`, `rate_limited`, `quota_exceeded` and `forbidden`
-(refused by `BeforeIngest`), `unverified_limit`, `storage_full`, `overloaded`,
+(refused by `BeforeIngest`), `body_refused` (refused by a `BodyScreener`, with the status it answered), `unverified_limit`, `storage_full`, `overloaded`,
 `too_large`, `bad_request`, `not_found` (the inbox is disabled, was deleted while the
-delivery was received, or `BeforeIngest` answered `ErrNotFound`) and `error`. More may be added, so treat one you do not know
+delivery was received, or `BeforeIngest` answered `ErrNotFound`; a `BodyScreener` that does is `body_refused`) and `error`. More may be added, so treat one you do not know
 as a refusal. The event carries the `Host` the delivery was addressed to, as in `IngestRequest`. It never carries headers, the body, or the reason text of a
 signature failure (the server logs that), so whatever you do with it cannot leak them.
 
@@ -342,12 +427,13 @@ every guess anyone makes at a key.
 ### Checking a hook of your own
 
 The server's own tests cover what it does with a hook's answers. A hook can be checked
-for what holds for every implementation without a server, and three suites do it:
+for what holds for every implementation without a server, and four suites do it:
 
 ```go
 inboxtest.UnverifiedLimiterSuite(t, func(t *testing.T) inbox.UnverifiedLimiter { return newLimiter(t) })
 inboxtest.IngestObserverSuite(t, func(t *testing.T) inbox.IngestObserver { return newObserver(t) })
 inboxtest.AdmitterSuite(t, func(t *testing.T) inbox.Admitter { return newAdmitter(t) })
+inboxtest.BodyScreenerSuite(t, func(t *testing.T) inbox.BodyScreener { return newScreener(t) })
 ```
 
 `UnverifiedLimiterSuite` and `IngestObserverSuite` call the hook with an ordinary context,
@@ -356,7 +442,11 @@ returns at once (both are called on the request's goroutine), does not change th
 the event it is given, and survives being called from many requests together. The observer
 is called with an event of every `inbox.Ingest*` outcome and one the package does not know
 yet. Which cap a limiter answers for which inbox, and what an observer counts, are for your
-own tests. `AdmitterSuite` is described above.
+own tests. `AdmitterSuite` is described above. `BodyScreenerSuite` calls `ScreenBody` with bodies of every
+kind (empty, binary, large, JSON) for an inbox that verified and one that did not, and checks that it
+returns at once, does not change the body or the inbox it is given, does not answer with a replacement
+over the inbox's `MaxBodyBytes`, and survives concurrent calls. What it refuses and what it replaces are
+for your own tests.
 
 The contract points that no suite can reach, because they are about what the server does,
 are these. Check them in your own tests:
@@ -366,6 +456,8 @@ are these. Check them in your own tests:
   `UnverifiedCounter`.
 - An observer is told about deliveries to a known inbox only, after `AfterIngest`, and
   a panic in it does not change the response.
+- A screener's refusal is answered as `BeforeIngest`'s is, its replacement is capped and counted as above, and
+  a panic in it stores nothing; the server's own tests check those.
 - A `Principal` that belongs to a tenant implements `TenantPrincipal` with the same
   `Tenant` for its life; one that does not is unscoped, and reaches the default tenant.
   `StoreSuite` checks what a Store does with a scoped context, and
@@ -454,6 +546,9 @@ suite is what makes it testable. The points that are easy to get wrong:
 - **An inbox has an ingest key** (`Inbox.IngestKey`, the `{key}` in `/in/{key}`), which
   the caller supplies when it creates the inbox; a Store does not make one up. It is
   a capability, so it should be random.
+- **A modified message says so.** `NewMessage.Modified` is true when the server's `BodyScreener` replaced the
+  body; keep it with the message and return it as `Message.Modified`. A `Store` that drops it makes a
+  redacted body look as if the sender sent it, and `StoreSuite` fails it.
 - **Deduplication** applies only to verified messages, by `DedupeKey` (the
   `DeliveryID` when it is empty), so a forged delivery cannot suppress the real
   one. The server makes the key the id and a hash of the body when the id is not

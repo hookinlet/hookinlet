@@ -164,14 +164,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The exact bytes received */
+        /** The stored bytes */
         get: operations["getMessageRaw"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         /**
-         * Headers only: The exact bytes received
+         * Headers only: The stored bytes
          * @description The same checks and the same headers as the GET, with no body.
          */
         head: operations["headGetMessageRaw"];
@@ -663,6 +663,8 @@ export interface components {
             verified: boolean;
             verifier: string;
             verify_error: string | null;
+            /** @description Present, and `true`, only when the stored body is not the bytes the sender sent: the server's embedder replaced it before storing (a redaction, say). The sender's signature covered the original bytes and cannot be checked against this body, though `verified` still says the delivery verified. Absent for every message stored as received, which is the default. */
+            modified?: boolean;
             /** @description From the sender, and only for verified messages. */
             delivery_id: string | null;
             /** @description From the sender, and only for verified messages. */
@@ -1155,7 +1157,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorConflict"];
             };
         };
-        /** @description The server cannot take the request now and the sender should try again: too many reads, streams, or waits are in progress, too many deliveries are being received at once, or (`storage_full`) there is no room to store a delivery. `Retry-After` says when. */
+        /** @description The server cannot take the request now and the sender should try again: too many reads, streams, or waits are in progress, too many deliveries are being received at once (the bytes of a replacement body made by an embedder's body screener count), or (`storage_full`) there is no room to store a delivery. `Retry-After` says when. */
         Overloaded: {
             headers: {
                 /** @description Seconds to wait before trying again. */
@@ -1574,7 +1576,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorVerificationFailed"];
                 };
             };
-            /** @description Refused by an embedder's hook (quota). */
+            /** @description Refused by an embedder's hook (quota), either before the delivery was verified or, once it had, by its body screener (`inbox.BodyScreener`). */
             402: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -1595,7 +1597,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorQuotaExceeded"];
                 };
             };
-            /** @description Refused by an embedder's hook. */
+            /** @description Refused by an embedder's hook, either before the delivery was verified or, once it had, by its body screener (`inbox.BodyScreener`). */
             403: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -1619,7 +1621,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["TooLarge"];
-            /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
+            /** @description Not stored. Either an embedder's hook refused it (rate limit; before the delivery was verified, or afterwards by its body screener), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -1724,7 +1726,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorVerificationFailed"];
                 };
             };
-            /** @description Refused by an embedder's hook (quota). */
+            /** @description Refused by an embedder's hook (quota), either before the delivery was verified or, once it had, by its body screener (`inbox.BodyScreener`). */
             402: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -1745,7 +1747,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorQuotaExceeded"];
                 };
             };
-            /** @description Refused by an embedder's hook. */
+            /** @description Refused by an embedder's hook, either before the delivery was verified or, once it had, by its body screener (`inbox.BodyScreener`). */
             403: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -1769,7 +1771,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["TooLarge"];
-            /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
+            /** @description Not stored. Either an embedder's hook refused it (rate limit; before the delivery was verified, or afterwards by its body screener), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -1875,7 +1877,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorVerificationFailed"];
                 };
             };
-            /** @description Refused by an embedder's hook (quota). */
+            /** @description Refused by an embedder's hook (quota), either before the delivery was verified or, once it had, by its body screener (`inbox.BodyScreener`). */
             402: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -1896,7 +1898,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorQuotaExceeded"];
                 };
             };
-            /** @description Refused by an embedder's hook. */
+            /** @description Refused by an embedder's hook, either before the delivery was verified or, once it had, by its body screener (`inbox.BodyScreener`). */
             403: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -1920,7 +1922,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["TooLarge"];
-            /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
+            /** @description Not stored. Either an embedder's hook refused it (rate limit; before the delivery was verified, or afterwards by its body screener), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -2026,7 +2028,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorVerificationFailed"];
                 };
             };
-            /** @description Refused by an embedder's hook (quota). */
+            /** @description Refused by an embedder's hook (quota), either before the delivery was verified or, once it had, by its body screener (`inbox.BodyScreener`). */
             402: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -2047,7 +2049,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorQuotaExceeded"];
                 };
             };
-            /** @description Refused by an embedder's hook. */
+            /** @description Refused by an embedder's hook, either before the delivery was verified or, once it had, by its body screener (`inbox.BodyScreener`). */
             403: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -2071,7 +2073,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["TooLarge"];
-            /** @description Not stored. Either an embedder's hook refused it (rate limit), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
+            /** @description Not stored. Either an embedder's hook refused it (rate limit; before the delivery was verified, or afterwards by its body screener), or the inbox already holds as many unverified messages as it may (`HOOKINLET_MAX_UNVERIFIED`, 1000 by default) and this delivery is unverified. A verified delivery is never refused for the second reason. */
             429: {
                 headers: {
                     /** @description Seconds to wait before trying again, when the hook that refused said so (`inbox.RetryAfterer`): a whole number from 1 to 86400. Absent otherwise. */
@@ -2629,7 +2631,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The body byte for byte, with the `Content-Type` the sender used (`application/octet-stream` if it sent none). Served as a download, never as a page. */
+            /** @description The stored body byte for byte, which is what the sender sent unless the message is `modified` (see `Message`), with the `Content-Type` the sender used (`application/octet-stream` if it sent none). Served as a download, never as a page. */
             200: {
                 headers: {
                     "Content-Disposition": "attachment";
@@ -2686,7 +2688,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The body byte for byte, with the `Content-Type` the sender used (`application/octet-stream` if it sent none). Served as a download, never as a page. */
+            /** @description The stored body byte for byte, which is what the sender sent unless the message is `modified` (see `Message`), with the `Content-Type` the sender used (`application/octet-stream` if it sent none). Served as a download, never as a page. */
             200: {
                 headers: {
                     "Content-Disposition": "attachment";

@@ -576,6 +576,82 @@ type Hooks interface {
 	AfterIngest(ctx context.Context, in *Inbox, m *Message, created bool)
 }
 
+// BodyScreenRequest is what a BodyScreener is asked about. It grows by adding
+// fields, which is why it is a struct. AccessFrom(ctx) says which operation it is for.
+type BodyScreenRequest struct {
+	// Inbox is the inbox the delivery is for. A screener must not modify it.
+	Inbox *Inbox
+	// Verified is whether the delivery verified. It is false for a delivery that
+	// failed verification and is kept anyway (on_verify_fail=store), and for an
+	// inbox whose verifier is "none".
+	Verified bool
+	// Body is the exact bytes received, never more than Inbox.MaxBodyBytes. A
+	// screener must not modify it, and must not keep it after it returns.
+	Body []byte
+}
+
+// BodyDecision is a BodyScreener's answer when it does not refuse: keep the body
+// as received (the zero value), or replace it.
+type BodyDecision struct {
+	// Replace says Body is stored in place of what was received. An empty Body is a
+	// replacement too (it stores an empty body); without Replace, Body is ignored.
+	Replace bool
+	// Body is the replacement. It may be at most Inbox.MaxBodyBytes bytes; a longer
+	// one is an internal failure, not truncated. The server does not modify it, and
+	// the screener must not after returning.
+	Body []byte
+}
+
+// BodyScreener is an optional capability of Hooks, found by type assertion: a Hooks
+// that also implements it is shown the body of every delivery that is about to be
+// stored, and may refuse it or store something else in its place. Hooks itself does
+// not change, and a Hooks without it stores what was received, which is the
+// open-source default. It is how an embedder redacts personal data from what it
+// keeps, or checks a payload against a schema.
+//
+// It runs after the delivery is verified (or kept as unverified) and before it is
+// stored, so it sees only what verification let through: a delivery refused for its
+// signature, a handshake (which is answered, not stored), and one BeforeIngest
+// refused never reach it. A repeat of a delivery already stored reaches it too,
+// because the Store is what recognises a repeat.
+//
+// Replacing the body has consequences the server handles and an embedder must know:
+//   - The signature covered the bytes received, not the replacement. The stored
+//     message is marked Modified, and the read API, the stream and the MCP tools
+//     say so; its Verified stays true, because the sender did send it.
+//   - A repeat is recognised by what the sender sent, not by the replacement: the
+//     dedupe key is computed from the original body, so a screener that is not
+//     deterministic does not turn a repeat into a new message.
+//   - The inbox's EventTypePointer is read from the original body, which is what
+//     the delivery verified. MaxBodyBytes bounds the original (it is enforced when
+//     the body is read) and the replacement alike. A replacement is held in memory
+//     beside the original and counts against IngestMemoryBudget until the delivery
+//     is stored or refused; when it does not fit, the sender is told to come back
+//     (503).
+//
+// ScreenBody runs on the request's goroutine, in the hot path, and must not block:
+// a slow screener delays the response, and senders give up on slow endpoints. The
+// ctx may be cancelled as soon as the sender goes away. A panic in it is logged and
+// answered as an internal failure (500): nothing is stored, because a screener that
+// redacts must never fail open.
+//
+// Refusing has a cost to remember: many senders retry a delivery that was answered
+// 4xx or 5xx, and some disable an endpoint that fails repeatedly, so refusing on
+// content can turn a payload that does not match a schema into a retry storm or a
+// disabled webhook. Replacing, or accepting and marking in the embedder's own
+// records, is usually kinder to the sender.
+type BodyScreener interface {
+	// ScreenBody may refuse the delivery by returning an error wrapping
+	// ErrRateLimited (429), ErrQuotaExceeded (402) or ErrForbidden (403), or
+	// ErrNotFound, which is answered as an unknown ingest key is (404); the refusal
+	// is reported to an IngestObserver as IngestBodyRefused. Any other error is an
+	// internal failure (500, IngestError). A refusal may say when to retry
+	// (RefuseAfter, RetryAfterer). The text of the error is written to the server's
+	// log, so it must not hold the body or anything taken from it. A nil error allows the delivery, with the
+	// decision's body if it replaces.
+	ScreenBody(ctx context.Context, req *BodyScreenRequest) (BodyDecision, error)
+}
+
 // AccessKind says what kind of access to an inbox Admitter.Admit is asked about.
 type AccessKind string
 
@@ -655,6 +731,11 @@ const (
 	IngestRateLimited   IngestOutcome = "rate_limited"
 	IngestQuotaExceeded IngestOutcome = "quota_exceeded"
 	IngestForbidden     IngestOutcome = "forbidden"
+	// IngestBodyRefused: a BodyScreener refused the delivery, with an error wrapping
+	// ErrRateLimited (429), ErrQuotaExceeded (402), ErrForbidden (403) or ErrNotFound
+	// (404). The status says which; the outcome says it was the body screener and
+	// not BeforeIngest. A screener error that wraps none of those is IngestError.
+	IngestBodyRefused IngestOutcome = "body_refused"
 	// IngestUnverifiedLimit: the delivery would have been stored unverified and the
 	// inbox holds as many unverified messages as it may (429).
 	IngestUnverifiedLimit IngestOutcome = "unverified_limit"

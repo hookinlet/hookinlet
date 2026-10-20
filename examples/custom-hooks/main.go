@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Pat Ramsey
 
-// Command custom-hooks is hookinlet with a rate limit and per-inbox delivery
-// counts added, written the way an application that embeds the server would: it
+// Command custom-hooks is hookinlet with a rate limit, per-inbox delivery
+// counts and, if asked, redaction of chosen JSON keys added, written the way an application that embeds the server would: it
 // builds the same pieces the stock binary does, using only the public packages
 // under pkg/, and passes its own inbox.Hooks to server.New.
 //
@@ -14,6 +14,9 @@
 //	HOOKINLET_LISTEN_ADDR=:8080      (default)
 //	EXAMPLE_RATE=5                   deliveries a second to each inbox (default)
 //	EXAMPLE_BURST=20                 how many may arrive at once (default)
+//	EXAMPLE_REDACT_KEYS=             JSON keys whose values are replaced before a
+//	                                 delivery is stored, such as card,email
+//	                                 (default: none; bodies are stored as received)
 //	EXAMPLE_COUNTS_ADDR=             where to serve the delivery counts, such as
 //	                                 127.0.0.1:9091 (default: not served)
 package main
@@ -30,10 +33,12 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/hookinlet/hookinlet/pkg/auth/token"
+	"github.com/hookinlet/hookinlet/pkg/inbox"
 	"github.com/hookinlet/hookinlet/pkg/notify/local"
 	"github.com/hookinlet/hookinlet/pkg/secretbox"
 	"github.com/hookinlet/hookinlet/pkg/server"
@@ -85,7 +90,14 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 
 	// The rate limiter refuses deliveries; the counter, wrapped around it, sees how
 	// every delivery ended.
-	hooks := NewOutcomeCounter(NewRateLimiter(rate, int(burst)))
+	counter := NewOutcomeCounter(NewRateLimiter(rate, int(burst)))
+	// With keys to redact, a Redactor goes around the counter and screens each body
+	// after it verified. Its messages are marked modified. Without keys the hooks do
+	// not screen, and bodies are stored as received.
+	var hooks inbox.Hooks = counter
+	if keys := splitKeys(getenv("EXAMPLE_REDACT_KEYS")); len(keys) > 0 {
+		hooks = NewRedactor(counter, keys...)
+	}
 	srv, err := server.New(server.Options{
 		Addr:          orDefault(getenv("HOOKINLET_LISTEN_ADDR"), ":8080"),
 		Logger:        log,
@@ -99,7 +111,7 @@ func run(ctx context.Context, log *slog.Logger, getenv func(string) string) erro
 		return err
 	}
 	if addr := getenv("EXAMPLE_COUNTS_ADDR"); addr != "" {
-		stopCounts, err := serveCounts(ctx, addr, hooks)
+		stopCounts, err := serveCounts(ctx, addr, counter)
 		if err != nil {
 			return fmt.Errorf("EXAMPLE_COUNTS_ADDR: %w", err)
 		}
@@ -118,6 +130,17 @@ func serveCounts(ctx context.Context, addr string, h http.Handler) (stop func(),
 	hs := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = hs.Serve(ln) }()
 	return func() { _ = hs.Close() }, nil
+}
+
+// splitKeys splits a comma-separated list, leaving out empty entries.
+func splitKeys(v string) []string {
+	var keys []string
+	for _, k := range strings.Split(v, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 func orDefault(v, def string) string {

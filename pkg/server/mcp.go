@@ -831,7 +831,11 @@ type mcpMessage struct {
 	Verified    bool    `json:"verified"`
 	Verifier    string  `json:"verifier"`
 	VerifyError *string `json:"verify_error"`
-	SourceIP    *string `json:"source_ip"`
+	// Modified is set, only when true, when the body below is not what the sender sent:
+	// the server's embedder replaced it before storing. Its signature cannot be
+	// checked against this body.
+	Modified bool    `json:"modified,omitempty"`
+	SourceIP *string `json:"source_ip"`
 	// BodyTruncated is the server saying it left the body out because it is over the
 	// inline limit (only with bodies: true); the size is the true one.
 	BodyTruncated bool `json:"body_truncated,omitempty"`
@@ -855,7 +859,7 @@ type mcpUntrusted struct {
 func projectMessage(m wire.Message) mcpMessage {
 	return mcpMessage{
 		Seq: m.Seq, Epoch: m.Epoch, Inbox: m.Inbox, ReceivedAt: m.ReceivedAt, Method: m.Method, Size: m.Size,
-		Verified: m.Verified, Verifier: m.Verifier, VerifyError: m.VerifyError, SourceIP: m.SourceIP, BodyTruncated: m.BodyTruncated,
+		Verified: m.Verified, Verifier: m.Verifier, VerifyError: m.VerifyError, Modified: m.Modified, SourceIP: m.SourceIP, BodyTruncated: m.BodyTruncated,
 		Untrusted: mcpUntrusted{
 			Path: m.Path, Query: m.Query, Headers: m.Headers, ContentType: m.ContentType, DeliveryID: m.DeliveryID,
 			EventType: m.EventType, Body: m.Body, BodyText: m.BodyText, BodyBase64: m.BodyBase64,

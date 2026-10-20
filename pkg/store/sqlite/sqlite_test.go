@@ -148,6 +148,7 @@ func TestShippedMigrationsAreUnchanged(t *testing.T) {
 		"0010_tenants.sql":                   "bc3c9a9f32616c114c3d960cb518cf0c9afb0a0c5329d36602cedf051c0e4177",
 		"0011_token_expiry_last_used.sql":    "9c54e2808c6739ef82838e9f3bc9cc3171ef2b3f10e84ba0cc26084a2f2840c0",
 		"0012_readers.sql":                   "3c2e1d7424de791d570bb0212a3d392fa8f736c5d1af1063a455f3d3e24bc0b6",
+		"0013_modified.sql":                  "5f77e4f60fef744c4bb9b39fe3e98702e06e9c39cb2985ddab477a74d465a131",
 	}
 	entries, err := os.ReadDir("migrations")
 	if err != nil {
@@ -631,4 +632,54 @@ func TestReaderTrackerSuite(t *testing.T) {
 	inboxtest.ReaderTrackerSuite(t, func(t *testing.T, now func() time.Time) inbox.Store {
 		return openAt(t, t.TempDir(), sqlite.WithClock(now))
 	})
+}
+
+// The record that a message was modified lives in a table of its own, which must not
+// outlive the message: not when retention prunes it and not when its inbox is deleted.
+func TestModifiedMarksGoWithTheirMessages(t *testing.T) {
+	dir := t.TempDir()
+	s := openAt(t, dir)
+	t.Cleanup(func() { _ = s.Close() })
+	raw, err := sql.Open("sqlite", filepath.Join(dir, sqlite.DBFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	marks := func() int {
+		var n int
+		if err := raw.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM message_modified`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	ctx := t.Context()
+	in := newInbox("marks")
+	in.RetentionMaxCount = 1
+	if err := s.CreateInbox(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	for _, modified := range []bool{true, true, false} {
+		if _, _, err := s.Append(ctx, in.ID, &inbox.NewMessage{Method: "POST", Verified: true, Modified: modified}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := marks(); n != 2 {
+		t.Fatalf("%d marks, want 2", n)
+	}
+	if _, err := s.Prune(ctx, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if n := marks(); n != 0 {
+		t.Errorf("%d marks after pruning the modified messages", n)
+	}
+	if _, _, err := s.Append(ctx, in.ID, &inbox.NewMessage{Method: "POST", Modified: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteInbox(ctx, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := marks(); n != 0 {
+		t.Errorf("%d marks after deleting the inbox", n)
+	}
 }

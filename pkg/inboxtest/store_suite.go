@@ -96,6 +96,7 @@ func runStoreSuite(t *testing.T, newStore func(t *testing.T, now func() time.Tim
 		{"AppendDedupeKey", testAppendDedupeKey},
 		{"AppendDedupeIgnoresUnverified", testDedupeIgnoresUnverified},
 		{"AppendDedupeConcurrent", testAppendDedupeConcurrent},
+		{"AppendKeepsModified", testAppendKeepsModified},
 		{"BodyAndFieldRoundTrip", testRoundTrip},
 		{"MessagesDoNotAlias", testMessageAliasing},
 		{"HeaderRedaction", testHeaderRedaction},
@@ -829,6 +830,66 @@ func testAppendDedupe(t *testing.T, s inbox.Store, _ *Clock) {
 	}
 	if got := query(t, s, b.ID, inbox.Query{DeliveryID: ""}); len(got.Messages) != 3 {
 		t.Errorf("empty DeliveryID filter should match everything, got %d messages", len(got.Messages))
+	}
+}
+
+// A message whose body the server's BodyScreener replaced is stored with
+// NewMessage.Modified, and every way of reading it says so; one that was not is not.
+// A Store that does not keep Modified, as one written before the field existed does not,
+// skips the case: it only matters to a server that has a BodyScreener, and such a Store
+// then shows no message as modified rather than failing.
+func testAppendKeepsModified(t *testing.T, s inbox.Store, _ *Clock) {
+	ctx := t.Context()
+	in := createInbox(t, s, "modified")
+	plain := appendMsg(t, s, in.ID)
+	redacted := appendMsg(t, s, in.ID, func(m *inbox.NewMessage) {
+		m.Verified, m.Modified, m.Body = true, true, []byte("[redacted]")
+		m.DeliveryID, m.DedupeKey = "d-m", "d-m"
+	})
+	if !redacted.Modified && !plain.Modified {
+		t.Skip("the Store does not keep NewMessage.Modified")
+	}
+	if plain.Modified || !redacted.Modified {
+		t.Errorf("Append returned Modified = %v and %v, want false and true", plain.Modified, redacted.Modified)
+	}
+	got, err := s.Get(ctx, in.ID, redacted.Seq)
+	if err != nil || !got.Modified || string(got.Body) != "[redacted]" {
+		t.Errorf("Get: %+v, %v; want a modified message", got, err)
+	}
+	if got, err := s.Get(ctx, in.ID, plain.Seq); err != nil || got.Modified {
+		t.Errorf("Get of an unmodified message: %+v, %v", got, err)
+	}
+	zero, none := int64(0), int64(0)
+	for name, q := range map[string]inbox.Query{
+		"Query":                 {After: &zero},
+		"Query without bodies":  {After: &zero, BodyLimit: &none},
+		"Query by delivery id":  {DeliveryID: "d-m"},
+		"Query newest first":    {},
+		"Query by verification": {After: &zero, Verified: new(true)},
+	} {
+		page, err := s.Query(ctx, in.ID, q)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var seen bool
+		for _, m := range page.Messages {
+			if m.Seq == redacted.Seq {
+				seen = true
+				if !m.Modified {
+					t.Errorf("%s: the modified message came back unmodified", name)
+				}
+			} else if m.Modified {
+				t.Errorf("%s: message %d came back modified", name, m.Seq)
+			}
+		}
+		if !seen {
+			t.Errorf("%s: the modified message was not returned", name)
+		}
+	}
+	// A repeat is answered with the message it repeats, as it was stored.
+	dup, created, err := s.Append(ctx, in.ID, nm(func(m *inbox.NewMessage) { m.Verified, m.DeliveryID, m.DedupeKey = true, "d-m", "d-m" }))
+	if err != nil || created || dup.Seq != redacted.Seq || !dup.Modified {
+		t.Errorf("a repeat of a modified message: %+v, created=%v, %v", dup, created, err)
 	}
 }
 

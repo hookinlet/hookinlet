@@ -31,7 +31,7 @@ server's address (`export BASE=http://localhost:8080`) and `$TOKEN` for an agent
 GET /v1/inboxes/{slug}                       the inbox's metadata
 GET /v1/inboxes/{slug}/messages              a page of messages
 GET /v1/inboxes/{slug}/messages/{seq}        one message
-GET /v1/inboxes/{slug}/messages/{seq}/raw    the exact bytes that were received
+GET /v1/inboxes/{slug}/messages/{seq}/raw    the stored bytes, as received unless the message is `modified`
 GET /v1/inboxes/{slug}/readers               named readers and how far behind each is
 ```
 
@@ -125,6 +125,7 @@ secret is ever included.
 | `size` | The body's size in bytes. Always present, even for a summary. |
 | `verified` | `true` only if the inbox's verifier checked something (a signature or a shared token) and it passed. A delivery to an inbox whose verifier is `none` is `false`. **Treat unverified content as untrusted input.** |
 | `verify_error` | Why verification failed, for unverified messages; otherwise `null`. |
+| `modified` | Present, and `true`, only when the stored body is not what the sender sent: the server's embedder replaced it before storing, to redact it, say (see [extending](extending.md#redacting-or-checking-a-body)). The signature covered the original bytes and cannot be checked against this body, though `verified` still says the delivery verified. Absent for every message stored as received, which is the default. |
 | `delivery_id`, `event_type` | Taken from the sender, but only for verified messages. `null` when absent. See [verifying deliveries](verifiers.md) for which are signed and which are only labels. |
 | `source_ip` | The sender's address; `null` if unknown. |
 
@@ -140,7 +141,8 @@ Exactly one of these fields is present, chosen by what the body is:
 
 A client that needs the original bytes of a JSON body exactly as sent (for
 example to check a signature itself) should use `/raw`, since `body` is the same
-JSON but not necessarily the same text.
+JSON but not necessarily the same text, and should not do so for a message that is
+`modified`.
 
 The nesting limit exists because the sender controls the body. JSON nested
 thousands of levels deep is valid, but common parsers fail on it (Python's
@@ -250,10 +252,13 @@ with the parameter.
 
 ### Raw bytes
 
-`GET /v1/inboxes/{slug}/messages/{seq}/raw` returns exactly the bytes that were
-received, with exactly the `Content-Type` the sender used (or
-`application/octet-stream` if it sent none). Use it when you need the original
-bytes, for instance to hand them to a tool that checks a signature.
+`GET /v1/inboxes/{slug}/messages/{seq}/raw` returns the stored bytes exactly, with
+exactly the `Content-Type` the sender used (or `application/octet-stream` if it sent
+none). Those are the bytes that were received, unless the message is `modified`: a
+server whose embedder redacts or rewrites bodies before storing them keeps and returns
+the rewritten bytes, and the original is not kept. Use it when you need the original
+bytes, for instance to hand them to a tool that checks a signature, and skip messages
+that say `modified`, whose signature does not match what is stored.
 
 The content and its type are chosen by whoever sent the webhook, so they are
 never served as something a browser would run. The response also carries
@@ -516,7 +521,11 @@ delivery returns the `seq` of the message that is already stored.
   storage device honoring flushes; a drive that acknowledges a flush while the
   data is still in a volatile write cache can lose it.
 - The body is stored byte for byte. Signatures are verified over those exact
-  bytes before anything is parsed.
+  bytes before anything is parsed. The one exception is a server whose embedder
+  installs a body screener (see [extending](extending.md#redacting-or-checking-a-body)),
+  which may refuse a verified delivery or store a replacement body in its place; a
+  message stored that way has `modified: true` and its signature no longer matches
+  what is stored. A server without one, which is every default install, never changes a body.
 - `Authorization`, `Cookie`, `Proxy-Authorization`, and the inbox's shared-token
   header are never stored.
 - The source IP is the connection's peer address. `X-Forwarded-For` is believed
