@@ -1,55 +1,49 @@
 # Administration
 
-Everything that sets hookinlet up or looks after it: creating inboxes, changing
-their settings, issuing and revoking tokens, retention, and backups. There are two ways in
-and they do the same things:
+This page covers everything that sets hookinlet up or looks after it. You can create inboxes, change their
+settings, issue and revoke tokens, set retention, and take backups. There are two ways to do it, and both do
+the same things:
 
 - the **admin API**, on a running server, with the admin token;
-- the **command line**, which calls that API when you give it `--url`, and
-  otherwise works directly in the data directory.
+- the **command line**. It calls the admin API when you give it `--url`. Without `--url`, it works directly in
+  the data directory.
 
 ## Who may do this
 
-The admin API accepts only the admin token (`HOOKINLET_ADMIN_TOKEN`, set when the
-server starts). An agent token gets `403`, a missing or wrong token gets `401`,
-and neither can tell what is behind the path. The admin token can read every
-inbox and change everything, so treat it like a root password: keep it in the
-environment, never in a flag, and use TLS in front of the server. The server
-will not start with one shorter than 32 characters or one that is mostly
-repetition; `openssl rand -base64 32` makes a good one.
+The admin API accepts only the admin token (`HOOKINLET_ADMIN_TOKEN`, set when the server starts). An agent
+token gets `403`. A missing or wrong token gets `401`. Neither one can tell what is behind the path. The admin
+token can read every inbox and change everything, so treat it like a root password. Keep it in the environment,
+never in a flag, and put TLS in front of the server. The server will not start if the token is shorter than 32
+characters or mostly repeats itself. `openssl rand -base64 32` makes a good one.
 
-A program that embeds hookinlet with its own `Authenticator` can also have a
-tenant's admin ([Tenants](extending.md#tenants)). It may use the operations on its
-tenant's inboxes: create, list, show, change, delete, the verifier secret, and
-rotating the ingest key. Tokens, backups, retention runs, `/v1/admin/status` and
-`/metrics` act on the whole store, so they answer it `403` and are for the operator
-only. The admin token is the operator.
+A program that embeds hookinlet with its own `Authenticator` can also have a tenant's admin
+([Tenants](extending.md#tenants)). A tenant's admin can work on that tenant's inboxes: create, list, show,
+change, delete, set the verifier secret, and rotate the ingest key. Tokens, backups, retention runs,
+`/v1/admin/status` and `/metrics` work on the whole store. A tenant's admin gets `403` on them. Only the
+operator can use them. The admin token is the operator.
 
-Every admin action is logged (`"msg":"admin"`) with what was done and the
-caller's address (`client_ip`; behind a proxy, set `--trusted-proxies` so that
-it is the caller and not the proxy). Tokens and secrets are never logged.
+hookinlet logs every admin action (`"msg":"admin"`). The log says what was done and the caller's address
+(`client_ip`). Behind a proxy, set `--trusted-proxies` so the log shows the caller and not the proxy. Tokens and
+secrets are never logged.
 
 ### Keeping the admin API off the public address
 
-The admin API is on the same address as ingest by default. Two settings take it
-off the internet:
+By default the admin API is on the same address as ingest. Two settings take it off the internet:
 
-- `--admin-listen-addr 127.0.0.1:9090` serves it on its own address and nowhere
-  else; the public address answers `404` for `/v1/admin/...`, and the admin address
-  answers `404` for everything that is not admin. This moves the *admin API*; the
-  admin token still reads every inbox through the read API and MCP on the public
-  address, so keep it as secret as before and give agents their own tokens. Reach it over an SSH tunnel, a
-  private network, or a proxy that you control. (In a container, bind it to an
-  address the container publishes only where you mean to.)
-- `--admin-enabled=false` turns it off altogether. Inboxes and tokens are then
-  managed with the command line, which works in the data directory.
+- `--admin-listen-addr 127.0.0.1:9090` serves the admin API on its own address and nowhere else. The public
+  address answers `404` for `/v1/admin/...`. The admin address answers `404` for everything that is not admin.
+  This moves the *admin API* only. The admin token can still read every inbox through the read API and MCP on
+  the public address. Keep it as secret as before, and give agents their own tokens. Reach the admin address
+  over an SSH tunnel, a private network, or a proxy that you control. (In a container, bind it to an address
+  that the container publishes only where you mean to.)
+- `--admin-enabled=false` turns the admin API off. You then manage inboxes and tokens with the command line,
+  which works in the data directory.
 
-Responses are JSON, never cached (`Cache-Control: no-store`), and errors use the
-same shape as the rest of the API: `{"error": {"code": "…", "message": "…"}}`.
+Responses are JSON and are never cached (`Cache-Control: no-store`). Errors use the same shape as the rest of
+the API: `{"error": {"code": "…", "message": "…"}}`.
 
-Nothing here ever returns a verifier secret, the sealed form of one, or a token
-hash. An inbox shows only `has_verifier_secret: true`. The one thing that is
-shown exactly once is a new agent token, in the response that creates it.
+The admin API never returns a verifier secret, the sealed form of one, or a token hash. An inbox shows only
+`has_verifier_secret: true`. A new agent token is shown exactly once, in the response that creates it.
 
 ## The API
 
