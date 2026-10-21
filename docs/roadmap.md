@@ -1,35 +1,39 @@
 # Roadmap
 
-Ideas that are not built yet. Each is labelled **OSS**
-(belongs in this repository) or **Cloud** (belongs in the hosted product).
+Ideas that are not built yet. Each has a label. **OSS** means it belongs in this repository. **Cloud** means it
+belongs in the hosted product.
 
 ## Webhook forwarding (relay)
 
-Receiving a webhook and also passing it on to other destinations, so an inbox
-can sit in front of an existing service instead of replacing it.
+This means receiving a webhook and also passing it on to other destinations. An inbox can then sit in front of an
+existing service instead of replacing it.
 
-- **Cloud:** first-class forwarding. Destinations per inbox, durable retries
-  with backoff, a job table, per-destination signing secrets, replay of past
-  messages, and SSRF protection for user-supplied URLs.
-- **OSS:** `examples/relay`, a small program that tails an inbox with the
-  query API's `after=` cursor (or SSE) and forwards each message. It shows
-  self-hosters how to relay without the core growing a delivery queue. It
+- **Cloud:** built-in forwarding. It would have destinations per inbox, retries that survive restarts and wait
+  longer each time, a job table, a signing secret for each destination, and replay of past messages. It would also
+  block user-supplied URLs that point at internal networks (SSRF protection).
+- **OSS:** `examples/relay`, a small program that follows an inbox with the query API's `after=` cursor (or SSE)
+  and forwards each message. It shows self-hosters how to relay without the core growing a delivery queue. It
   exists: see `examples/relay`.
 
-The core already provides what a relay needs: per-inbox sequence numbers that
-are safe cursors, and `Hooks.AfterIngest` for embedders.
+The core already provides what a relay needs. Each inbox has sequence numbers, which work as safe cursors.
+Embedders get `Hooks.AfterIngest`.
 
 ## Pruning in `hookinlet apply` (OSS)
 
-`apply -f` creates and updates the inboxes a file declares and never deletes
-anything. A `--prune` that also deleted the inboxes the file does not name would
-make the file the whole truth, which is what some teams want. It is not there
-because deleting an inbox deletes every message in it, for good, and the usual
-ways to get a file wrong (a typo in a slug, the wrong file, a file for another
-environment, a half-written one) would then destroy data that was never meant to
-go. If it is added, it should be opt-in per run, show exactly what it would
-delete in `--dry-run` first, require the count and slugs to be confirmed (for
-example `--prune --yes` only after a dry run, or a `--prune-limit N` that
-refuses to delete more than N), and refuse an empty or unparseable file. Until
-then, `inbox delete` is the explicit way, and `apply` lists the inboxes it does
-not manage so that they are not forgotten.
+`apply -f` creates and updates the inboxes a file declares. It never deletes anything. A `--prune` option could
+also delete the inboxes the file does not name. That would make the file the whole truth, which some teams want.
+
+It is not there because deleting an inbox deletes every message in it, for good. Files go wrong in common ways: a
+typo in a slug, the wrong file, a file for another environment, a half-written file. Each of these would destroy
+data nobody meant to remove.
+
+If `--prune` is added, it should follow these rules:
+
+- It is opt-in for each run.
+- `--dry-run` first shows exactly what it would delete.
+- You must confirm the count and the slugs. For example, `--prune --yes` works only after a dry run, or a
+  `--prune-limit N` refuses to delete more than N.
+- It refuses an empty file or a file it cannot parse.
+
+Until then, `inbox delete` is the explicit way to remove an inbox. `apply` also lists the inboxes it does not
+manage, so you do not forget them.

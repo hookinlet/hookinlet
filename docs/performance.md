@@ -1,14 +1,15 @@
 # Performance
 
-The read API's budget is a **p95 under 20 ms per request at one million stored
-messages**. This page records what was measured, on what, and how to repeat it.
+The read API has a budget: a **p95 under 20 ms per request at one million stored
+messages**. (p95 means 95 out of 100 requests were at least this fast.) This page
+shows what was measured, on what machine, and how to repeat it.
 
 ## Results
 
-Measured on an Apple M1 Max (10 cores, 32 GB) with Go 1.27.2, against one inbox
-holding 1,000,000 messages of about 300 bytes each, through the full HTTP
-handler: authentication, inbox lookup, query, and JSON encoding. Each shape ran
-400 times from random positions in the inbox.
+These runs used an Apple M1 Max (10 cores, 32 GB) and Go 1.27.2. They hit one
+inbox that held 1,000,000 messages of about 300 bytes each. Each request went
+through the full HTTP handler: authentication, inbox lookup, query, and JSON
+encoding. Each request shape ran 400 times from random positions in the inbox.
 
 | Request | p50 | p95 | max |
 |---|---:|---:|---:|
@@ -28,55 +29,54 @@ handler: authentication, inbox lookup, query, and JSON encoding. Each shape ran
 | one message | 0.06 ms | 0.10 ms | 0.2 ms |
 | inbox info (includes the message count) | 0.05 ms | 0.07 ms | 0.2 ms |
 
-These were measured again after the page-size bounds below were added (each
-message's encoded size is now computed to enforce them); nothing changed beyond
-noise, and the worst p95 stayed at 11.4 ms.
+We measured again after adding the page-size bounds below. The server now works
+out each message's encoded size to enforce them. Nothing changed beyond noise,
+and the worst p95 stayed at 11.4 ms.
 
-The slowest shapes are the time-range filters. SQLite finds the range through the
-`(inbox_id, received_at)` index and sorts it by `seq`; an hour is 3,600
-messages here. The cost grows with how many messages fall inside the range, not
-with the size of the inbox.
+The slowest requests are the time-range filters. SQLite finds the range through
+the `(inbox_id, received_at)` index and sorts it by `seq`. An hour is 3,600
+messages here. The cost grows with the number of messages in the range, not with
+the size of the inbox.
 
 ## What this does not measure
 
-- **Concurrent writes.** Ingest throughput with many senders is not measured.
-  Each delivery is one durable transaction; see "Cost of durable writes" below
-  for one sender.
-- **Many readers at once.** One request at a time was measured. Reads use their
-  own pool of connections and do not wait for the writer.
-- **A cold cache.** The first queries after a restart read from disk. The
-  working set for the common shapes is the newest few pages.
-- **Slower disks and smaller machines.** Expect the same shape, scaled.
+- **Concurrent writes.** We did not measure ingest speed with many senders. Each
+  delivery is one durable transaction. See "Cost of durable writes" below for
+  one sender.
+- **Many readers at once.** We sent one request at a time. Reads use their own
+  pool of connections and do not wait for the writer.
+- **A cold cache.** The first queries after a restart read from disk. The common
+  requests touch only the newest few pages.
+- **Slower disks and smaller machines.** Expect the same pattern, scaled.
 
 ## Cost of durable writes
 
-Each commit is synced to disk (`synchronous=FULL`), so a `2xx` from ingest means
-the message survives power loss, not only a crash of the process. The store used
-`synchronous=NORMAL` in earlier versions, which syncs the WAL only at checkpoints
-and can lose the most recent commits on power loss.
+Each commit is synced to disk (`synchronous=FULL`). A `2xx` from ingest means
+the message survives power loss, not only a crash of the process. Earlier
+versions used `synchronous=NORMAL`. That setting syncs the WAL only at
+checkpoints, so power loss can lose the most recent commits.
 
-`BenchmarkAppendSequential` is one sender appending 1 KiB messages one after
-another through `Store.Append`, on the same machine as above (Go 1.27.2, macOS,
-internal SSD), five runs of 3,000 appends each:
+`BenchmarkAppendSequential` is one sender that appends 1 KiB messages one after
+another through `Store.Append`. It ran on the same machine as above (Go 1.27.2,
+macOS, internal SSD), five runs of 3,000 appends each:
 
 | `synchronous` | Per append (median of five runs) | Range | Appends per second |
 |---|---:|---:|---:|
 | NORMAL (before) | 98 us | 95 to 115 us | about 10,200 |
 | FULL (now) | 134 us | 126 to 154 us | about 7,500 |
 
-So a sequential writer pays about 36 us more per message, roughly 1.4 times as
-long. This is the figure for one machine and one disk; on a disk with slower
-flushes the difference is larger. On macOS, SQLite's default is `fsync`, which
-does not force the drive's own cache to empty; Linux `fdatasync`/`fsync` does
-ask the device to flush. The numbers say nothing about a host with a network
-volume.
+A sequential writer pays about 36 us more per message, roughly 1.4 times as
+long. This is the figure for one machine and one disk. On a disk with slower
+flushes, the difference is larger. On macOS, SQLite's default is `fsync`, which
+does not force the drive's own cache to empty. Linux `fdatasync`/`fsync` does ask
+the device to flush. The numbers say nothing about a host with a network volume.
 
-The append-latency gates for large deletes (below) were run again with FULL and
-still pass: append p99 of 24 ms while one million rows are pruned (another inbox
-or the same one), 20 ms while a one-million-message inbox is deleted, and 17 ms
-while large messages are pruned, against the 50 ms gate. These runs gave higher
-p99 values than the table below (16 to 18 ms, and 9 ms for large messages); the
-tables below were measured with NORMAL and have not been redone.
+We ran the append-latency gates for large deletes (below) again with FULL. They
+still pass. Append p99 was 24 ms while one million rows are pruned (in another
+inbox or the same one), 20 ms while a one-million-message inbox is deleted, and
+17 ms while large messages are pruned. The gate is 50 ms. These p99 values are
+higher than in the tables below (16 to 18 ms, and 9 ms for large messages). We
+measured those tables with NORMAL and have not redone them.
 
 ```sh
 go test -run '^$' -bench BenchmarkAppendSequential -benchtime 3000x ./pkg/store/sqlite/
@@ -84,7 +84,7 @@ go test -run '^$' -bench BenchmarkAppendSequential -benchtime 3000x ./pkg/store/
 
 ## What was fixed to get here
 
-The first run at a million messages found two reads far over budget:
+The first run at a million messages found two reads far over budget.
 
 | Read | Before | After | Cause and fix |
 |---|---:|---:|---|
@@ -93,13 +93,13 @@ The first run at a million messages found two reads far over budget:
 
 ## Deliveries while a large prune runs
 
-Retention (and deleting an inbox) removes messages in batches, and a delivery
-that arrives meanwhile waits for the one batch in progress, because all writes
-share one connection. So the batch is the longest a delivery can be made to wait.
-A batch is at most 250 rows and at most 2 MiB of message bodies, whichever comes
-first, since large messages make a batch slower. With one million rows being
-pruned (everything but one message) and four senders appending every couple of
-milliseconds, on the same machine as the figures above:
+Retention (and deleting an inbox) removes messages in batches. All writes share
+one connection, so a delivery that arrives meanwhile waits for the batch in
+progress. A batch is the longest a delivery can wait. A batch holds at most 250
+rows and at most 2 MiB of message bodies, whichever limit comes first, because
+large messages make a batch slower. This test pruned one million rows (everything
+but one message) while four senders appended every couple of milliseconds. It ran
+on the same machine as the figures above:
 
 | Rows per batch | Append p50 | Append p99 | Longest wait | The whole prune |
 |---|---|---|---|---|
@@ -109,11 +109,12 @@ milliseconds, on the same machine as the figures above:
 | **250 (used)** | **2 ms** | **16 ms** | **66 ms** | **11 s** |
 | 100 | 1 ms | 10 ms | 44 ms | 14 s |
 
-The gate is a p99 under 50 ms; 250 rows leaves a wide margin and costs two extra
-seconds on a prune nobody is waiting for. Measured
-(counting only appends made while the operation runs). These tables were measured with the earlier
-`synchronous=NORMAL` setting; with the shipped FULL setting the same operations gave append p99 values of
-24, 20 and 17 ms (see above), all inside the 50 ms gate:
+The gate is a p99 under 50 ms. A batch of 250 rows leaves a wide margin. It adds
+two seconds to a prune that nobody is waiting for. The next table counts only
+appends made while the operation runs. We measured both tables with the earlier
+`synchronous=NORMAL` setting. With the shipped FULL setting, the same operations
+gave append p99 values of 24, 20 and 17 ms (see above). All are inside the 50 ms
+gate:
 
 | Operation | Append p99 | Longest wait |
 |---|---|---|
@@ -122,16 +123,16 @@ seconds on a prune nobody is waiting for. Measured
 | Delete a 1,000,000-message inbox (12 s) | 17 ms | 102 ms |
 | Prune 1,500 messages of 512 KiB (0.6 s) | 9 ms | 15 ms |
 
-What is measured is `Store.Append`, not the HTTP request around it, which adds
-verification and encoding but nothing that waits for the writer. The senders are
-closed loops with a 2 ms pause, so one stuck behind a batch sends nothing while it
-waits, and with more senders the queue behind each batch is longer; the figures
-are for four senders.
+We measured `Store.Append`, not the HTTP request around it. The request adds
+verification and encoding, but nothing that waits for the writer. Each sender
+sends one request, waits for the answer, pauses 2 ms, and repeats. A sender stuck
+behind a batch sends nothing while it waits. With more senders, the queue behind
+each batch is longer. The figures are for four senders.
 
 ## Repeating the measurement
 
 Seeding a million rows takes about 15 seconds. The measurements run only when
-asked for:
+you ask for them:
 
 ```sh
 # The full request path (what an agent experiences)
