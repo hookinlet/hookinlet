@@ -4,6 +4,27 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## 0.11.1 - 2026-10-22
+
+A security fix for the Go standard library, updated dependencies, and documentation written in plainer English. No
+behaviour changes, no API changes, and nothing to migrate: upgrade by starting the new version on the same data
+directory.
+
+**Security**
+
+- **Built with Go 1.27.3.** Go 1.27.2 has a flaw in `crypto/x509` (GO-2026-6809): certificates from some compromised
+  intermediate authorities were still trusted. `govulncheck` reported the server as affected, so the binaries and the
+  image are now built with 1.27.3, which fixes it. Anyone running 0.11.0 should upgrade.
+
+**Changed**
+
+- **Dependencies are updated.** The console's web packages (Vue and the test tools), the pinned Go base image and the
+  GoReleaser action move to their newest patch releases. The console and its third-party licence file are rebuilt to
+  match.
+- **The documentation is rewritten in plain English.** The README, CONTRIBUTING and every page under `docs/` use shorter
+  sentences and everyday words, and explain a technical term where it first appears. Commands, settings and API
+  shapes are unchanged.
+
 ## 0.11.0 - 2026-10-19
 
 The conformance suites cover more of what embedders rely on: a `Store` that has to be told of its tenants can now pass
