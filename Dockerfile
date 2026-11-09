@@ -2,7 +2,7 @@
 # cross-compiles, so a multi-platform image needs no emulation.
 # Base images are pinned by digest, so the image that is published is the one
 # that was tested; see docs/releasing.md for how to update them.
-FROM --platform=$BUILDPLATFORM golang:1.27.3@sha256:f20d83a83e18dbd2a4714b8ffd4b30b287b6243962dd75608e86abcc63ba4efc AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
