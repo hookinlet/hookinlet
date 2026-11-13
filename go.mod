@@ -9,7 +9,7 @@ require (
 	github.com/oapi-codegen/runtime v1.8.0
 	go.uber.org/goleak v1.3.0
 	go.yaml.in/yaml/v3 v3.0.6
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
