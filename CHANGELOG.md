@@ -4,6 +4,24 @@ Notable changes, and every change to the public `pkg/` Go API, are listed here.
 Until v1.0.0, breaking changes are allowed; after it, semantic versioning
 applies.
 
+## 0.11.2 - 2026-11-23
+
+A security fix for the Go standard library, and updated dependencies. No changes to the server's own code, no API
+changes, and nothing to migrate: upgrade by starting the new version on the same data directory.
+
+**Security**
+
+- **Built with Go 1.27.4.** Go 1.27.3 has a flaw in `net/http` (GO-2026-6859). `govulncheck` reported the server as
+  affected, because the server's request handling calls the affected code, so the binaries and the image are now built
+  with 1.27.4, which fixes it. Anyone running 0.11.1 should upgrade.
+
+**Changed**
+
+- **Dependencies are updated.** The SQLite driver (`modernc.org/sqlite`) moves to 1.62.0 and the `oapi-codegen` runtime
+  to 1.9.0, along with the other Go modules the server is built from. The console's web packages (Vue and the build
+  and test tools), the pinned Go base image, and the GitHub Actions used to build and publish move to their newest
+  releases. The console and the third-party licence files are rebuilt to match.
+
 ## 0.11.1 - 2026-10-22
 
 A security fix for the Go standard library, updated dependencies, and documentation written in plainer English. No
